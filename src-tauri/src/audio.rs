@@ -2,8 +2,6 @@ use biquad::*;
 use chrono::Local;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
-use spectrum_analyzer::scaling::divide_by_N;
-use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -27,12 +25,6 @@ struct StatsEvent {
     bytes_sent: u64,
     uptime_seconds: u64,
     bitrate_kbps: f64,
-}
-
-// Spectrum analyzer event (16 frequency bands)
-#[derive(Clone, Serialize)]
-struct SpectrumEvent {
-    bands: Vec<f32>, // 16 bands from low to high frequency
 }
 
 // EQ Settings
@@ -82,7 +74,6 @@ enum AudioCommand {
         buffer_size: u32,
         gain: f32, // Volume gain: 0.0 - 2.0 (0% - 200%)
         eq_settings: EQSettings,
-        visualizer_enabled: bool,
         auto_reconnect: bool,
         app_handle: AppHandle,
     },
@@ -111,7 +102,6 @@ impl AudioState {
                         buffer_size,
                         gain,
                         eq_settings,
-                        visualizer_enabled,
                         auto_reconnect,
                         app_handle,
                     } => {
@@ -152,7 +142,6 @@ impl AudioState {
                                 buffer_size,
                                 gain,
                                 eq_settings,
-                                visualizer_enabled,
                                 app_handle.clone(),
                             ) {
                                 Ok((stream, stats)) => {
@@ -300,7 +289,6 @@ fn start_audio_stream(
     buffer_size: u32,
     gain: f32,
     eq_settings: EQSettings,
-    visualizer_enabled: bool,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     let host = cpal::default_host();
@@ -389,7 +377,6 @@ fn start_audio_stream(
     };
 
     let bytes_sent_clone = Arc::clone(&stats.bytes_sent);
-    let app_handle_clone = app_handle.clone();
     let app_handle_err = app_handle.clone();
 
     let err_fn = move |err| {
@@ -427,9 +414,7 @@ fn start_audio_stream(
     );
 
     // FFT Buffer
-    let fft_size = 2048;
-    let mut fft_buffer = Vec::with_capacity(fft_size);
-    let mut last_fft_time = Instant::now();
+    // Removed visualizer code: fft_size, fft_buffer, last_fft_time
 
     let audio_stream = device
         .build_input_stream(
@@ -453,63 +438,33 @@ fn start_audio_stream(
                     // Clipping
                     let final_sample = sample_f32.clamp(-32768.0, 32767.0) as i16;
                     bytes.extend_from_slice(&final_sample.to_le_bytes());
+                }
 
-                    // FFT Processing
-                    if visualizer_enabled {
-                        fft_buffer.push(sample_f32);
-                        if fft_buffer.len() >= fft_size {
-                            if last_fft_time.elapsed() >= Duration::from_millis(50) {
-                                // Perform FFT
-                                let spectrum = samples_fft_to_spectrum(
-                                    &fft_buffer,
-                                    sample_rate,
-                                    FrequencyLimit::All,
-                                    Some(&divide_by_N),
-                                );
+                // Silence Detection: Calculate RMS (Root Mean Square) to detect if audio is playing
+                let rms: f32 = data
+                    .iter()
+                    .map(|&s| {
+                        let sample_float = s as f32;
+                        sample_float * sample_float
+                    })
+                    .sum::<f32>()
+                    / data.len() as f32;
+                let rms = rms.sqrt();
 
-                                if let Ok(spec) = spectrum {
-                                    // Map to 16 bands (logarithmic)
-                                    let mut bands = vec![0.0; 16];
-                                    let data = spec.data();
+                // Silence threshold (adjust as needed: lower = more sensitive)
+                const SILENCE_THRESHOLD: f32 = 50.0; // ~0.15% of max amplitude
 
-                                    // Simple mapping: divide frequency range into 16 chunks
-                                    // This is a very basic approximation
-                                    let mut band_idx = 0;
-                                    let mut count = 0;
-                                    let mut sum = 0.0;
-                                    let chunks = data.len() / 16;
-
-                                    for (_freq, val) in data {
-                                        sum += val.val();
-                                        count += 1;
-                                        if count >= chunks {
-                                            if band_idx < 16 {
-                                                bands[band_idx] = sum / count as f32;
-                                            }
-                                            sum = 0.0;
-                                            count = 0;
-                                            band_idx += 1;
-                                        }
-                                    }
-
-                                    // Emit event
-                                    let _ = app_handle_clone
-                                        .emit("spectrum-event", SpectrumEvent { bands });
-                                }
-                                last_fft_time = Instant::now();
-                            }
-                            fft_buffer.clear();
-                        }
+                // Only send audio data if it's above silence threshold
+                if rms > SILENCE_THRESHOLD {
+                    // Send to TCP stream
+                    if let Err(e) = stream.write_all(&bytes) {
+                        eprintln!("Failed to write to TCP: {}", e);
+                    } else {
+                        // Track bytes sent
+                        bytes_sent_clone.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                     }
                 }
-
-                // Send to TCP stream
-                if let Err(e) = stream.write_all(&bytes) {
-                    eprintln!("Failed to write to TCP: {}", e);
-                } else {
-                    // Track bytes sent
-                    bytes_sent_clone.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-                }
+                // If silence detected, skip sending but keep connection alive
             },
             err_fn,
             None, // Timeout
@@ -546,7 +501,6 @@ pub fn start_stream(
     buffer_size: u32,
     gain: f32,
     eq_settings: EQSettings,
-    visualizer_enabled: bool,
     auto_reconnect: bool,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -558,7 +512,6 @@ pub fn start_stream(
         buffer_size,
         gain,
         eq_settings,
-        visualizer_enabled,
         auto_reconnect,
         app_handle,
     })

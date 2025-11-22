@@ -13,7 +13,7 @@ let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, autost
 let profileSelect, btnSaveProfile, btnNewProfile, btnDeleteProfile, newProfileContainer, newProfileName, btnConfirmProfile, btnCancelProfile;
 let logsContainer, clearLogsBtn, gainSlider, gainValue, statsBar;
 let tabBtns, tabPanes;
-let visualizerCanvas, visualizerCtx, visualizerToggle, eqToggle, eqControls;
+let eqToggle, eqControls;
 let eqBass, eqMid, eqTreble, eqBassVal, eqMidVal, eqTrebleVal;
 
 const MAX_LOGS = 100;
@@ -165,7 +165,7 @@ async function loadSettings() {
             eqTreble.value = settings.eq_treble;
             eqTrebleVal.textContent = (settings.eq_treble > 0 ? '+' : '') + settings.eq_treble + 'dB';
         }
-        if (settings.visualizer_enabled !== undefined) visualizerToggle.checked = settings.visualizer_enabled;
+        // Visualizer removed
         
         // Update UI state
         eqControls.style.display = eqToggle.checked ? 'flex' : 'none';
@@ -206,8 +206,7 @@ async function saveSettings() {
             eq_enabled: eqToggle.checked,
             eq_bass: parseFloat(eqBass.value),
             eq_mid: parseFloat(eqMid.value),
-            eq_treble: parseFloat(eqTreble.value),
-            visualizer_enabled: visualizerToggle.checked
+            eq_treble: parseFloat(eqTreble.value)
         };
 
         // Get existing profiles
@@ -274,21 +273,33 @@ async function createNewProfile(name) {
 }
 
 async function deleteProfile() {
+    console.log("🗑️ Delete profile button clicked");
+    console.log("Current profile:", profileSelect.value);
+    
     const current = profileSelect.value;
+    if (!current) {
+        console.warn("No profile selected");
+        alert("Please select a profile first");
+        return;
+    }
+    
     if (current === "Default") {
+        console.log("Cannot delete Default profile");
         alert("Cannot delete Default profile");
         return;
     }
     
-    if (!confirm(`Delete profile '${current}'?`)) return;
-    
+    console.log("Deleting profile:", current);
     const profiles = await store.get("profiles");
+    console.log("Profiles before delete:", profiles);
     delete profiles[current];
+    console.log("Profiles after delete:", profiles);
     
     await store.set("profiles", profiles);
     await store.set("current_profile", "Default");
     await store.save();
     
+    console.log("✅ Profile deleted, reloading UI");
     await renderProfileList();
     // Reload settings for Default
     await loadSettings();
@@ -305,7 +316,7 @@ async function toggleStream() {
       portInput.disabled = false;
       sampleRateSelect.disabled = false;
       bufferSizeSelect.disabled = false;
-      gainSlider.disabled = false;
+      // gainSlider remains enabled for real-time adjustment
     } catch (error) {
       updateStatus(true, "Error stopping: " + error);
     }
@@ -323,7 +334,6 @@ async function toggleStream() {
         mid_gain: parseFloat(eqMid.value),
         treble_gain: parseFloat(eqTreble.value)
     };
-    const visualizerEnabled = visualizerToggle.checked;
     const autoReconnect = autoReconnectCheck.checked;
 
     if (!device) {
@@ -349,7 +359,6 @@ async function toggleStream() {
           bufferSize,
           gain,
           eqSettings: eqSettings,
-          visualizerEnabled: visualizerEnabled,
           autoReconnect: autoReconnect,
           appHandle: null // Backend handles this
       });
@@ -360,7 +369,7 @@ async function toggleStream() {
       portInput.disabled = true;
       sampleRateSelect.disabled = true;
       bufferSizeSelect.disabled = true;
-      gainSlider.disabled = true;
+      // gainSlider remains enabled for real-time adjustment
     } catch (error) {
       updateStatus(false, "Error: " + error);
     }
@@ -433,11 +442,7 @@ async function init() {
   gainValue = document.getElementById("gain-value");
   statsBar = document.getElementById("stats-bar");
 
-    // Visualizer & EQ Elements
-    visualizerCanvas = document.getElementById('visualizer-canvas');
-    visualizerCtx = visualizerCanvas.getContext('2d');
-    visualizerToggle = document.getElementById('visualizer-toggle');
-    
+    // EQ Elements
     eqToggle = document.getElementById('eq-toggle');
     eqControls = document.getElementById('eq-controls');
     eqBass = document.getElementById('eq-bass');
@@ -455,13 +460,6 @@ async function init() {
   await listen('stats-event', (event) => {
     updateStats(event.payload);
   });
-
-    // Listen for spectrum events
-    await listen('spectrum-event', (event) => {
-        if (visualizerToggle.checked) {
-            drawSpectrum(event.payload.bands);
-        }
-    });
 
   // Gain slider
   if (gainSlider && gainValue) {
@@ -508,11 +506,6 @@ async function init() {
             btn.classList.add('active');
             const tabId = btn.getAttribute('data-tab');
             document.getElementById(tabId).classList.add('active');
-            
-            // Resize visualizer if audio tab is selected
-            if (tabId === 'tab-audio' && visualizerCanvas) {
-                visualizerCanvas.width = visualizerCanvas.parentElement.clientWidth;
-            }
         });
     });
 
@@ -534,7 +527,27 @@ async function init() {
         });
     }
 
-    if (btnDeleteProfile) btnDeleteProfile.addEventListener("click", deleteProfile);
+    console.log("Profile buttons check:", {
+        btnSaveProfile: !!btnSaveProfile,
+        btnNewProfile: !!btnNewProfile,
+        btnDeleteProfile: !!btnDeleteProfile
+    });
+    
+    
+    if (btnDeleteProfile) {
+        console.log("✅ Delete button found, attaching event listener");
+        console.log("Delete button element:", btnDeleteProfile);
+        console.log("Delete function exists:", typeof deleteProfile);
+        
+        // Try both ways
+        btnDeleteProfile.addEventListener("click", deleteProfile);
+        btnDeleteProfile.onclick =() => {
+            console.log("🔥 ONCLICK HANDLER FIRED (backup)");
+            deleteProfile();
+        };
+    } else {
+        console.error("❌ Delete button NOT found!");
+    }
 
     if (btnConfirmProfile) {
         btnConfirmProfile.addEventListener("click", () => {
@@ -550,10 +563,6 @@ async function init() {
     }
 
     // Initialize listeners
-    visualizerToggle.addEventListener('change', () => {
-        saveSettings();
-    });
-
     eqToggle.addEventListener('change', () => {
         eqControls.style.display = eqToggle.checked ? 'flex' : 'none';
         saveSettings();
@@ -588,32 +597,3 @@ async function init() {
 }
 
 window.addEventListener("DOMContentLoaded", init);
-
-
-function drawSpectrum(bands) {
-    if (!visualizerCanvas || !visualizerCtx) return;
-    
-    const width = visualizerCanvas.width;
-    const height = visualizerCanvas.height;
-    const barWidth = (width / bands.length) - 2;
-    
-    visualizerCtx.clearRect(0, 0, width, height);
-    
-    bands.forEach((val, i) => {
-        // Normalize value (experimental scaling)
-        // val is likely small (0.0 - 0.1 range usually for FFT magnitude)
-        let heightVal = Math.min(val * 5000, height); 
-        
-        const x = i * (barWidth + 2);
-        const y = height - heightVal;
-        
-        // Gradient color
-        const gradient = visualizerCtx.createLinearGradient(0, height, 0, 0);
-        gradient.addColorStop(0, '#10b981'); // Green bottom
-        gradient.addColorStop(0.6, '#3b82f6'); // Blue mid
-        gradient.addColorStop(1, '#ef4444'); // Red top
-        
-        visualizerCtx.fillStyle = gradient;
-        visualizerCtx.fillRect(x, y, barWidth, heightVal);
-    });
-}
