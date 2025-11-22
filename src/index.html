@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TCP Streamer</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body>
+    <div class="glass-panel">
+      <div class="header">
+        <h1>TCP Streamer</h1>
+        <div class="status-badge" id="status-badge">
+          <span class="status-dot"></span>
+          <span id="status-text">Ready</span>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <label for="device-select">Input Device</label>
+        <div class="select-wrapper">
+          <select id="device-select">
+            <option value="" disabled selected>Loading devices...</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="control-group">
+          <label for="ip-input">Target IP</label>
+          <input type="text" id="ip-input" placeholder="192.168.1.100" />
+        </div>
+
+        <div class="control-group">
+          <label for="port-input">Port</label>
+          <input type="number" id="port-input" placeholder="1704" value="1704" />
+        </div>
+      </div>
+
+      <div class="advanced-toggle" id="advanced-toggle">
+        <span>Advanced Settings</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>
+
+      <div class="advanced-section" id="advanced-section">
+        <div class="row">
+          <div class="control-group">
+            <label for="sample-rate">Sample Rate</label>
+            <div class="select-wrapper">
+              <select id="sample-rate">
+                <option value="48000">48 kHz</option>
+                <option value="44100">44.1 kHz</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="buffer-size">Buffer Size</label>
+            <div class="select-wrapper">
+              <select id="buffer-size">
+                <option value="256">Low (256)</option>
+                <option value="512">Medium (512)</option>
+                <option value="1024" selected>High (1024)</option>
+                <option value="2048">Max (2048)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="settings-row">
+            <div class="checkbox-wrapper">
+            <input type="checkbox" id="autostart-check" />
+            <label for="autostart-check">Start with OS</label>
+            </div>
+            <div class="checkbox-wrapper">
+            <input type="checkbox" id="autostream-check" />
+            <label for="autostream-check">Auto-stream</label>
+            </div>
+        </div>
+
+        <button id="toggle-btn" class="glow-button">
+          <span class="btn-text">Start Streaming</span>
+        </button>
+      </div>
+    </div>
+  </body>
+</html>
