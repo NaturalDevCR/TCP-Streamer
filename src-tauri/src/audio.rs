@@ -127,7 +127,7 @@ impl AudioState {
                                 adaptive_bitrate,
                                 app_handle.clone(),
                             ) {
-                                Ok((stream, stats)) => {
+                                Ok((stream, _stats)) => {
                                     emit_log(
                                         &app_handle,
                                         "success",
@@ -219,7 +219,7 @@ pub fn get_input_devices() -> Result<Vec<AudioDevice>, String> {
         if host.id() == cpal::HostId::Wasapi {
             if let Ok(output_devices) = host.output_devices() {
                 for device in output_devices {
-                    if let Ok(name) = d.name() {
+                    if let Ok(name) = device.name() {
                         let loopback_name = format!("Loopback: {}", name);
                         println!("Found loopback candidate: {}", loopback_name);
                         result.push(AudioDevice {
