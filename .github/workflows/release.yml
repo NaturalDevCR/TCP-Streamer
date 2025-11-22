@@ -23,7 +23,17 @@ jobs:
         if: matrix.platform == 'ubuntu-20.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopus-dev libflac-dev
+
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: brew install opus flac
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          vcpkg install flac:x64-windows-static opus:x64-windows-static
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
