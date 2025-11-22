@@ -34,7 +34,7 @@ jobs:
         run: |
           git clone https://github.com/Microsoft/vcpkg.git
           .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg install libflac:x64-windows-static libopus:x64-windows-static
+          .\vcpkg\vcpkg install opus:x64-windows flac:x64-windows
           echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
 
       - name: Rust setup
