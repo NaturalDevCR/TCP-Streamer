@@ -572,33 +572,17 @@ fn start_audio_stream(
         .build_input_stream(
             &config,
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                // Silence Detection: Calculate RMS
-                let rms: f32 = data
-                    .iter()
-                    .map(|&s| {
-                        let sample_float = s as f32;
-                        sample_float * sample_float
-                    })
-                    .sum::<f32>()
-                    / data.len() as f32;
-                let rms = rms.sqrt();
+                // Convert to bytes (no silence detection - transmit all audio)
+                let mut bytes = Vec::with_capacity(data.len() * 2);
+                for &sample in data {
+                    bytes.extend_from_slice(&sample.to_le_bytes());
+                }
 
-                const SILENCE_THRESHOLD: f32 = 10.0; // Lowered from 50.0
-
-                // Only process if above silence threshold
-                if rms > SILENCE_THRESHOLD {
-                    // Convert to bytes
-                    let mut bytes = Vec::with_capacity(data.len() * 2);
-                    for &sample in data {
-                        bytes.extend_from_slice(&sample.to_le_bytes());
-                    }
-
-                    // Write to ring buffer (non-blocking)
-                    let written = producer.push_slice(&bytes);
-                    if written < bytes.len() {
-                        // Buffer full - this means we're producing faster than consuming
-                        eprintln!("Ring buffer full! Dropped {} bytes", bytes.len() - written);
-                    }
+                // Write to ring buffer (non-blocking)
+                let written = producer.push_slice(&bytes);
+                if written < bytes.len() {
+                    // Buffer full - this means we're producing faster than consuming
+                    eprintln!("Ring buffer full! Dropped {} bytes", bytes.len() - written);
                 }
             },
             err_fn,
