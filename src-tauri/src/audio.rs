@@ -27,6 +27,7 @@ struct PacketHeader {
 }
 
 impl PacketHeader {
+    #[allow(dead_code)]
     fn new(sequence: u32, data_len: u32) -> Self {
         let start = SystemTime::now();
         let since_the_epoch = start
@@ -42,6 +43,7 @@ impl PacketHeader {
         }
     }
 
+    #[allow(dead_code)]
     fn as_bytes(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
@@ -66,6 +68,13 @@ struct HealthEvent {
     buffer_usage: f32,    // 0.0 to 1.0
     network_latency: u32, // ms (estimated based on write time)
     dropped_packets: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct StatsEvent {
+    uptime_seconds: u64,
+    bytes_sent: u64,
+    bitrate_kbps: f64,
 }
 
 // Helper function to emit log events
@@ -263,6 +272,7 @@ fn start_audio_stream(
         let mut sequence: u32 = 0;
         let mut temp_buffer = [0i16; 1024]; // Read in chunks
         let mut dropped_packets: u64 = 0;
+        let start_time = Instant::now();
 
         emit_log(
             &app_handle_net,
@@ -304,7 +314,7 @@ fn start_audio_stream(
                 // Prepare Packet
                 // 1. Header
                 let data_len = (count * 2) as u32; // 2 bytes per sample
-                let header = PacketHeader::new(sequence, data_len);
+                                                   // let header = PacketHeader::new(sequence, data_len);
 
                 // 2. Payload (Convert i16 to bytes)
                 let mut payload = Vec::with_capacity(data_len as usize);
@@ -312,11 +322,14 @@ fn start_audio_stream(
                     payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
                 }
 
-                // 3. Send Header + Payload
+                // 3. Send Payload (Raw PCM)
+                // We are removing the header for now as it causes noise on standard raw receivers
+                /*
                 if let Err(e) = stream.write_all(header.as_bytes()) {
                     emit_log(&app_handle_net, "error", format!("Write error: {}", e));
                     break;
                 }
+                */
                 if let Err(e) = stream.write_all(&payload) {
                     emit_log(&app_handle_net, "error", format!("Write error: {}", e));
                     break;
@@ -324,11 +337,32 @@ fn start_audio_stream(
 
                 let _write_time = start_write.elapsed().as_millis();
                 // Update stats
-                bytes_sent_clone.fetch_add(
-                    (header.as_bytes().len() + payload.len()) as u64,
-                    Ordering::Relaxed,
-                );
+                let current_bytes = bytes_sent_clone
+                    .fetch_add(payload.len() as u64, Ordering::Relaxed)
+                    + payload.len() as u64;
                 sequence = sequence.wrapping_add(1);
+
+                // Emit stats every second (approx)
+                // Assuming 48kHz stereo 16-bit = 192KB/s
+                // 1024 samples = ~21ms
+                // So ~47 packets per second
+                if sequence % 50 == 0 {
+                    let uptime = start_time.elapsed().as_secs();
+                    let bitrate = if uptime > 0 {
+                        (current_bytes as f64 * 8.0) / (uptime as f64 * 1000.0)
+                    } else {
+                        0.0
+                    };
+
+                    let _ = app_handle_net.emit(
+                        "stats-update",
+                        StatsEvent {
+                            uptime_seconds: uptime,
+                            bytes_sent: current_bytes,
+                            bitrate_kbps: bitrate,
+                        },
+                    );
+                }
             } else {
                 // Buffer empty, sleep briefly to avoid busy loop
                 thread::sleep(Duration::from_millis(1));
@@ -392,8 +426,18 @@ fn start_audio_stream(
 #[tauri::command]
 pub fn get_input_devices() -> Result<Vec<String>, String> {
     let host = cpal::default_host();
-    let devices = host.input_devices().map_err(|e| e.to_string())?;
-    Ok(devices.map(|d| d.name().unwrap_or_default()).collect())
+    // Log all devices found for debugging
+    match host.input_devices() {
+        Ok(devices) => {
+            let device_names: Vec<String> = devices.map(|d| d.name().unwrap_or_default()).collect();
+            println!("Found devices: {:?}", device_names);
+            Ok(device_names)
+        }
+        Err(e) => {
+            println!("Error listing devices: {}", e);
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
