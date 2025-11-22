@@ -34,13 +34,14 @@ jobs:
         run: |
           git clone https://github.com/Microsoft/vcpkg.git
           .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg install opus:x64-windows-static libflac:x64-windows-static
+          .\vcpkg\vcpkg install opus:x64-windows-static libflac:x64-windows-static ogg:x64-windows-static
 
       - name: Set vcpkg library paths (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
+          echo "VCPKG_DEFAULT_TRIPLET=x64-windows-static" >> $env:GITHUB_ENV
           $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\lib"
           $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\include"
           echo "LIB=$libPath;$env:LIB" >> $env:GITHUB_ENV
