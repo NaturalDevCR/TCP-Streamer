@@ -248,32 +248,15 @@ fn start_audio_stream(
 
     // 2. Spawn Network Thread (Consumer)
     thread::spawn(move || {
-        let addr = format!("{}:{}", ip_clone, port);
-        let mut stream = match TcpStream::connect(&addr) {
-            Ok(s) => s,
-            Err(e) => {
-                emit_log(
-                    &app_handle_net,
-                    "error",
-                    format!("TCP Connect failed: {}", e),
-                );
-                return;
-            }
-        };
-
-        if let Err(e) = stream.set_nodelay(true) {
-            emit_log(
-                &app_handle_net,
-                "warn",
-                format!("Failed to set nodelay: {}", e),
-            );
-        }
-
+        let server_addr = format!("{}:{}", ip_clone, port);
         let mut sequence: u32 = 0;
         let mut temp_buffer = [0i16; 1024]; // Read in chunks
         let mut dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
+
+        // We wrap the stream in an Option to handle reconnection
+        let mut current_stream: Option<TcpStream> = None;
 
         emit_log(
             &app_handle_net,
@@ -282,58 +265,77 @@ fn start_audio_stream(
         );
 
         while is_running_clone.load(Ordering::Relaxed) {
+            // 1. Handle Reconnection if needed
+            if current_stream.is_none() {
+                emit_log(
+                    &app_handle_net,
+                    "warning",
+                    format!("Reconnecting to {}...", server_addr),
+                );
+                match TcpStream::connect(&server_addr) {
+                    Ok(s) => {
+                        let _ = s.set_nodelay(true);
+                        current_stream = Some(s);
+                        emit_log(
+                            &app_handle_net,
+                            "success",
+                            "Reconnected successfully!".to_string(),
+                        );
+                    }
+                    Err(e) => {
+                        emit_log(
+                            &app_handle_net,
+                            "error",
+                            format!("Reconnection failed: {}", e),
+                        );
+                        thread::sleep(Duration::from_secs(2));
+                        continue; // Retry loop
+                    }
+                }
+            }
+
             // Check buffer usage for health monitoring
             let occupied = cons.len();
             let capacity = cons.capacity();
             let usage = occupied as f32 / capacity as f32;
 
             if usage > 0.9 {
-                // Buffer near full! Network is too slow.
                 dropped_packets += 1;
-                // We could skip sending to catch up, or just log it.
             }
 
-            // Emit health event occasionally (e.g., every 100 packets)
+            // Emit health event occasionally
             if sequence % 100 == 0 {
                 let _ = app_handle_net.emit(
                     "health-event",
                     HealthEvent {
                         buffer_usage: usage,
-                        network_latency: 0, // TODO: Measure write time
+                        network_latency: 0,
                         dropped_packets,
                     },
                 );
             }
 
             // Read from Ring Buffer
-            // We read as much as available, up to temp_buffer size
             let count = cons.pop_slice(&mut temp_buffer);
 
             if count > 0 {
                 let start_write = Instant::now();
 
-                // Prepare Packet
-                // 1. Header
-                let data_len = (count * 2) as u32; // 2 bytes per sample
-                                                   // let header = PacketHeader::new(sequence, data_len);
-
-                // 2. Payload (Convert i16 to bytes)
+                // Prepare Payload (Raw PCM)
+                let data_len = (count * 2) as u32;
                 let mut payload = Vec::with_capacity(data_len as usize);
                 for i in 0..count {
                     payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
                 }
 
-                // 3. Send Payload (Raw PCM)
-                // We are removing the header for now as it causes noise on standard raw receivers
-                /*
-                if let Err(e) = stream.write_all(header.as_bytes()) {
-                    emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                    break;
-                }
-                */
-                if let Err(e) = stream.write_all(&payload) {
-                    emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                    break;
+                // Send Payload
+                if let Some(ref mut s) = current_stream {
+                    if let Err(e) = s.write_all(&payload) {
+                        emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                        // Drop connection to trigger reconnect
+                        current_stream = None;
+                        continue;
+                    }
                 }
 
                 let _write_time = start_write.elapsed().as_millis();
