@@ -40,6 +40,9 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: |
           git clone https://github.com/Microsoft/vcpkg.git
+          cd vcpkg
+          git checkout 68dfac5b423a83402eb8b9fffa157bce1ef8f5a4
+          cd ..
           .\vcpkg\bootstrap-vcpkg.bat
           .\vcpkg\vcpkg install opus:x64-windows flac:x64-windows
 
