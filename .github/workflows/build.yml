@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - main
-    tags-ignore:
-      - "**" # Don't run on tag pushes (release.yml handles that)
   workflow_dispatch:
 
 jobs:
@@ -32,32 +30,18 @@ jobs:
         if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopus-dev libflac-dev
-
-      - name: Install dependencies (macOS)
-        if: matrix.platform == 'macos-latest'
-        run: brew install opus flac
-
-      - name: Install dependencies (Windows)
-        if: matrix.platform == 'windows-latest'
-        run: |
-          git clone https://github.com/Microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg install opus:x64-windows-static libflac:x64-windows-static libogg:x64-windows-static
-
-      - name: Set vcpkg library paths (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
-          echo "VCPKG_DEFAULT_TRIPLET=x64-windows-static" >> $env:GITHUB_ENV
-          $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\lib"
-          $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\include"
-          echo "LIB=$libPath;$env:LIB" >> $env:GITHUB_ENV
-          echo "INCLUDE=$includePath;$env:INCLUDE" >> $env:GITHUB_ENV
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install Frontend Dependencies
         run: npm install
 
       - name: Build Tauri App
-        run: npm run tauri build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version
+          releaseName: "App v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: true
+          prerelease: false

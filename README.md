@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and zero audio processing.
 
-![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -56,8 +56,6 @@
 ### Core Functionality
 
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
-- ✅ **Audio Compression** - Support for FLAC (lossless) and Opus (lossy)
-- ✅ **Adaptive Bitrate** - Dynamic quality adjustment based on network health
 - ✅ **Silence Detection** - Smart bandwidth optimization
 - ✅ **Auto-Reconnect** - Resilient connection management
 - ✅ **Multi-Profile Support** - Save and switch between configurations
@@ -67,7 +65,6 @@
 
 - 📊 **Sample Rates**: 44.1 kHz or 48 kHz
 - 🔧 **Buffer Sizes**: 256, 512, 1024, or 2048 samples
-- 🗜️ **Compression**: None (PCM), FLAC, Opus
 - 🎤 **Input Devices**: Any audio input (microphone, loopback, virtual devices)
 
 ### Automation
@@ -79,7 +76,7 @@
 ### User Experience
 
 - 🎨 **Modern UI** - Clean, tabbed interface
-- 📈 **Real-time Statistics** - Monitor bitrate, latency, uptime, data sent
+- 📈 **Real-time Statistics** - Monitor bitrate, uptime, data sent
 - 📝 **Activity Logs** - Track connection events and errors
 - 🌙 **Minimize to Tray** - Never quits, always accessible
 
@@ -177,8 +174,6 @@ Enter the IP address and port of your TCP server:
 
 - **Sample Rate**: 48 kHz (recommended) or 44.1 kHz
 - **Buffer Size**: 1024 (balanced) or adjust for latency/stability
-- **Compression**: Select **Opus** for low bandwidth or **FLAC** for quality.
-- **Adaptive Bitrate**: Enable for Opus to handle unstable networks automatically.
 
 ### 4. **Start Streaming**
 
@@ -215,7 +210,6 @@ Save different configurations for various scenarios:
 | --------------- | -------------------- | ------------------------------------ |
 | **Sample Rate** | 44.1 kHz, 48 kHz     | 48 kHz for modern systems            |
 | **Buffer Size** | 256, 512, 1024, 2048 | 1024 (balanced) or 512 (low latency) |
-| **Compression** | None, FLAC, Opus     | Opus for internet/WiFi, FLAC for LAN |
 
 ### Automation Settings
 
@@ -259,7 +253,7 @@ Save different configurations for various scenarios:
 Input Device → cpal → PCM Audio (i16) → Silence Detection (RMS) → TCP Stream
 ```
 
-- **Format**: Raw PCM (16-bit), FLAC, or Opus
+- **Format**: Raw PCM, 16-bit signed integers, little-endian
 - **Channels**: 2 (stereo)
 - **Silence Threshold**: RMS < 50.0 (skips transmission)
 
