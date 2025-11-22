@@ -39,7 +39,9 @@ jobs:
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows-latest'
         run: |
-          vcpkg install flac:x64-windows-static opus:x64-windows-static
+          cd $env:VCPKG_INSTALLATION_ROOT
+          git pull
+          .\vcpkg.exe install flac:x64-windows-static opus:x64-windows-static
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
 
       - name: Install Frontend Dependencies
