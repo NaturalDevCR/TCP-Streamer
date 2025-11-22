@@ -1,3 +1,4 @@
+console.log("Main.js loaded");
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
@@ -9,7 +10,8 @@ let store; // Store will be initialized async
 // Debug Store (will log after init)
 
 let isStreaming = false;
-let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, autostartCheck, autostreamCheck, autoReconnectCheck, toggleBtn, statusBadge, statusText;
+let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, codecSelect, autostartCheck, autostreamCheck, autoReconnectCheck, toggleBtn, statusBadge, statusText;
+let adaptiveBitrateCheck, statLatency, suggestedAction, actionValue;
 let profileSelect, btnSaveProfile, btnNewProfile, btnDeleteProfile, newProfileContainer, newProfileName, btnConfirmProfile, btnCancelProfile;
 let logsContainer, clearLogsBtn, statsBar;
 let tabBtns, tabPanes;
@@ -79,39 +81,57 @@ function updateStats(stats) {
     document.getElementById('stat-uptime').textContent = formatUptime(stats.uptime_seconds);
     document.getElementById('stat-bytes').textContent = formatBytes(stats.bytes_sent);
     document.getElementById('stat-bitrate').textContent = stats.bitrate_kbps.toFixed(1) + ' kbps';
+    if (statLatency) statLatency.textContent = stats.buffer_latency_ms.toFixed(1) + ' ms';
+}
+
+function updateAdaptiveVisibility() {
+    const container = document.getElementById("adaptive-container");
+    if (container && codecSelect) {
+        if (codecSelect.value === "2") { // Opus
+            container.style.display = "block";
+        } else {
+            container.style.display = "none";
+        }
+    }
 }
 
 async function loadDevices() {
   try {
-    console.log("Requesting devices...");
     const devices = await invoke("get_input_devices");
-    console.log("Devices received:", devices);
-    
     deviceSelect.innerHTML = "";
-    if (!devices || devices.length === 0) {
-      const option = document.createElement("option");
-      option.text = "No devices found";
-      option.disabled = true;
-      deviceSelect.add(option);
-      return;
-    }
     
+    if (devices.length === 0) {
+        const option = document.createElement("option");
+        option.text = "No devices found";
+        option.disabled = true;
+        deviceSelect.add(option);
+        return;
+    }
+
     devices.forEach((device) => {
+      const name = device.name || device; // Handle object or string
       const option = document.createElement("option");
-      option.value = device.name;
-      option.text = device.name;
+      option.value = name;
+      option.text = name;
       deviceSelect.add(option);
     });
     
-    // Restore selected device
-    try {
-        const savedDevice = await store.get("device");
-        if (savedDevice) {
-            deviceSelect.value = savedDevice;
+    // Restore selected device if exists
+    const savedDevice = await store.get("device");
+    // Or from profile
+    const currentProfile = await store.get("current_profile");
+    const profiles = await store.get("profiles") || {};
+    const profileData = profiles[currentProfile] || {};
+    
+    const deviceToSelect = profileData.device || savedDevice;
+    
+    if (deviceToSelect) {
+        // Check if device still exists
+        if (devices.includes(deviceToSelect)) {
+            deviceSelect.value = deviceToSelect;
         }
-    } catch (e) {
-        console.warn("Could not load saved device:", e);
     }
+    
   } catch (error) {
     console.error("Failed to load devices:", error);
     updateStatus(false, "Error loading devices");
@@ -142,8 +162,12 @@ async function loadSettings() {
         if (settings.port) portInput.value = settings.port;
         if (settings.sample_rate) sampleRateSelect.value = settings.sample_rate;
         if (settings.buffer_size) bufferSizeSelect.value = settings.buffer_size;
+        if (settings.codec) codecSelect.value = settings.codec; // Added codec
+        if (settings.adaptive_bitrate !== undefined) adaptiveBitrateCheck.checked = settings.adaptive_bitrate;
         if (settings.auto_stream !== undefined) autostreamCheck.checked = settings.auto_stream;
         if (settings.auto_reconnect !== undefined) autoReconnectCheck.checked = settings.auto_reconnect;
+        
+        updateAdaptiveVisibility();
         
         // EQ and Gain removed
         
@@ -177,6 +201,8 @@ async function saveSettings() {
             port: parseInt(portInput.value),
             sample_rate: parseInt(sampleRateSelect.value),
             buffer_size: parseInt(bufferSizeSelect.value),
+            codec: parseInt(codecSelect.value), // Added codec
+            adaptive_bitrate: adaptiveBitrateCheck.checked,
             auto_stream: autostreamCheck.checked,
             auto_reconnect: autoReconnectCheck.checked
         };
@@ -225,43 +251,49 @@ async function renderProfileList() {
 
 async function createNewProfile(name) {
     if (!name) return;
+    
     const profiles = await store.get("profiles") || {};
     if (profiles[name]) {
         alert("Profile already exists!");
         return;
     }
     
-    // Copy current settings
-    const currentProfile = profileSelect.value;
-    profiles[name] = profiles[currentProfile] || {};
+    // Clone current settings
+    const currentSettings = {
+        device: deviceSelect.value,
+        ip: ipInput.value,
+        port: parseInt(portInput.value),
+        sample_rate: parseInt(sampleRateSelect.value),
+        buffer_size: parseInt(bufferSizeSelect.value),
+        codec: parseInt(codecSelect.value),
+        adaptive_bitrate: adaptiveBitrateCheck.checked,
+        auto_stream: autostreamCheck.checked,
+        auto_reconnect: autoReconnectCheck.checked
+    };
     
+    profiles[name] = currentSettings;
     await store.set("profiles", profiles);
     await store.set("current_profile", name);
     await store.save();
     
-    await renderProfileList();
-    profileSelect.value = name;
     newProfileContainer.style.display = "none";
+    newProfileName.value = "";
+    
+    await renderProfileList();
+    // Select new profile
+    profileSelect.value = name;
+    console.log(`✅ Created profile: ${name}`);
 }
 
 async function deleteProfile() {
-    console.log("🗑️ Delete profile button clicked");
-    console.log("Current profile:", profileSelect.value);
-    
     const current = profileSelect.value;
-    if (!current) {
-        console.warn("No profile selected");
-        alert("Please select a profile first");
-        return;
-    }
-    
     if (current === "Default") {
-        console.log("Cannot delete Default profile");
         alert("Cannot delete Default profile");
         return;
     }
     
-    console.log("Deleting profile:", current);
+    if (!confirm(`Delete profile '${current}'?`)) return;
+    
     const profiles = await store.get("profiles");
     console.log("Profiles before delete:", profiles);
     delete profiles[current];
@@ -288,6 +320,8 @@ async function toggleStream() {
       portInput.disabled = false;
       sampleRateSelect.disabled = false;
       bufferSizeSelect.disabled = false;
+      codecSelect.disabled = false;
+      adaptiveBitrateCheck.disabled = false;
       // gainSlider remains enabled for real-time adjustment
     } catch (error) {
       updateStatus(true, "Error stopping: " + error);
@@ -298,6 +332,8 @@ async function toggleStream() {
     const port = parseInt(portInput.value);
     const sampleRate = parseInt(sampleRateSelect.value);
     const bufferSize = parseInt(bufferSizeSelect.value);
+    const codec = parseInt(codecSelect.value);
+    const adaptiveBitrate = adaptiveBitrateCheck.checked;
     const autoReconnect = autoReconnectCheck.checked;
 
     if (!device) {
@@ -321,6 +357,8 @@ async function toggleStream() {
           port,
           sampleRate,
           bufferSize,
+          codec,
+          adaptiveBitrate,
           autoReconnect: autoReconnect,
           appHandle: null // Backend handles this
       });
@@ -331,6 +369,8 @@ async function toggleStream() {
       portInput.disabled = true;
       sampleRateSelect.disabled = true;
       bufferSizeSelect.disabled = true;
+      codecSelect.disabled = true;
+      adaptiveBitrateCheck.disabled = true;
       // gainSlider remains enabled for real-time adjustment
     } catch (error) {
       updateStatus(false, "Error: " + error);
@@ -352,7 +392,30 @@ async function toggleAutostart() {
 
 async function init() {
   console.log("Initializing app...");
-  
+
+  // Initialize Tabs immediately to ensure navigation works
+  tabBtns = document.querySelectorAll('.tab-btn');
+  tabPanes = document.querySelectorAll('.tab-pane');
+
+  tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+          console.log("Tab clicked:", btn.getAttribute('data-tab'));
+          // Remove active class from all
+          tabBtns.forEach(b => b.classList.remove('active'));
+          tabPanes.forEach(p => p.classList.remove('active'));
+          
+          // Add active class to clicked
+          btn.classList.add('active');
+          const tabId = btn.getAttribute('data-tab');
+          const tabPane = document.getElementById(tabId);
+          if (tabPane) {
+              tabPane.classList.add('active');
+          } else {
+              console.error(`Tab pane not found for id: ${tabId}`);
+          }
+      });
+  });
+
   // Initialize Store first (Tauri Plugin Store v2 API)
   try {
     store = await Store.load("store.bin");
@@ -376,6 +439,8 @@ async function init() {
   portInput = document.getElementById("port-input");
   sampleRateSelect = document.getElementById("sample-rate");
   bufferSizeSelect = document.getElementById("buffer-size");
+  codecSelect = document.getElementById("codec-select"); // Added codecSelect initialization
+  adaptiveBitrateCheck = document.getElementById("adaptive-bitrate-check");
   autostartCheck = document.getElementById("autostart-check");
   autostreamCheck = document.getElementById("autostream-check");
   autoReconnectCheck = document.getElementById("autoreconnect-check");
@@ -383,9 +448,9 @@ async function init() {
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");
   
-  // Tabs
-  tabBtns = document.querySelectorAll('.tab-btn');
-  tabPanes = document.querySelectorAll('.tab-pane');
+  
+  // Tabs (Initialized at top)
+
 
   // Profile Elements
   profileSelect = document.getElementById("profile-select");
@@ -401,6 +466,9 @@ async function init() {
   logsContainer = document.getElementById("logs-container");
   clearLogsBtn = document.getElementById("clear-logs-btn");
   statsBar = document.getElementById("stats-bar");
+  statLatency = document.getElementById("stat-latency");
+  suggestedAction = document.getElementById("suggested-action");
+  actionValue = document.getElementById("action-value");
 
   // Set up Tauri event listeners
   await listen('log-event', (event) => {
@@ -409,6 +477,26 @@ async function init() {
 
   await listen('stats-event', (event) => {
     updateStats(event.payload);
+  });
+  
+  await listen('health-event', (event) => {
+      if (suggestedAction && actionValue) {
+          suggestedAction.style.display = "block";
+          actionValue.textContent = event.payload.suggested_action;
+          
+          // Color code
+          const status = event.payload.status;
+          if (status === "Poor") actionValue.style.color = "#ff4444";
+          else if (status === "Degraded") actionValue.style.color = "#ffbb33";
+          else actionValue.style.color = "#00C851";
+      }
+      
+      if (document.getElementById("health-value")) {
+          const healthBadge = document.getElementById("health-badge");
+          const healthValue = document.getElementById("health-value");
+          healthBadge.style.display = "block";
+          healthValue.textContent = event.payload.status;
+      }
   });
 
   // Gain slider removed
@@ -419,6 +507,13 @@ async function init() {
   if (portInput) portInput.addEventListener('change', saveSettings);
   if (sampleRateSelect) sampleRateSelect.addEventListener('change', saveSettings);
   if (bufferSizeSelect) bufferSizeSelect.addEventListener('change', saveSettings);
+  if (codecSelect) {
+      codecSelect.addEventListener('change', () => {
+          saveSettings();
+          updateAdaptiveVisibility();
+      });
+  }
+  if (adaptiveBitrateCheck) adaptiveBitrateCheck.addEventListener('change', saveSettings);
   if (autostreamCheck) autostreamCheck.addEventListener('change', saveSettings);
   if (autoReconnectCheck) autoReconnectCheck.addEventListener('change', saveSettings);
 
@@ -439,19 +534,8 @@ async function init() {
       autostartCheck.addEventListener("change", toggleAutostart);
   }
 
-    // Tab Listeners
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            // Remove active class from all
-            tabBtns.forEach(b => b.classList.remove('active'));
-            tabPanes.forEach(p => p.classList.remove('active'));
-            
-            // Add active class to clicked
-            btn.classList.add('active');
-            const tabId = btn.getAttribute('data-tab');
-            document.getElementById(tabId).classList.add('active');
-        });
-    });
+    // Tab Listeners (Initialized at top)
+
 
     // Profile Listeners
     if (profileSelect) {
@@ -525,4 +609,8 @@ async function init() {
   console.log("App initialized");
 }
 
-window.addEventListener("DOMContentLoaded", init);
+if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", init);
+} else {
+    init();
+}

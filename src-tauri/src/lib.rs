@@ -1,6 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod audio;
+mod encoder;
+mod health;
+mod protocol;
 use audio::AudioState;
 
 use tauri::{

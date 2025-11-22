@@ -1,8 +1,10 @@
+use crate::encoder::{AudioEncoder, Codec};
+use crate::health::HealthMonitor;
+use crate::protocol::Packet;
 use chrono::Local;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use ringbuf::{traits::*, HeapRb};
 use serde::Serialize;
-use std::io::Write;
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -24,6 +26,8 @@ struct StatsEvent {
     bytes_sent: u64,
     uptime_seconds: u64,
     bitrate_kbps: f64,
+    buffer_latency_ms: f32,
+    suggested_action: String,
 }
 
 // Helper function to emit log events
@@ -50,7 +54,9 @@ enum AudioCommand {
         port: u16,
         sample_rate: u32,
         buffer_size: u32,
+        codec: u8,
         auto_reconnect: bool,
+        adaptive_bitrate: bool,
         app_handle: AppHandle,
     },
     Stop,
@@ -66,7 +72,8 @@ impl AudioState {
 
         thread::spawn(move || {
             let mut _current_stream: Option<cpal::Stream> = None;
-            let mut _stats_handle: Option<thread::JoinHandle<()>> = None;
+            let mut _current_stream: Option<cpal::Stream> = None;
+            // Stats handle removed as stats are now emitted from the TCP thread
 
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -76,7 +83,9 @@ impl AudioState {
                         port,
                         sample_rate,
                         buffer_size,
+                        codec,
                         auto_reconnect,
+                        adaptive_bitrate,
                         app_handle,
                     } => {
                         let mut retry_count = 0;
@@ -114,6 +123,8 @@ impl AudioState {
                                 port,
                                 sample_rate,
                                 buffer_size,
+                                codec,
+                                adaptive_bitrate,
                                 app_handle.clone(),
                             ) {
                                 Ok((stream, stats)) => {
@@ -130,10 +141,7 @@ impl AudioState {
 
                                     _current_stream = Some(stream);
 
-                                    // Start statistics emission thread
-                                    let stats_handle =
-                                        start_stats_thread(app_handle.clone(), stats);
-                                    _stats_handle = Some(stats_handle);
+                                    // Stats thread removed, stats are emitted from TCP loop
 
                                     // Reset retry count on success?
                                     // Actually, if we are here, we are streaming.
@@ -175,7 +183,6 @@ impl AudioState {
                     }
                     AudioCommand::Stop => {
                         _current_stream = None;
-                        _stats_handle = None;
                     }
                 }
             }
@@ -212,7 +219,7 @@ pub fn get_input_devices() -> Result<Vec<AudioDevice>, String> {
         if host.id() == cpal::HostId::Wasapi {
             if let Ok(output_devices) = host.output_devices() {
                 for device in output_devices {
-                    if let Ok(name) = device.name() {
+                    if let Ok(name) = d.name() {
                         let loopback_name = format!("Loopback: {}", name);
                         println!("Found loopback candidate: {}", loopback_name);
                         result.push(AudioDevice {
@@ -228,30 +235,7 @@ pub fn get_input_devices() -> Result<Vec<AudioDevice>, String> {
     Ok(result)
 }
 
-// Statistics thread - emits stats every second
-fn start_stats_thread(app_handle: AppHandle, stats: StreamStats) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        while stats.is_running.load(Ordering::Relaxed) {
-            thread::sleep(Duration::from_secs(1));
-
-            let bytes = stats.bytes_sent.load(Ordering::Relaxed);
-            let elapsed = stats.start_time.elapsed().as_secs();
-            let bitrate_kbps = if elapsed > 0 {
-                (bytes as f64 * 8.0) / (elapsed as f64 * 1000.0)
-            } else {
-                0.0
-            };
-
-            let stats_event = StatsEvent {
-                bytes_sent: bytes,
-                uptime_seconds: elapsed,
-                bitrate_kbps,
-            };
-
-            let _ = app_handle.emit("stats-event", stats_event);
-        }
-    })
-}
+// Stats thread removed
 
 fn start_audio_stream(
     device_name: String,
@@ -259,6 +243,8 @@ fn start_audio_stream(
     port: u16,
     sample_rate: u32,
     buffer_size: u32,
+    codec_byte: u8,
+    adaptive_bitrate: bool,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     let host = cpal::default_host();
@@ -327,17 +313,16 @@ fn start_audio_stream(
 
     let addr = format!("{}:{}", ip, port);
 
-    // Connect to TCP server
-    let mut stream = TcpStream::connect(&addr).map_err(|e| {
-        emit_log(
-            &app_handle,
-            "error",
-            format!("TCP connection failed: {}", e),
-        );
-        format!("Failed to connect: {}", e)
-    })?;
+    // Create ring buffer (1 second of audio: sample_rate * channels * bytes_per_sample)
+    let ring_buffer_size = (sample_rate * 2 * 2) as usize; // 2 channels, 2 bytes per sample
+    let ring_buffer = HeapRb::<u8>::new(ring_buffer_size);
+    let (mut producer, mut consumer) = ring_buffer.split();
 
-    stream.set_nodelay(true).map_err(|e| e.to_string())?;
+    emit_log(
+        &app_handle,
+        "info",
+        format!("Ring buffer created: {} bytes", ring_buffer_size),
+    );
 
     // Create statistics tracker
     let stats = StreamStats {
@@ -346,27 +331,248 @@ fn start_audio_stream(
         is_running: Arc::new(AtomicBool::new(true)),
     };
 
+    let mut current_bitrate = 128000; // Start at 128kbps for Opus
+    let adaptive = adaptive_bitrate;
+
     let bytes_sent_clone = Arc::clone(&stats.bytes_sent);
+    let is_running_clone = Arc::clone(&stats.is_running);
+    let app_handle_tcp = app_handle.clone();
+    let addr_clone = addr.clone();
+    let ring_buffer_capacity = ring_buffer_size;
+
+    // Variables for stats emission
+    let start_time = stats.start_time;
+    let bytes_sent_stats = Arc::clone(&stats.bytes_sent);
+
+    // Spawn async TCP writer thread
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            emit_log(
+                &app_handle_tcp,
+                "info",
+                "Connecting to TCP server (async)...".to_string(),
+            );
+
+            match tokio::net::TcpStream::connect(&addr_clone).await {
+                Ok(mut tcp_stream) => {
+                    tcp_stream.set_nodelay(true).ok();
+                    emit_log(
+                        &app_handle_tcp,
+                        "success",
+                        format!("TCP connected (async): {}", addr_clone),
+                    );
+
+                    let mut sequence: u32 = 0;
+                    let mut health_monitor =
+                        HealthMonitor::new(ring_buffer_capacity, sample_rate, 2);
+                    let mut last_stats_time = Instant::now();
+
+                    // Initialize encoder
+                    let codec = Codec::from(codec_byte);
+                    let encoder = match AudioEncoder::new(codec, sample_rate, 2) {
+                        Ok(enc) => enc,
+                        Err(e) => {
+                            emit_log(
+                                &app_handle_tcp,
+                                "error",
+                                format!("Encoder init failed: {}", e),
+                            );
+                            return;
+                        }
+                    };
+
+                    emit_log(
+                        &app_handle_tcp,
+                        "info",
+                        format!("Encoder initialized: {:?}", codec),
+                    );
+
+                    // TCP writer loop
+                    while is_running_clone.load(Ordering::Relaxed) {
+                        let available = consumer.occupied_len();
+
+                        if available > 0 {
+                            // Read from ring buffer
+                            let chunk_size = available.min(4096);
+                            let mut buffer = vec![0u8; chunk_size];
+                            let read = consumer.pop_slice(&mut buffer);
+
+                            if read > 0 {
+                                // Encode audio data
+                                let encoded_data = if let AudioEncoder::Flac = encoder {
+                                    // Special handling for FLAC to avoid lifetime issues
+                                    match AudioEncoder::encode_flac_chunk(
+                                        &buffer[..read],
+                                        sample_rate,
+                                        2,
+                                    ) {
+                                        Ok(data) => data,
+                                        Err(e) => {
+                                            emit_log(
+                                                &app_handle_tcp,
+                                                "error",
+                                                format!("FLAC encoding failed: {}", e),
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    match encoder.encode(&buffer[..read], 2) {
+                                        Ok(data) => data,
+                                        Err(e) => {
+                                            emit_log(
+                                                &app_handle_tcp,
+                                                "error",
+                                                format!("Encoding failed: {}", e),
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                };
+
+                                // Emit stats every second
+                                if last_stats_time.elapsed() >= Duration::from_secs(1) {
+                                    let uptime = start_time.elapsed().as_secs();
+                                    let bytes = bytes_sent_stats.load(Ordering::Relaxed);
+                                    let bitrate = (bytes as f64 * 8.0) / (uptime as f64 * 1000.0); // kbps
+
+                                    let metrics = health_monitor.get_metrics();
+
+                                    let _ = app_handle_tcp.emit(
+                                        "stats-event",
+                                        StatsEvent {
+                                            bytes_sent: bytes,
+                                            uptime_seconds: uptime,
+                                            bitrate_kbps: bitrate,
+                                            buffer_latency_ms: metrics.buffer_latency_ms,
+                                            suggested_action: metrics.suggested_action.clone(),
+                                        },
+                                    );
+
+                                    let _ = app_handle_tcp.emit("health-event", metrics.clone());
+
+                                    // Adaptive Bitrate Logic
+                                    if adaptive {
+                                        if let AudioEncoder::Opus(_) = encoder {
+                                            let mut new_bitrate = current_bitrate;
+                                            match metrics.status {
+                                                crate::health::HealthStatus::Poor => {
+                                                    // Drastic reduction
+                                                    new_bitrate =
+                                                        (current_bitrate as f32 * 0.7) as i32;
+                                                }
+                                                crate::health::HealthStatus::Degraded => {
+                                                    // Moderate reduction
+                                                    new_bitrate =
+                                                        (current_bitrate as f32 * 0.9) as i32;
+                                                }
+                                                crate::health::HealthStatus::Excellent => {
+                                                    // Slow recovery
+                                                    new_bitrate =
+                                                        (current_bitrate as f32 * 1.05) as i32;
+                                                }
+                                                _ => {}
+                                            }
+
+                                            // Clamp bitrate (32kbps to 192kbps)
+                                            new_bitrate = new_bitrate.clamp(32000, 192000);
+
+                                            if new_bitrate != current_bitrate {
+                                                if let Ok(_) = encoder.set_bitrate(new_bitrate) {
+                                                    current_bitrate = new_bitrate;
+                                                    // Log change only if significant
+                                                    if (new_bitrate - current_bitrate).abs() > 5000
+                                                    {
+                                                        emit_log(
+                                                            &app_handle_tcp,
+                                                            "info",
+                                                            format!(
+                                                                "Adaptive Bitrate: {} kbps",
+                                                                new_bitrate / 1000
+                                                            ),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    last_stats_time = Instant::now();
+                                }
+                                // Create packet with header
+                                let packet =
+                                    Packet::new(sequence, encoded_data, encoder.get_codec_byte());
+                                let packet_bytes = packet.to_bytes();
+
+                                // Async TCP write
+                                use tokio::io::AsyncWriteExt;
+                                match tcp_stream.write_all(&packet_bytes).await {
+                                    Ok(_) => {
+                                        bytes_sent_clone.fetch_add(
+                                            packet_bytes.len() as u64,
+                                            Ordering::Relaxed,
+                                        );
+                                        health_monitor.increment_packets();
+                                        sequence = sequence.wrapping_add(1);
+                                    }
+                                    Err(e) => {
+                                        emit_log(
+                                            &app_handle_tcp,
+                                            "error",
+                                            format!("TCP write failed: {}", e),
+                                        );
+                                        health_monitor.increment_failures();
+                                        break; // Exit on error
+                                    }
+                                }
+                            }
+                        } else {
+                            // No data, sleep briefly to avoid busy-waiting
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                        }
+
+                        // Update health metrics
+                        health_monitor.update_buffer_used(consumer.occupied_len());
+
+                        // Emit health metrics periodically (every ~100 packets or so)
+                        // Since we sleep 1ms when empty, and process fast when full,
+                        // let's just emit every 1000 packets to avoid spamming
+                        if sequence % 100 == 0 {
+                            let metrics = health_monitor.get_metrics();
+                            let _ = app_handle_tcp.emit("health-event", metrics);
+                        }
+                    }
+
+                    emit_log(
+                        &app_handle_tcp,
+                        "info",
+                        "TCP writer loop stopped".to_string(),
+                    );
+                }
+                Err(e) => {
+                    emit_log(
+                        &app_handle_tcp,
+                        "error",
+                        format!("TCP connection failed: {}", e),
+                    );
+                }
+            }
+        });
+    });
+
     let app_handle_err = app_handle.clone();
 
     let err_fn = move |err| {
         emit_log(&app_handle_err, "error", format!("Stream error: {}", err));
     };
 
-    // No EQ or gain processing - audio passes through unchanged
+    // Audio callback - writes to ring buffer only (non-blocking)
     let audio_stream = device
         .build_input_stream(
             &config,
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                let mut bytes = Vec::with_capacity(data.len() * 2);
-
-                for &sample in data {
-                    // Pass through audio unchanged (no EQ, no gain)
-                    let final_sample = sample;
-                    bytes.extend_from_slice(&final_sample.to_le_bytes());
-                }
-
-                // Silence Detection: Calculate RMS (Root Mean Square) to detect if audio is playing
+                // Silence Detection: Calculate RMS
                 let rms: f32 = data
                     .iter()
                     .map(|&s| {
@@ -377,23 +583,26 @@ fn start_audio_stream(
                     / data.len() as f32;
                 let rms = rms.sqrt();
 
-                // Silence threshold (adjust as needed: lower = more sensitive)
-                const SILENCE_THRESHOLD: f32 = 50.0; // ~0.15% of max amplitude
+                const SILENCE_THRESHOLD: f32 = 50.0;
 
-                // Only send audio data if it's above silence threshold
+                // Only process if above silence threshold
                 if rms > SILENCE_THRESHOLD {
-                    // Send to TCP stream
-                    if let Err(e) = stream.write_all(&bytes) {
-                        eprintln!("Failed to write to TCP: {}", e);
-                    } else {
-                        // Track bytes sent
-                        bytes_sent_clone.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                    // Convert to bytes
+                    let mut bytes = Vec::with_capacity(data.len() * 2);
+                    for &sample in data {
+                        bytes.extend_from_slice(&sample.to_le_bytes());
+                    }
+
+                    // Write to ring buffer (non-blocking)
+                    let written = producer.push_slice(&bytes);
+                    if written < bytes.len() {
+                        // Buffer full - this means we're producing faster than consuming
+                        eprintln!("Ring buffer full! Dropped {} bytes", bytes.len() - written);
                     }
                 }
-                // If silence detected, skip sending but keep connection alive
             },
             err_fn,
-            None, // Timeout
+            None,
         )
         .map_err(|e| {
             emit_log(
@@ -425,7 +634,9 @@ pub fn start_stream(
     port: u16,
     sample_rate: u32,
     buffer_size: u32,
+    codec: u8,
     auto_reconnect: bool,
+    adaptive_bitrate: bool,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Start {
@@ -434,7 +645,9 @@ pub fn start_stream(
         port,
         sample_rate,
         buffer_size,
+        codec,
         auto_reconnect,
+        adaptive_bitrate,
         app_handle,
     })
     .map_err(|e| e.to_string())?;

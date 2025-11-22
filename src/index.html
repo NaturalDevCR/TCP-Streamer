@@ -28,9 +28,15 @@
           <span class="stat-value" id="stat-bytes">0 MB</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">Bitrate</span>
-          <span class="stat-value" id="stat-bitrate">0 kbps</span>
+            <span class="stat-label">Latency</span>
+            <span class="stat-value" id="stat-latency">0 ms</span>
         </div>
+        <div class="status-bar">
+        <div class="status-item" id="status-text">Ready</div>
+        <div class="status-item" id="bitrate">0 kbps</div>
+        <div class="status-item" id="health-badge" style="display: none;">Health: <span id="health-value">Unknown</span></div>
+        <div class="status-item" id="suggested-action" style="display: none;">Action: <span id="action-value">--</span></div>
+    </div>
       </div>
       
       <!-- Tabs Navigation -->
@@ -56,7 +62,7 @@
             </div>
 
             <div class="settings-card">
-                <h3>Destination</h3>
+                <h3>Stream Settings</h3>
                 <div class="row">
                     <div class="control-group">
                     <label for="ip-input">Target IP</label>
@@ -86,6 +92,25 @@
                             <option value="1024" selected>High (1024)</option>
                             <option value="2048">Max (2048)</option>
                         </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="row" style="margin-top: 10px;">
+                    <div class="control-group" style="width: 100%;">
+                        <label for="codec-select">Compression</label>
+                        <div class="select-wrapper">
+                        <select id="codec-select">
+                            <option value="0" selected>None (PCM)</option>
+                            <option value="1">FLAC (Lossless)</option>
+                            <option value="2">Opus (Lossy)</option>
+                        </select>
+                        </div>
+                        <div id="adaptive-container" style="display: none; margin-top: 10px;">
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="adaptive-bitrate-check">
+                                <span class="checkmark"></span>
+                                Enable Adaptive Bitrate
+                            </label>
                         </div>
                     </div>
                 </div>
