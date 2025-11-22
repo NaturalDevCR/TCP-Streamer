@@ -36,7 +36,6 @@
       <!-- Tabs Navigation -->
       <div class="tabs-nav">
         <button class="tab-btn active" data-tab="tab-connection">Connection</button>
-        <button class="tab-btn" data-tab="tab-audio">Audio</button>
         <button class="tab-btn" data-tab="tab-settings">Settings</button>
         <button class="tab-btn" data-tab="tab-logs">Logs</button>
       </div>
@@ -68,73 +67,32 @@
                     <input type="number" id="port-input" placeholder="1704" value="1704" />
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Tab 2: Audio -->
-        <div class="tab-pane" id="tab-audio">
-            <!-- EQ Card -->
-            <div class="settings-card">
-                <div class="section-header" id="eq-header">
-                    <h3>Equalizer</h3>
-                    <label class="switch">
-                        <input type="checkbox" id="eq-toggle">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="eq-controls" id="eq-controls">
-                    <div class="eq-band">
-                        <span class="eq-label">Bass</span>
-                        <input type="range" id="eq-bass" min="-12" max="12" value="0" step="0.5">
-                        <span id="eq-bass-val" class="eq-value">0dB</span>
+                <div class="row" style="margin-top: 10px;">
+                    <div class="control-group">
+                        <label for="sample-rate">Sample Rate</label>
+                        <div class="select-wrapper">
+                        <select id="sample-rate">
+                            <option value="48000">48 kHz</option>
+                            <option value="44100">44.1 kHz</option>
+                        </select>
+                        </div>
                     </div>
-                    <div class="eq-band">
-                        <span class="eq-label">Mid</span>
-                        <input type="range" id="eq-mid" min="-12" max="12" value="0" step="0.5">
-                        <span id="eq-mid-val" class="eq-value">0dB</span>
+                    <div class="control-group">
+                        <label for="buffer-size">Buffer Size</label>
+                        <div class="select-wrapper">
+                        <select id="buffer-size">
+                            <option value="256">Low (256)</option>
+                            <option value="512">Medium (512)</option>
+                            <option value="1024" selected>High (1024)</option>
+                            <option value="2048">Max (2048)</option>
+                        </select>
+                        </div>
                     </div>
-                    <div class="eq-band">
-                        <span class="eq-label">Treble</span>
-                        <input type="range" id="eq-treble" min="-12" max="12" value="0" step="0.5">
-                        <span id="eq-treble-val" class="eq-value">0dB</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Audio Settings Card -->
-            <div class="settings-card">
-                <h3>Audio Settings</h3>
-                <div class="control-group">
-                    <label for="gain-slider">Volume Gain <span id="gain-value" class="value-display">100%</span></label>
-                    <input type="range" id="gain-slider" min="0" max="2" step="0.01" value="1.0">
-                </div>
-                
-                <div class="row">
-                <div class="control-group">
-                    <label for="sample-rate">Sample Rate</label>
-                    <div class="select-wrapper">
-                    <select id="sample-rate">
-                        <option value="48000">48 kHz</option>
-                        <option value="44100">44.1 kHz</option>
-                    </select>
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label for="buffer-size">Buffer Size</label>
-                    <div class="select-wrapper">
-                    <select id="buffer-size">
-                        <option value="256">Low (256)</option>
-                        <option value="512">Medium (512)</option>
-                        <option value="1024" selected>High (1024)</option>
-                        <option value="2048">Max (2048)</option>
-                    </select>
-                    </div>
-                </div>
                 </div>
             </div>
         </div>
 
-        <!-- Tab 3: Settings -->
+        <!-- Tab 2: Settings -->
         <div class="tab-pane" id="tab-settings">
             <!-- Profiles Card -->
             <div class="settings-card">

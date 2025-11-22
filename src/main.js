@@ -11,10 +11,8 @@ let store; // Store will be initialized async
 let isStreaming = false;
 let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, autostartCheck, autostreamCheck, autoReconnectCheck, toggleBtn, statusBadge, statusText;
 let profileSelect, btnSaveProfile, btnNewProfile, btnDeleteProfile, newProfileContainer, newProfileName, btnConfirmProfile, btnCancelProfile;
-let logsContainer, clearLogsBtn, gainSlider, gainValue, statsBar;
+let logsContainer, clearLogsBtn, statsBar;
 let tabBtns, tabPanes;
-let eqToggle, eqControls;
-let eqBass, eqMid, eqTreble, eqBassVal, eqMidVal, eqTrebleVal;
 
 const MAX_LOGS = 100;
 
@@ -147,28 +145,7 @@ async function loadSettings() {
         if (settings.auto_stream !== undefined) autostreamCheck.checked = settings.auto_stream;
         if (settings.auto_reconnect !== undefined) autoReconnectCheck.checked = settings.auto_reconnect;
         
-        if (settings.gain !== undefined) {
-            gainSlider.value = settings.gain;
-            gainValue.textContent = Math.round(settings.gain * 100) + '%';
-        }
-
-        if (settings.eq_enabled !== undefined) eqToggle.checked = settings.eq_enabled;
-        if (settings.eq_bass !== undefined) {
-            eqBass.value = settings.eq_bass;
-            eqBassVal.textContent = (settings.eq_bass > 0 ? '+' : '') + settings.eq_bass + 'dB';
-        }
-        if (settings.eq_mid !== undefined) {
-            eqMid.value = settings.eq_mid;
-            eqMidVal.textContent = (settings.eq_mid > 0 ? '+' : '') + settings.eq_mid + 'dB';
-        }
-        if (settings.eq_treble !== undefined) {
-            eqTreble.value = settings.eq_treble;
-            eqTrebleVal.textContent = (settings.eq_treble > 0 ? '+' : '') + settings.eq_treble + 'dB';
-        }
-        // Visualizer removed
-        
-        // Update UI state
-        eqControls.style.display = eqToggle.checked ? 'flex' : 'none';
+        // EQ and Gain removed
         
         // Set profile dropdown
         if (profileSelect) profileSelect.value = currentProfile;
@@ -201,12 +178,7 @@ async function saveSettings() {
             sample_rate: parseInt(sampleRateSelect.value),
             buffer_size: parseInt(bufferSizeSelect.value),
             auto_stream: autostreamCheck.checked,
-            auto_reconnect: autoReconnectCheck.checked,
-            gain: parseFloat(gainSlider.value),
-            eq_enabled: eqToggle.checked,
-            eq_bass: parseFloat(eqBass.value),
-            eq_mid: parseFloat(eqMid.value),
-            eq_treble: parseFloat(eqTreble.value)
+            auto_reconnect: autoReconnectCheck.checked
         };
 
         // Get existing profiles
@@ -219,7 +191,7 @@ async function saveSettings() {
         // Actually, let's just save everything to the profile.
         
         await store.save();
-        console.log(`✅ Settings saved to profile '${currentProfile}'`);
+        console.log(`💾 Settings saved to profile '${currentProfile}'`);
     } catch (e) {
         console.error("❌ Failed to save settings:", e);
     }
@@ -326,14 +298,6 @@ async function toggleStream() {
     const port = parseInt(portInput.value);
     const sampleRate = parseInt(sampleRateSelect.value);
     const bufferSize = parseInt(bufferSizeSelect.value);
-    const gain = parseFloat(gainSlider.value); // 0.0 - 2.0
-
-    const eqSettings = {
-        enabled: eqToggle.checked,
-        bass_gain: parseFloat(eqBass.value),
-        mid_gain: parseFloat(eqMid.value),
-        treble_gain: parseFloat(eqTreble.value)
-    };
     const autoReconnect = autoReconnectCheck.checked;
 
     if (!device) {
@@ -357,8 +321,6 @@ async function toggleStream() {
           port,
           sampleRate,
           bufferSize,
-          gain,
-          eqSettings: eqSettings,
           autoReconnect: autoReconnect,
           appHandle: null // Backend handles this
       });
@@ -438,19 +400,7 @@ async function init() {
   // Initialize new elements
   logsContainer = document.getElementById("logs-container");
   clearLogsBtn = document.getElementById("clear-logs-btn");
-  gainSlider = document.getElementById("gain-slider");
-  gainValue = document.getElementById("gain-value");
   statsBar = document.getElementById("stats-bar");
-
-    // EQ Elements
-    eqToggle = document.getElementById('eq-toggle');
-    eqControls = document.getElementById('eq-controls');
-    eqBass = document.getElementById('eq-bass');
-    eqMid = document.getElementById('eq-mid');
-    eqTreble = document.getElementById('eq-treble');
-    eqBassVal = document.getElementById('eq-bass-val');
-    eqMidVal = document.getElementById('eq-mid-val');
-    eqTrebleVal = document.getElementById('eq-treble-val');
 
   // Set up Tauri event listeners
   await listen('log-event', (event) => {
@@ -461,13 +411,7 @@ async function init() {
     updateStats(event.payload);
   });
 
-  // Gain slider
-  if (gainSlider && gainValue) {
-    gainSlider.addEventListener('input', (e) => {
-      gainValue.textContent = Math.round(e.target.value * 100) + '%';
-    });
-    gainSlider.addEventListener('change', saveSettings); // Auto-save on change
-  }
+  // Gain slider removed
 
   // Auto-save on input changes
   if (deviceSelect) deviceSelect.addEventListener('change', saveSettings);
@@ -562,23 +506,8 @@ async function init() {
         });
     }
 
-    // Initialize listeners
-    eqToggle.addEventListener('change', () => {
-        eqControls.style.display = eqToggle.checked ? 'flex' : 'none';
-        saveSettings();
-    });
-
-    [eqBass, eqMid, eqTreble].forEach(slider => {
-        slider.addEventListener('input', (e) => {
-            const valSpan = document.getElementById(e.target.id + '-val');
-            valSpan.textContent = (e.target.value > 0 ? '+' : '') + e.target.value + 'dB';
-        });
-        slider.addEventListener('change', saveSettings);
-    });
+    // EQ listeners removed
     
-    // Initial EQ state
-    eqControls.style.display = eqToggle.checked ? 'flex' : 'none';
-
   // Load data
   await loadSettings();
   await loadDevices();

@@ -15,11 +15,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AudioState::new())
         .setup(|app| {
+            // Check if launched with autostart (minimized flag)
+            let args: Vec<String> = std::env::args().collect();
+            let start_hidden = args
+                .iter()
+                .any(|arg| arg == "--hidden" || arg == "--minimized" || arg.contains("autostart"));
+
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app, "show", "Show Settings", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
@@ -53,6 +59,13 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // If started hidden (e.g., from autostart), hide the window
+            if start_hidden {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
 
             Ok(())
         })

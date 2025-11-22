@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "0.2.1"
+version = "0.3.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -26,5 +26,4 @@ cpal = "0.15"
 tauri-plugin-autostart = "2"
 tauri-plugin-store = "2"
 chrono = { version = "0.4", features = ["serde"] }
-biquad = "0.4"
 

@@ -1,7 +1,6 @@
-use biquad::*;
 use chrono::Local;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -25,27 +24,6 @@ struct StatsEvent {
     bytes_sent: u64,
     uptime_seconds: u64,
     bitrate_kbps: f64,
-}
-
-// EQ Settings
-// EQ Settings
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct EQSettings {
-    pub enabled: bool,
-    pub bass_gain: f32,   // -12.0 to +12.0 dB
-    pub mid_gain: f32,    // -12.0 to +12.0 dB
-    pub treble_gain: f32, // -12.0 to +12.0 dB
-}
-
-impl Default for EQSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            bass_gain: 0.0,
-            mid_gain: 0.0,
-            treble_gain: 0.0,
-        }
-    }
 }
 
 // Helper function to emit log events
@@ -72,8 +50,6 @@ enum AudioCommand {
         port: u16,
         sample_rate: u32,
         buffer_size: u32,
-        gain: f32, // Volume gain: 0.0 - 2.0 (0% - 200%)
-        eq_settings: EQSettings,
         auto_reconnect: bool,
         app_handle: AppHandle,
     },
@@ -100,8 +76,6 @@ impl AudioState {
                         port,
                         sample_rate,
                         buffer_size,
-                        gain,
-                        eq_settings,
                         auto_reconnect,
                         app_handle,
                     } => {
@@ -140,8 +114,6 @@ impl AudioState {
                                 port,
                                 sample_rate,
                                 buffer_size,
-                                gain,
-                                eq_settings,
                                 app_handle.clone(),
                             ) {
                                 Ok((stream, stats)) => {
@@ -287,8 +259,6 @@ fn start_audio_stream(
     port: u16,
     sample_rate: u32,
     buffer_size: u32,
-    gain: f32,
-    eq_settings: EQSettings,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     let host = cpal::default_host();
@@ -383,39 +353,7 @@ fn start_audio_stream(
         emit_log(&app_handle_err, "error", format!("Stream error: {}", err));
     };
 
-    // Initialize EQ filters
-    let fs = sample_rate as f32;
-    let mut bass_filter = DirectForm1::<f32>::new(
-        Coefficients::<f32>::from_params(
-            Type::LowShelf(Q_BUTTERWORTH_F32),
-            fs.hz(),
-            250.hz(),
-            eq_settings.bass_gain,
-        )
-        .unwrap(),
-    );
-    let mut mid_filter = DirectForm1::<f32>::new(
-        Coefficients::<f32>::from_params(
-            Type::PeakingEQ(1.0),
-            fs.hz(),
-            1000.hz(),
-            eq_settings.mid_gain,
-        )
-        .unwrap(),
-    );
-    let mut treble_filter = DirectForm1::<f32>::new(
-        Coefficients::<f32>::from_params(
-            Type::HighShelf(Q_BUTTERWORTH_F32),
-            fs.hz(),
-            4000.hz(),
-            eq_settings.treble_gain,
-        )
-        .unwrap(),
-    );
-
-    // FFT Buffer
-    // Removed visualizer code: fft_size, fft_buffer, last_fft_time
-
+    // No EQ or gain processing - audio passes through unchanged
     let audio_stream = device
         .build_input_stream(
             &config,
@@ -423,20 +361,8 @@ fn start_audio_stream(
                 let mut bytes = Vec::with_capacity(data.len() * 2);
 
                 for &sample in data {
-                    let mut sample_f32 = sample as f32;
-
-                    // Apply EQ if enabled
-                    if eq_settings.enabled {
-                        sample_f32 = bass_filter.run(sample_f32);
-                        sample_f32 = mid_filter.run(sample_f32);
-                        sample_f32 = treble_filter.run(sample_f32);
-                    }
-
-                    // Apply Gain
-                    sample_f32 *= gain;
-
-                    // Clipping
-                    let final_sample = sample_f32.clamp(-32768.0, 32767.0) as i16;
+                    // Pass through audio unchanged (no EQ, no gain)
+                    let final_sample = sample;
                     bytes.extend_from_slice(&final_sample.to_le_bytes());
                 }
 
@@ -499,8 +425,6 @@ pub fn start_stream(
     port: u16,
     sample_rate: u32,
     buffer_size: u32,
-    gain: f32,
-    eq_settings: EQSettings,
     auto_reconnect: bool,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -510,8 +434,6 @@ pub fn start_stream(
         port,
         sample_rate,
         buffer_size,
-        gain,
-        eq_settings,
         auto_reconnect,
         app_handle,
     })
