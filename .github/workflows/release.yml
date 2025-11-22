@@ -36,6 +36,16 @@ jobs:
           .\vcpkg\bootstrap-vcpkg.bat
           .\vcpkg\vcpkg install opus:x64-windows libflac:x64-windows
 
+      - name: Set vcpkg library paths (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
+          $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\lib"
+          $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\include"
+          echo "LIB=$libPath;$env:LIB" >> $env:GITHUB_ENV
+          echo "INCLUDE=$includePath;$env:INCLUDE" >> $env:GITHUB_ENV
+
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
 
