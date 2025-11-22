@@ -583,7 +583,7 @@ fn start_audio_stream(
                     / data.len() as f32;
                 let rms = rms.sqrt();
 
-                const SILENCE_THRESHOLD: f32 = 50.0;
+                const SILENCE_THRESHOLD: f32 = 10.0; // Lowered from 50.0
 
                 // Only process if above silence threshold
                 if rms > SILENCE_THRESHOLD {
