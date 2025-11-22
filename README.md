@@ -1,8 +1,8 @@
 # TCP Streamer
 
-> A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and zero audio processing.
+> A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.5.3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -45,9 +45,10 @@
 ```
 
 1. **Capture**: Reads audio from selected input device at configurable sample rate/buffer size
-2. **Detect**: Analyzes RMS (Root Mean Square) to identify silence
-3. **Stream**: Sends audio data only when sound is detected, saving bandwidth
-4. **Reconnect**: Automatically attempts to reconnect if connection drops
+2. **Buffer**: Pushes audio into a lock-free **Ring Buffer** to absorb network jitter
+3. **Process**: Analyzes RMS to detect silence
+4. **Stream**: A separate network thread reads from buffer and sends data via Async TCP
+5. **Monitor**: Real-time health monitoring (buffer usage, latency, bitrate)
 
 ---
 
@@ -55,6 +56,7 @@
 
 ### Core Functionality
 
+- ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
 - ✅ **Silence Detection** - Smart bandwidth optimization
 - ✅ **Auto-Reconnect** - Resilient connection management
@@ -65,7 +67,7 @@
 
 - 📊 **Sample Rates**: 44.1 kHz or 48 kHz
 - 🔧 **Buffer Sizes**: 256, 512, 1024, or 2048 samples
-- 🎤 **Input Devices**: Any audio input (microphone, loopback, virtual devices)
+- 🎤 **Input Devices**: Scans all host APIs (WASAPI, MME, CoreAudio) to find all devices
 
 ### Automation
 
@@ -250,19 +252,20 @@ Save different configurations for various scenarios:
 ### Audio Pipeline
 
 ```rust
-Input Device → cpal → PCM Audio (i16) → Silence Detection (RMS) → TCP Stream
+Input Device → cpal → Producer → Ring Buffer → Consumer (Thread) → TCP Stream
 ```
 
 - **Format**: Raw PCM, 16-bit signed integers, little-endian
 - **Channels**: 2 (stereo)
+- **Buffering**: Lock-free Ring Buffer (approx 2s capacity)
 - **Silence Threshold**: RMS < 50.0 (skips transmission)
 
 ### Data Flow
 
-1. **Capture**: cpal reads audio from device at specified sample rate/buffer
-2. **Process**: Calculate RMS to detect silence
-3. **Transmit**: If RMS > threshold, send audio bytes via TCP
-4. **Monitor**: Track bytes sent, calculate bitrate, update UI
+1. **Capture**: cpal reads audio from device and pushes to **Ring Buffer** (Producer)
+2. **Process**: Calculate RMS to detect silence before pushing
+3. **Transmit**: Dedicated **Network Thread** (Consumer) reads from buffer and sends via TCP
+4. **Monitor**: Network thread calculates stats (bitrate, uptime) and emits events to UI
 
 ---
 

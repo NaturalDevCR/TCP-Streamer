@@ -273,6 +273,7 @@ fn start_audio_stream(
         let mut temp_buffer = [0i16; 1024]; // Read in chunks
         let mut dropped_packets: u64 = 0;
         let start_time = Instant::now();
+        let mut last_stats_emit = Instant::now();
 
         emit_log(
             &app_handle_net,
@@ -337,35 +338,33 @@ fn start_audio_stream(
 
                 let _write_time = start_write.elapsed().as_millis();
                 // Update stats
-                let current_bytes = bytes_sent_clone
-                    .fetch_add(payload.len() as u64, Ordering::Relaxed)
-                    + payload.len() as u64;
+                let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                 sequence = sequence.wrapping_add(1);
-
-                // Emit stats every second (approx)
-                // Assuming 48kHz stereo 16-bit = 192KB/s
-                // 1024 samples = ~21ms
-                // So ~47 packets per second
-                if sequence % 50 == 0 {
-                    let uptime = start_time.elapsed().as_secs();
-                    let bitrate = if uptime > 0 {
-                        (current_bytes as f64 * 8.0) / (uptime as f64 * 1000.0)
-                    } else {
-                        0.0
-                    };
-
-                    let _ = app_handle_net.emit(
-                        "stats-update",
-                        StatsEvent {
-                            uptime_seconds: uptime,
-                            bytes_sent: current_bytes,
-                            bitrate_kbps: bitrate,
-                        },
-                    );
-                }
             } else {
                 // Buffer empty, sleep briefly to avoid busy loop
                 thread::sleep(Duration::from_millis(1));
+            }
+
+            // Emit stats every second regardless of audio activity
+            if last_stats_emit.elapsed() >= Duration::from_secs(1) {
+                let uptime = start_time.elapsed().as_secs();
+                let current_bytes = bytes_sent_clone.load(Ordering::Relaxed);
+
+                let bitrate = if uptime > 0 {
+                    (current_bytes as f64 * 8.0) / (uptime as f64 * 1000.0)
+                } else {
+                    0.0
+                };
+
+                let _ = app_handle_net.emit(
+                    "stats-update",
+                    StatsEvent {
+                        uptime_seconds: uptime,
+                        bytes_sent: current_bytes,
+                        bitrate_kbps: bitrate,
+                    },
+                );
+                last_stats_emit = Instant::now();
             }
         }
         emit_log(
@@ -425,19 +424,41 @@ fn start_audio_stream(
 
 #[tauri::command]
 pub fn get_input_devices() -> Result<Vec<String>, String> {
-    let host = cpal::default_host();
-    // Log all devices found for debugging
-    match host.input_devices() {
-        Ok(devices) => {
-            let device_names: Vec<String> = devices.map(|d| d.name().unwrap_or_default()).collect();
-            println!("Found devices: {:?}", device_names);
-            Ok(device_names)
-        }
-        Err(e) => {
-            println!("Error listing devices: {}", e);
-            Err(e.to_string())
+    let mut all_devices = Vec::new();
+
+    // Try all available hosts
+    for host_id in cpal::available_hosts() {
+        let host = cpal::host_from_id(host_id).map_err(|e| e.to_string())?;
+        println!("Scanning host: {:?}", host_id);
+
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                if let Ok(name) = device.name() {
+                    // Avoid duplicates
+                    if !all_devices.contains(&name) {
+                        all_devices.push(name);
+                    }
+                }
+            }
         }
     }
+
+    // If no devices found via specific hosts, try default host as fallback
+    if all_devices.is_empty() {
+        let host = cpal::default_host();
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                if let Ok(name) = device.name() {
+                    if !all_devices.contains(&name) {
+                        all_devices.push(name);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Found devices: {:?}", all_devices);
+    Ok(all_devices)
 }
 
 #[tauri::command]
