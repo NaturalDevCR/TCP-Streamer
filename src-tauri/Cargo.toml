@@ -32,5 +32,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "io-util
 ringbuf = "0.4"
 
 # Phase 2: Compression
-flac-bound = "0.3"
+flac-bound = { version = "0.3", features = ["vendored"] }
 opus = "0.3"

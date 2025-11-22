@@ -29,13 +29,15 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: brew install opus flac
 
+      - name: Setup vcpkg (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "f5e5d94a3a9c4d77bdafdfbf50f10e1e7bff46a9"
+
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows-latest'
-        run: |
-          git clone https://github.com/Microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg install opus:x64-windows flac:x64-windows
-          echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
+        run: vcpkg install opus:x64-windows
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
