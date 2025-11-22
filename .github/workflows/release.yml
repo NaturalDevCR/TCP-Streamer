@@ -41,8 +41,8 @@ jobs:
         shell: pwsh
         run: |
           echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
-          $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\lib"
-          $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\include"
+          $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\lib"
+          $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\include"
           echo "LIB=$libPath;$env:LIB" >> $env:GITHUB_ENV
           echo "INCLUDE=$includePath;$env:INCLUDE" >> $env:GITHUB_ENV
 

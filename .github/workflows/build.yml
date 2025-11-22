@@ -48,8 +48,8 @@ jobs:
         shell: pwsh
         run: |
           echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
-          $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\lib"
-          $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\include"
+          $libPath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\lib"
+          $includePath = "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows-static\include"
           echo "LIB=$libPath;$env:LIB" >> $env:GITHUB_ENV
           echo "INCLUDE=$includePath;$env:INCLUDE" >> $env:GITHUB_ENV
 
@@ -57,12 +57,4 @@ jobs:
         run: npm install
 
       - name: Build Tauri App
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version
-          releaseName: "App v__VERSION__"
-          releaseBody: "See the assets to download this version and install."
-          releaseDraft: true
-          prerelease: false
+        run: npm run tauri build
