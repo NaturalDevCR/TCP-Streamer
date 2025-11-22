@@ -3,11 +3,8 @@ import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Store } from "@tauri-apps/plugin-store";
 
 const store = new Store("store.bin");
-// Initialize store
-await store.load();
 
 let isStreaming = false;
-
 let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, autostartCheck, autostreamCheck, toggleBtn, statusBadge, statusText, advancedToggle, advancedSection;
 
 function updateStatus(active, text) {
@@ -28,14 +25,16 @@ async function loadDevices() {
     console.log("Requesting devices...");
     const devices = await invoke("get_input_devices");
     console.log("Devices received:", devices);
+    
     deviceSelect.innerHTML = "";
-    if (devices.length === 0) {
+    if (!devices || devices.length === 0) {
       const option = document.createElement("option");
       option.text = "No devices found";
       option.disabled = true;
       deviceSelect.add(option);
       return;
     }
+    
     devices.forEach((device) => {
       const option = document.createElement("option");
       option.value = device.name;
@@ -44,44 +43,69 @@ async function loadDevices() {
     });
     
     // Restore selected device
-    const savedDevice = await store.get("device");
-    if (savedDevice) {
-        deviceSelect.value = savedDevice;
+    try {
+        const savedDevice = await store.get("device");
+        if (savedDevice) {
+            deviceSelect.value = savedDevice;
+        }
+    } catch (e) {
+        console.warn("Could not load saved device:", e);
     }
   } catch (error) {
     console.error("Failed to load devices:", error);
     updateStatus(false, "Error loading devices");
+    
+    // Fallback for UI if backend fails
+    deviceSelect.innerHTML = "";
+    const option = document.createElement("option");
+    option.text = "Error: " + error;
+    option.disabled = true;
+    deviceSelect.add(option);
   }
 }
 
 async function loadSettings() {
-    const savedIp = await store.get("ip");
-    if (savedIp) ipInput.value = savedIp;
-    
-    const savedPort = await store.get("port");
-    if (savedPort) portInput.value = savedPort;
+    try {
+        await store.load();
+        
+        const savedIp = await store.get("ip");
+        if (savedIp) ipInput.value = savedIp;
+        
+        const savedPort = await store.get("port");
+        if (savedPort) portInput.value = savedPort;
 
-    const savedSampleRate = await store.get("sample_rate");
-    if (savedSampleRate) sampleRateSelect.value = savedSampleRate;
+        const savedSampleRate = await store.get("sample_rate");
+        if (savedSampleRate) sampleRateSelect.value = savedSampleRate;
 
-    const savedBufferSize = await store.get("buffer_size");
-    if (savedBufferSize) bufferSizeSelect.value = savedBufferSize;
+        const savedBufferSize = await store.get("buffer_size");
+        if (savedBufferSize) bufferSizeSelect.value = savedBufferSize;
 
-    const autostart = await isEnabled();
-    autostartCheck.checked = autostart;
+        const savedAutoStream = await store.get("auto_stream");
+        if (savedAutoStream) autostreamCheck.checked = savedAutoStream;
+    } catch (e) {
+        console.warn("Failed to load settings from store:", e);
+    }
 
-    const savedAutoStream = await store.get("auto_stream");
-    if (savedAutoStream) autostreamCheck.checked = savedAutoStream;
+    try {
+        const autostart = await isEnabled();
+        autostartCheck.checked = autostart;
+    } catch (e) {
+        console.warn("Failed to check autostart status:", e);
+    }
 }
 
 async function saveSettings() {
-    await store.set("device", deviceSelect.value);
-    await store.set("ip", ipInput.value);
-    await store.set("port", parseInt(portInput.value));
-    await store.set("sample_rate", parseInt(sampleRateSelect.value));
-    await store.set("buffer_size", parseInt(bufferSizeSelect.value));
-    await store.set("auto_stream", autostreamCheck.checked);
-    await store.save();
+    try {
+        await store.set("device", deviceSelect.value);
+        await store.set("ip", ipInput.value);
+        await store.set("port", parseInt(portInput.value));
+        await store.set("sample_rate", parseInt(sampleRateSelect.value));
+        await store.set("buffer_size", parseInt(bufferSizeSelect.value));
+        await store.set("auto_stream", autostreamCheck.checked);
+        await store.save();
+    } catch (e) {
+        console.error("Failed to save settings:", e);
+    }
 }
 
 async function toggleStream() {
@@ -152,7 +176,9 @@ async function toggleAutostart() {
     }
 }
 
-window.addEventListener("DOMContentLoaded", async () => {
+async function init() {
+  console.log("Initializing app...");
+  
   // Initialize elements
   deviceSelect = document.getElementById("device-select");
   ipInput = document.getElementById("ip-input");
@@ -171,23 +197,27 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (advancedToggle) {
       advancedToggle.addEventListener("click", () => {
           console.log("Toggling advanced settings");
-          // alert("Clicked!"); // Uncomment for debugging
           advancedToggle.classList.toggle("open");
           advancedSection.classList.toggle("open");
-          console.log("Section classes:", advancedSection.classList.toString());
       });
   } else {
       console.error("Advanced toggle element not found");
   }
+  
+  if (toggleBtn) {
+      toggleBtn.addEventListener("click", toggleStream);
+  }
+  
+  if (autostartCheck) {
+      autostartCheck.addEventListener("change", toggleAutostart);
+  }
 
+  // Load data
   await loadSettings();
   await loadDevices();
-  
-  toggleBtn.addEventListener("click", toggleStream);
-  autostartCheck.addEventListener("change", toggleAutostart);
 
   // Auto-stream check
-  if (autostreamCheck.checked) {
+  if (autostreamCheck && autostreamCheck.checked) {
       // Small delay to ensure devices are loaded
       setTimeout(() => {
           if (deviceSelect.value && ipInput.value) {
@@ -195,4 +225,8 @@ window.addEventListener("DOMContentLoaded", async () => {
           }
       }, 500);
   }
-});
+  
+  console.log("App initialized");
+}
+
+window.addEventListener("DOMContentLoaded", init);

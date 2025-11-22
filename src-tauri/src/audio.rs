@@ -116,14 +116,14 @@ fn start_audio_stream(
 
     // Check for Loopback prefix (Windows WASAPI)
     if device_name.starts_with("Loopback: ") {
-        let real_name = device_name.trim_start_matches("Loopback: ");
+        let _real_name = device_name.trim_start_matches("Loopback: ");
         is_loopback = true;
 
         #[cfg(target_os = "windows")]
         if let Ok(devices) = host.output_devices() {
             for d in devices {
                 if let Ok(name) = d.name() {
-                    if name == real_name {
+                    if name == _real_name {
                         device = Some(d);
                         break;
                     }
