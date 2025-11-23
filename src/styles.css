@@ -1,6 +1,6 @@
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+
   --bg-color: #0f172a;
   --card-bg: rgba(30, 41, 59, 0.7);
   --text-primary: #f8fafc;
@@ -9,7 +9,7 @@
   --accent-glow: rgba(59, 130, 246, 0.5);
   --success-color: #10b981;
   --border-color: rgba(148, 163, 184, 0.1);
-  
+
   --glass-border: 1px solid rgba(255, 255, 255, 0.1);
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
@@ -22,8 +22,11 @@ body {
   min-height: 100vh;
   height: 100vh;
   background-color: var(--bg-color);
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+  background-image: radial-gradient(
+      at 0% 0%,
+      rgba(59, 130, 246, 0.15) 0px,
+      transparent 50%
+    ),
     radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.15) 0px, transparent 50%);
   color: var(--text-primary);
   overflow: hidden;
@@ -165,7 +168,7 @@ select:focus {
 }
 
 .select-wrapper::after {
-  content: '';
+  content: "";
   position: absolute;
   right: 12px;
   top: 50%;
@@ -229,7 +232,7 @@ input[type="checkbox"]:checked {
 }
 
 input[type="checkbox"]:checked::after {
-  content: '✓';
+  content: "✓";
   position: absolute;
   color: white;
   font-size: 10px;
@@ -303,17 +306,19 @@ input[type="checkbox"]:checked::after {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--accent-color);
-  font-family: 'Fira Code', 'Courier New', monospace;
+  font-family: "Fira Code", "Courier New", monospace;
 }
 
 /* Volume Gain Slider */
 .gain-slider {
   width: 100%;
   height: 6px;
-  background: linear-gradient(to right, 
-    rgba(59, 130, 246, 0.2) 0%, 
-    rgba(59, 130, 246, 0.4) 50%, 
-    rgba(239, 68, 68, 0.4) 100%);
+  background: linear-gradient(
+    to right,
+    rgba(59, 130, 246, 0.2) 0%,
+    rgba(59, 130, 246, 0.4) 50%,
+    rgba(239, 68, 68, 0.4) 100%
+  );
   border-radius: 3px;
   outline: none;
   -webkit-appearance: none;
@@ -323,10 +328,12 @@ input[type="checkbox"]:checked::after {
 }
 
 .gain-slider:hover {
-  background: linear-gradient(to right, 
-    rgba(59, 130, 246, 0.3) 0%, 
-    rgba(59, 130, 246, 0.5) 50%, 
-    rgba(239, 68, 68, 0.5) 100%);
+  background: linear-gradient(
+    to right,
+    rgba(59, 130, 246, 0.3) 0%,
+    rgba(59, 130, 246, 0.5) 50%,
+    rgba(239, 68, 68, 0.5) 100%
+  );
 }
 
 .gain-slider::-webkit-slider-thumb {
@@ -426,7 +433,7 @@ input[type="checkbox"]:checked::after {
   right: 0;
   bottom: 0;
   background-color: rgba(255, 255, 255, 0.1);
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 34px;
 }
 
@@ -438,7 +445,7 @@ input[type="checkbox"]:checked::after {
   left: 3px;
   bottom: 3px;
   background-color: white;
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 50%;
 }
 
@@ -465,10 +472,18 @@ input:checked + .slider:before {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  padding: 8px;
+  padding: 10px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 0.9rem;
+  transition: all 0.2s;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative; /* For tooltip positioning */
+}
+
+.tab-btn svg {
+  opacity: 0.7;
   transition: all 0.2s;
 }
 
@@ -477,11 +492,52 @@ input:checked + .slider:before {
   color: var(--text-primary);
 }
 
+.tab-btn:hover svg {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
 .tab-btn.active {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--primary-color);
-  font-weight: 500;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  color: var(--accent-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tab-btn.active svg {
+  opacity: 1;
+  stroke: var(--accent-color);
+}
+
+/* Tooltip Styles */
+.tab-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  animation: tooltipFadeIn 0.2s forwards;
+  z-index: 10;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 5px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .tab-content {
@@ -499,8 +555,14 @@ input:checked + .slider:before {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Settings Cards */
@@ -525,15 +587,15 @@ input:checked + .slider:before {
 
 /* Adjust section headers inside cards */
 .settings-card .section-header {
-    border-bottom: none;
-    margin-bottom: 10px;
-    padding-bottom: 0;
+  border-bottom: none;
+  margin-bottom: 10px;
+  padding-bottom: 0;
 }
 
 .settings-card .section-header h3 {
-    border-bottom: none;
-    margin-bottom: 0;
-    padding-bottom: 0;
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 /* Profiles Section */
@@ -613,15 +675,39 @@ input:checked + .slider:before {
 }
 
 .logs-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px 8px 0 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-primary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.logs-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+#log-filter {
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--bg-dark);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+#logs-container {
+    background: #000;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    height: 300px;
+    overflow-y: auto;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .clear-logs-btn {
@@ -647,7 +733,7 @@ input:checked + .slider:before {
   max-height: 200px;
   overflow-y: auto;
   padding: 8px;
-  font-family: 'Fira Code', 'Courier New', monospace;
+  font-family: "Fira Code", "Courier New", monospace;
   font-size: 0.72rem;
   line-height: 1.5;
 }
@@ -722,4 +808,61 @@ input:checked + .slider:before {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   font-weight: 400;
   letter-spacing: 0.3px;
+}
+
+/* Toast Notifications */
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.toast {
+  background: rgba(30, 30, 35, 0.9);
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transform: translateY(20px);
+  animation: toast-in 0.3s forwards, toast-out 0.3s forwards 2.7s;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast.success {
+  border-left: 4px solid #4caf50;
+}
+
+.toast.error {
+  border-left: 4px solid #f44336;
+}
+
+.toast.info {
+  border-left: 4px solid #2196f3;
+}
+
+@keyframes toast-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
 }

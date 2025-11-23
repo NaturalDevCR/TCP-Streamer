@@ -9,7 +9,8 @@ let store; // Store will be initialized async
 // Debug Store (will log after init)
 
 let isStreaming = false;
-let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, autostartCheck, autostreamCheck, autoReconnectCheck, toggleBtn, statusBadge, statusText;
+let deviceSelect, ipInput, portInput, sampleRateSelect, bufferSizeSelect, ringBufferDurationSelect, autostartCheck, autostreamCheck, autoReconnectCheck, toggleBtn, statusBadge, statusText;
+let priorityCheck, dscpSelect, chunkSizeSelect;
 let profileSelect, btnSaveProfile, btnNewProfile, btnDeleteProfile, newProfileContainer, newProfileName, btnConfirmProfile, btnCancelProfile;
 let logsContainer, clearLogsBtn, statsBar;
 let tabBtns, tabPanes;
@@ -34,10 +35,19 @@ function updateStatus(active, text) {
 }
 
 // Log system
+// Log system
+let currentLogFilter = 'all';
+
 function addLog(log) {
     const entry = document.createElement('div');
     entry.className = `log-entry log-${log.level}`;
+    entry.dataset.level = log.level; // Store level for filtering
     entry.innerHTML = `<span class="log-time">[${log.timestamp}]</span> ${log.message}`;
+    
+    // Apply filter
+    if (currentLogFilter !== 'all' && log.level !== currentLogFilter) {
+        entry.style.display = 'none';
+    }
     
     logsContainer.appendChild(entry);
     
@@ -50,8 +60,45 @@ function addLog(log) {
     logsContainer.scrollTop = logsContainer.scrollHeight;
 }
 
+function filterLogs(level) {
+    currentLogFilter = level;
+    const entries = logsContainer.children;
+    for (let entry of entries) {
+        if (level === 'all' || entry.dataset.level === level) {
+            entry.style.display = 'block';
+        } else {
+            entry.style.display = 'none';
+        }
+    }
+}
+
 function clearLogs() {
     logsContainer.innerHTML = '';
+}
+
+// Toast Notifications
+function showNotification(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    let icon = '';
+    if (type === 'success') icon = '✓';
+    if (type === 'error') icon = '✕';
+    if (type === 'info') icon = 'ℹ';
+    
+    toast.innerHTML = `<span style="font-weight:bold">${icon}</span> ${message}`;
+    
+    container.appendChild(toast);
+    
+    // Remove after animation (3s total: 0.3s in + 2.4s wait + 0.3s out)
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 3000);
 }
 
 // Statistics formatting
@@ -141,9 +188,14 @@ async function loadSettings() {
         if (settings.ip) ipInput.value = settings.ip;
         if (settings.port) portInput.value = settings.port;
         if (settings.sample_rate) sampleRateSelect.value = settings.sample_rate;
+        if (settings.sample_rate) sampleRateSelect.value = settings.sample_rate;
         if (settings.buffer_size) bufferSizeSelect.value = settings.buffer_size;
+        if (settings.ring_buffer_duration) ringBufferDurationSelect.value = settings.ring_buffer_duration;
         if (settings.auto_stream !== undefined) autostreamCheck.checked = settings.auto_stream;
         if (settings.auto_reconnect !== undefined) autoReconnectCheck.checked = settings.auto_reconnect;
+        if (settings.high_priority !== undefined) priorityCheck.checked = settings.high_priority;
+        if (settings.dscp_strategy) dscpSelect.value = settings.dscp_strategy;
+        if (settings.chunk_size) chunkSizeSelect.value = settings.chunk_size;
         
         // EQ and Gain removed
         
@@ -176,9 +228,14 @@ async function saveSettings() {
             ip: ipInput.value,
             port: parseInt(portInput.value),
             sample_rate: parseInt(sampleRateSelect.value),
+            sample_rate: parseInt(sampleRateSelect.value),
             buffer_size: parseInt(bufferSizeSelect.value),
+            ring_buffer_duration: parseInt(ringBufferDurationSelect.value),
             auto_stream: autostreamCheck.checked,
-            auto_reconnect: autoReconnectCheck.checked
+            auto_reconnect: autoReconnectCheck.checked,
+            high_priority: priorityCheck.checked,
+            dscp_strategy: dscpSelect.value,
+            chunk_size: parseInt(chunkSizeSelect.value)
         };
 
         // Get existing profiles
@@ -191,9 +248,12 @@ async function saveSettings() {
         // Actually, let's just save everything to the profile.
         
         await store.save();
+        await store.save();
         console.log(`💾 Settings saved to profile '${currentProfile}'`);
+        showNotification(`Settings saved to profile '${currentProfile}'`, 'success');
     } catch (e) {
         console.error("❌ Failed to save settings:", e);
+        showNotification("Failed to save settings", 'error');
     }
 }
 
@@ -242,6 +302,7 @@ async function createNewProfile(name) {
     await renderProfileList();
     profileSelect.value = name;
     newProfileContainer.style.display = "none";
+    showNotification(`Profile '${name}' created successfully`, 'success');
 }
 
 async function deleteProfile() {
@@ -275,6 +336,7 @@ async function deleteProfile() {
     await renderProfileList();
     // Reload settings for Default
     await loadSettings();
+    showNotification(`Profile '${current}' deleted successfully`, 'success');
 }
 
 async function toggleStream() {
@@ -287,7 +349,9 @@ async function toggleStream() {
       ipInput.disabled = false;
       portInput.disabled = false;
       sampleRateSelect.disabled = false;
+      sampleRateSelect.disabled = false;
       bufferSizeSelect.disabled = false;
+      ringBufferDurationSelect.disabled = false;
       // gainSlider remains enabled for real-time adjustment
     } catch (error) {
       updateStatus(true, "Error stopping: " + error);
@@ -298,7 +362,11 @@ async function toggleStream() {
     const port = parseInt(portInput.value);
     const sampleRate = parseInt(sampleRateSelect.value);
     const bufferSize = parseInt(bufferSizeSelect.value);
+    const ringBufferDuration = parseInt(ringBufferDurationSelect.value);
     const autoReconnect = autoReconnectCheck.checked;
+    const highPriority = priorityCheck.checked;
+    const dscpStrategy = dscpSelect.value;
+    const chunkSize = parseInt(chunkSizeSelect.value);
 
     if (!device) {
         updateStatus(false, "Select a device");
@@ -321,7 +389,11 @@ async function toggleStream() {
           port,
           sampleRate,
           bufferSize,
+          ringBufferDurationMs: ringBufferDuration,
           autoReconnect: autoReconnect,
+          highPriority: highPriority,
+          dscpStrategy: dscpStrategy,
+          chunkSize: chunkSize,
           appHandle: null // Backend handles this
       });
       isStreaming = true;
@@ -330,7 +402,9 @@ async function toggleStream() {
       ipInput.disabled = true;
       portInput.disabled = true;
       sampleRateSelect.disabled = true;
+      sampleRateSelect.disabled = true;
       bufferSizeSelect.disabled = true;
+      ringBufferDurationSelect.disabled = true;
       // gainSlider remains enabled for real-time adjustment
     } catch (error) {
       updateStatus(false, "Error: " + error);
@@ -376,9 +450,13 @@ async function init() {
   portInput = document.getElementById("port-input");
   sampleRateSelect = document.getElementById("sample-rate");
   bufferSizeSelect = document.getElementById("buffer-size");
+  ringBufferDurationSelect = document.getElementById("ring-buffer-duration");
   autostartCheck = document.getElementById("autostart-check");
   autostreamCheck = document.getElementById("autostream-check");
   autoReconnectCheck = document.getElementById("autoreconnect-check");
+  priorityCheck = document.getElementById("priority-check");
+  dscpSelect = document.getElementById("dscp-select");
+  chunkSizeSelect = document.getElementById("chunk-size-select");
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");
@@ -400,7 +478,14 @@ async function init() {
   // Initialize new elements
   logsContainer = document.getElementById("logs-container");
   clearLogsBtn = document.getElementById("clear-logs-btn");
+  const logFilter = document.getElementById("log-filter");
   statsBar = document.getElementById("stats-bar");
+  
+  if (logFilter) {
+      logFilter.addEventListener('change', (e) => {
+          filterLogs(e.target.value);
+      });
+  }
 
   // Set up Tauri event listeners
   await listen('log-event', (event) => {
@@ -441,8 +526,12 @@ async function init() {
   if (portInput) portInput.addEventListener('change', saveSettings);
   if (sampleRateSelect) sampleRateSelect.addEventListener('change', saveSettings);
   if (bufferSizeSelect) bufferSizeSelect.addEventListener('change', saveSettings);
+  if (ringBufferDurationSelect) ringBufferDurationSelect.addEventListener('change', saveSettings);
   if (autostreamCheck) autostreamCheck.addEventListener('change', saveSettings);
   if (autoReconnectCheck) autoReconnectCheck.addEventListener('change', saveSettings);
+  if (priorityCheck) priorityCheck.addEventListener('change', saveSettings);
+  if (dscpSelect) dscpSelect.addEventListener('change', saveSettings);
+  if (chunkSizeSelect) chunkSizeSelect.addEventListener('change', saveSettings);
 
   // Logs toggle (Removed)
   

@@ -18,6 +18,7 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_log::Builder::default().build())
         .manage(AudioState::new())
         .setup(|app| {
             // Check if launched with autostart (minimized flag)

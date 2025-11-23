@@ -18,7 +18,7 @@
       </div>
 
       <!-- Statistics Bar -->
-      <div class="stats-bar" id="stats-bar" style="display: none;">
+      <div class="stats-bar" id="stats-bar" style="display: none">
         <div class="stat-item">
           <span class="stat-label">Uptime</span>
           <span class="stat-value" id="stat-uptime">--:--</span>
@@ -32,42 +32,67 @@
           <span class="stat-value" id="stat-bitrate">0 kbps</span>
         </div>
       </div>
-      
+
       <!-- Tabs Navigation -->
       <div class="tabs-nav">
-        <button class="tab-btn active" data-tab="tab-connection">Connection</button>
-        <button class="tab-btn" data-tab="tab-settings">Settings</button>
-        <button class="tab-btn" data-tab="tab-logs">Logs</button>
+        <button class="tab-btn active" data-tab="tab-connection" data-tooltip="Connection">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M2 20h.01"/><path d="M22 20h.01"/><path d="M5 12a7 7 0 0 1 14 0"/><path d="M8.5 15.5a3.5 3.5 0 0 1 7 0"/></svg>
+        </button>
+        <button class="tab-btn" data-tab="tab-audio" data-tooltip="Audio">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        </button>
+        <button class="tab-btn" data-tab="tab-settings" data-tooltip="Settings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <button class="tab-btn" data-tab="tab-advanced" data-tooltip="Advanced">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"/><path d="M2 12l5-5"/><path d="M2 12l5 5"/><path d="M22 12l-5-5"/><path d="M22 12l-5 5"/><path d="M12 7v10"/></svg>
+        </button>
+        <button class="tab-btn" data-tab="tab-logs" data-tooltip="Logs">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </button>
       </div>
 
       <div class="tab-content">
         <!-- Tab 1: Connection -->
         <div class="tab-pane active" id="tab-connection">
-            <div class="settings-card">
-                <h3>Source</h3>
-                <div class="control-group">
-                    <label for="device-select">Input Device</label>
-                    <div class="select-wrapper">
-                    <select id="device-select">
-                        <option value="" disabled selected>Loading devices...</option>
-                    </select>
-                    </div>
-                </div>
+          <div class="settings-card">
+            <h3>Source</h3>
+            <div class="control-group">
+              <label for="device-select">Input Device</label>
+              <div class="select-wrapper">
+                <select id="device-select">
+                  <option value="" disabled selected>Loading devices...</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>Destination</h3>
+            <div class="row">
+              <div class="control-group">
+                <label for="ip-input">Target IP</label>
+                <input type="text" id="ip-input" placeholder="192.168.1.100" />
+              </div>
+              <div class="control-group">
+                <label for="port-input">Port</label>
+                <input
+                  type="number"
+                  id="port-input"
+                  placeholder="1704"
+                  value="1704"
+                />
+              </div>
             </div>
 
+          </div>
+        </div>
+
+        <!-- Tab: Audio -->
+        <div class="tab-pane" id="tab-audio">
             <div class="settings-card">
-                <h3>Destination</h3>
+                <h3>Audio Configuration</h3>
                 <div class="row">
-                    <div class="control-group">
-                    <label for="ip-input">Target IP</label>
-                    <input type="text" id="ip-input" placeholder="192.168.1.100" />
-                    </div>
-                    <div class="control-group">
-                    <label for="port-input">Port</label>
-                    <input type="number" id="port-input" placeholder="1704" value="1704" />
-                    </div>
-                </div>
-                <div class="row" style="margin-top: 10px;">
                     <div class="control-group">
                         <label for="sample-rate">Sample Rate</label>
                         <div class="select-wrapper">
@@ -89,66 +114,173 @@
                         </div>
                     </div>
                 </div>
+                <div class="row" style="margin-top: 10px;">
+                    <div class="control-group">
+                        <label for="ring-buffer-duration">Ring Buffer (ms)</label>
+                        <div class="select-wrapper">
+                        <select id="ring-buffer-duration">
+                            <option value="2000">Low (2000ms)</option>
+                            <option value="4000" selected>Balanced (4000ms)</option>
+                            <option value="8000">High (8000ms)</option>
+                            <option value="15000">Max (15000ms)</option>
+                        </select>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Tab 2: Settings -->
         <div class="tab-pane" id="tab-settings">
-            <!-- Profiles Card -->
-            <div class="settings-card">
-                <h3>Configuration Profiles</h3>
-                <div class="profiles-section" id="profiles-section" style="display: block; background: none; padding: 0;">
-                    <div class="control-group">
-                        <label for="profile-select">Select Profile</label>
-                        <select id="profile-select" class="profile-select"></select>
-                    </div>
-                    <div class="profile-actions" style="margin-top: 10px; justify-content: flex-start;">
-                        <button id="btn-save-profile" class="btn-small" title="Save current settings to this profile">💾 Save</button>
-                        <button id="btn-new-profile" class="btn-small" title="Create a new profile">➕ New</button>
-                        <button id="btn-delete-profile" class="btn-small btn-danger" title="Delete this profile">🗑️ Delete</button>
-                    </div>
-                    <div class="new-profile-input" id="new-profile-container" style="display: none;">
-                        <input type="text" id="new-profile-name" placeholder="Enter Profile Name">
-                        <button id="btn-confirm-profile" class="btn-small btn-success">✓ Create</button>
-                        <button id="btn-cancel-profile" class="btn-small">✕ Cancel</button>
-                    </div>
-                </div>
+          <!-- Profiles Card -->
+          <div class="settings-card">
+            <h3>Configuration Profiles</h3>
+            <div
+              class="profiles-section"
+              id="profiles-section"
+              style="display: block; background: none; padding: 0"
+            >
+              <div class="control-group">
+                <label for="profile-select">Select Profile</label>
+                <select id="profile-select" class="profile-select"></select>
+              </div>
+              <div
+                class="profile-actions"
+                style="margin-top: 10px; justify-content: flex-start"
+              >
+                <button
+                  id="btn-save-profile"
+                  class="btn-small"
+                  title="Save current settings to this profile"
+                >
+                  💾 Save
+                </button>
+                <button
+                  id="btn-new-profile"
+                  class="btn-small"
+                  title="Create a new profile"
+                >
+                  ➕ New
+                </button>
+                <button
+                  id="btn-delete-profile"
+                  class="btn-small btn-danger"
+                  title="Delete this profile"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
+              <div
+                class="new-profile-input"
+                id="new-profile-container"
+                style="display: none"
+              >
+                <input
+                  type="text"
+                  id="new-profile-name"
+                  placeholder="Enter Profile Name"
+                />
+                <button id="btn-confirm-profile" class="btn-small btn-success">
+                  ✓ Create
+                </button>
+                <button id="btn-cancel-profile" class="btn-small">
+                  ✕ Cancel
+                </button>
+              </div>
             </div>
+          </div>
 
-            <!-- Automation Card -->
-            <div class="settings-card">
-                <h3>Automation</h3>
-                <div class="control-group">
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="autostart-check">
-                        <span class="checkmark"></span>
-                        Auto-start on launch
-                    </label>
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="autostream-check">
-                        <span class="checkmark"></span>
-                        Auto-stream on load
-                    </label>
-                    <label class="checkbox-container">
-                        <input type="checkbox" id="autoreconnect-check">
-                        <span class="checkmark"></span>
-                        Auto-reconnect
-                    </label>
+          <!-- Automation Card -->
+          <div class="settings-card">
+            <h3>Automation</h3>
+            <div class="control-group">
+              <label class="checkbox-container">
+                <input type="checkbox" id="autostart-check" />
+                <span class="checkmark"></span>
+                Auto-start on launch
+              </label>
+              <label class="checkbox-container">
+                <input type="checkbox" id="autostream-check" />
+                <span class="checkmark"></span>
+                Auto-stream on load
+              </label>
+              <div class="form-group checkbox-group">
+                <input type="checkbox" id="autoreconnect-check" />
+                <label for="autoreconnect-check">Auto-Reconnect</label>
+              </div>
+
+              </div>
+            </div>
+          </div>
+
+        <!-- Tab 3: Advanced -->
+        <div class="tab-pane" id="tab-advanced">
+          <div class="settings-card">
+            <h3>Advanced Network</h3>
+            <div class="control-group">
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="priority-check" checked />
+                    <label for="priority-check">High Priority Thread</label>
+                </div>
+                <div class="form-group">
+                    <label for="dscp-select">DSCP Strategy</label>
+                    <select id="dscp-select">
+                        <option value="voip">VoIP (EF - 0xB8)</option>
+                        <option value="lowdelay">Low Delay (0x10)</option>
+                        <option value="throughput">Throughput (0x08)</option>
+                        <option value="besteffort">Best Effort (0x00)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="chunk-size-select">Chunk Size (Samples)</label>
+                    <select id="chunk-size-select">
+                        <option value="128">128 (Ultra Low Latency)</option>
+                        <option value="256">256 (Very Low Latency)</option>
+                        <option value="512" selected>512 (Low Latency)</option>
+                        <option value="1024">1024 (Stable)</option>
+                        <option value="2048">2048 (High Stability)</option>
+                        <option value="4096">4096 (Max Stability)</option>
+                    </select>
                 </div>
             </div>
+          </div>
         </div>
 
         <!-- Tab 4: Logs -->
         <div class="tab-pane" id="tab-logs">
-             <div class="settings-card" style="margin-top: 0;">
-                <div class="logs-header" style="background: none; padding-left: 0; padding-right: 0; border-radius: 0; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                  <h3 style="margin: 0; border: none; padding: 0;">Activity Log</h3>
-                  <button class="clear-logs-btn" id="clear-logs-btn">Clear</button>
-                </div>
-                <div class="logs-container" id="logs-container" style="height: 300px;">
-                  <!-- Logs -->
-                </div>
+          <div class="settings-card" style="margin-top: 0">
+            <div
+              class="logs-header"
+              style="
+                background: none;
+                padding-left: 0;
+                padding-right: 0;
+                border-radius: 0;
+                margin-bottom: 10px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+              "
+            >
+              <h3>Logs</h3>
+              <div class="logs-controls">
+                  <select id="log-filter">
+                      <option value="all">All Levels</option>
+                      <option value="info">Info</option>
+                      <option value="warning">Warning</option>
+                      <option value="error">Error</option>
+                      <option value="debug">Debug</option>
+                      <option value="trace">Trace</option>
+                  </select>
+                  <button id="clear-logs-btn" class="btn secondary small">Clear</button>
               </div>
+            </div>
+            <div
+              class="logs-container"
+              id="logs-container"
+              style="height: 300px"
+            >
+              <!-- Logs -->
+            </div>
+          </div>
         </div>
       </div>
 
@@ -160,9 +292,8 @@
       </div>
 
       <!-- Footer with Credits -->
-      <div class="app-footer">
-        Made with ♥ by Josue O.A / NaturalDevCR
-      </div>
+      <div class="app-footer">Made with ♥ by Josue O.A / NaturalDevCR</div>
     </div>
+    <div id="toast-container"></div>
   </body>
 </html>

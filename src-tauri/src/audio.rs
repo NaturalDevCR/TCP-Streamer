@@ -1,14 +1,18 @@
 use chrono::Local;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use log::{debug, error, info, trace, warn};
 use ringbuf::HeapRb;
 use serde::Serialize;
+use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use std::io::Write;
+use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
+use thread_priority::{ThreadBuilder, ThreadPriority};
 
 // Audio Packet Header (16 bytes)
 // Magic: "TCP\0" (4 bytes)
@@ -79,6 +83,17 @@ struct StatsEvent {
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
+    // Also log to standard logger (terminal/file)
+    match level {
+        "error" => error!("{}", message),
+        "warning" => warn!("{}", message),
+        "info" => info!("{}", message),
+        "debug" => debug!("{}", message),
+        "trace" => trace!("{}", message),
+        "success" => info!("SUCCESS: {}", message), // Map success to info
+        _ => info!("[{}] {}", level, message),
+    }
+
     let log = LogEvent {
         timestamp: Local::now().format("%H:%M:%S").to_string(),
         level: level.to_string(),
@@ -109,7 +124,11 @@ enum AudioCommand {
         port: u16,
         sample_rate: u32,
         buffer_size: u32,
+        ring_buffer_duration_ms: u32,
         auto_reconnect: bool,
+        high_priority: bool,
+        dscp_strategy: String,
+        chunk_size: u32,
         app_handle: AppHandle,
     },
     Stop,
@@ -139,7 +158,11 @@ impl AudioState {
                         port,
                         sample_rate,
                         buffer_size,
+                        ring_buffer_duration_ms,
                         auto_reconnect,
+                        high_priority,
+                        dscp_strategy,
+                        chunk_size,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -168,6 +191,10 @@ impl AudioState {
                             port,
                             sample_rate,
                             buffer_size,
+                            ring_buffer_duration_ms,
+                            high_priority,
+                            dscp_strategy,
+                            chunk_size,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -198,6 +225,8 @@ impl AudioState {
                         should_reconnect.store(false, Ordering::Relaxed);
                         _current_stream_handle = None;
                         _current_params = None;
+                        // We can't easily access the app_handle here to log "Stopped" unless we stored it in the struct or passed it.
+                        // But the frontend knows it called stop.
                     }
                 }
             }
@@ -213,8 +242,21 @@ fn start_audio_stream(
     port: u16,
     sample_rate: u32,
     buffer_size: u32,
+    ring_buffer_duration_ms: u32,
+    high_priority: bool,
+    dscp_strategy: String,
+    chunk_size: u32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
+    emit_log(
+        &app_handle,
+        "debug",
+        format!(
+            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size
+        ),
+    );
+
     let host = cpal::default_host();
     let device = if device_name == "default" {
         host.default_input_device()
@@ -232,8 +274,14 @@ fn start_audio_stream(
     };
 
     // 1. Setup Ring Buffer
-    // Size = 2 seconds of audio (48000 * 2 channels * 2 seconds = 192000 samples)
-    let ring_buffer_size = (sample_rate as usize) * 2 * 2;
+    // Size calculated from duration (ms)
+    // ring_buffer_duration_ms default should be around 4000ms for stability
+    let ring_buffer_size = (sample_rate as usize) * 2 * (ring_buffer_duration_ms as usize) / 1000;
+    emit_log(
+        &app_handle,
+        "trace",
+        format!("Allocating ring buffer of size: {}", ring_buffer_size),
+    );
     let rb = HeapRb::<i16>::new(ring_buffer_size);
     let (mut prod, mut cons) = rb.split();
 
@@ -247,10 +295,36 @@ fn start_audio_stream(
     let ip_clone = ip.clone();
 
     // 2. Spawn Network Thread (Consumer)
-    thread::spawn(move || {
+    // Use ThreadBuilder to set priority
+    let priority = if high_priority {
+        ThreadPriority::Max
+    } else {
+        ThreadPriority::Min
+    }; // Min is usually normal/default
+    let thread_builder = ThreadBuilder::default()
+        .name("NetworkThread")
+        .priority(priority);
+
+    let _ = thread_builder.spawn(move |result| {
+        if let Err(e) = result {
+            emit_log(
+                &app_handle_net,
+                "warning",
+                format!("Failed to set thread priority: {:?}", e),
+            );
+        } else {
+            if high_priority {
+                emit_log(
+                    &app_handle_net,
+                    "info",
+                    "Network thread priority set to Max".to_string(),
+                );
+            }
+        }
         let server_addr = format!("{}:{}", ip_clone, port);
         let mut sequence: u32 = 0;
-        let mut temp_buffer = [0i16; 1024]; // Read in chunks
+        // Dynamic chunk size
+        let mut temp_buffer = vec![0i16; chunk_size as usize];
         let mut dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
@@ -272,14 +346,80 @@ fn start_audio_stream(
                     "warning",
                     format!("Reconnecting to {}...", server_addr),
                 );
-                match TcpStream::connect(&server_addr) {
+
+                // Advanced Socket Setup using socket2
+                let connect_result = (|| -> Result<TcpStream, Box<dyn std::error::Error>> {
+                    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+
+                    // 1. Set Send Buffer Size (1MB)
+                    // This allows the kernel to buffer more data if the network is momentarily slow,
+                    // preventing the application from blocking on write immediately.
+                    socket.set_send_buffer_size(1024 * 1024)?;
+                    emit_log(
+                        &app_handle_net,
+                        "trace",
+                        "Socket send buffer set to 1MB".to_string(),
+                    );
+
+                    // 2. Set Keepalive
+                    // Detect dead connections faster
+                    let keepalive = TcpKeepalive::new()
+                        .with_time(Duration::from_secs(10))
+                        .with_interval(Duration::from_secs(1));
+                    socket.set_tcp_keepalive(&keepalive)?;
+                    emit_log(&app_handle_net, "trace", "Socket keepalive set".to_string());
+
+                    // 3. Set Type of Service (TOS) / DSCP
+                    let tos_value = match dscp_strategy.as_str() {
+                        "voip" => 0xB8,       // EF
+                        "lowdelay" => 0x10,   // IPTOS_LOWDELAY
+                        "throughput" => 0x08, // IPTOS_THROUGHPUT
+                        "besteffort" => 0x00,
+                        _ => 0xB8, // Default to EF
+                    };
+
+                    if let Err(e) = socket.set_tos(tos_value) {
+                        emit_log(
+                            &app_handle_net,
+                            "warning",
+                            format!("Failed to set DSCP {:#x}: {}. Using default.", tos_value, e),
+                        );
+                    } else {
+                        emit_log(
+                            &app_handle_net,
+                            "debug",
+                            format!("DSCP set to {:#x} ({})", tos_value, dscp_strategy),
+                        );
+                    }
+
+                    // 4. Connect
+                    let addr: SocketAddr = server_addr.parse()?;
+                    emit_log(
+                        &app_handle_net,
+                        "debug",
+                        format!("Connecting to address: {:?}", addr),
+                    );
+                    socket.connect(&addr.into())?;
+
+                    // 5. Convert to std::net::TcpStream
+                    let stream: TcpStream = socket.into();
+                    stream.set_nodelay(true)?; // Ensure Nagle's algo is off
+                    emit_log(
+                        &app_handle_net,
+                        "trace",
+                        "Nagle's algorithm disabled (TCP_NODELAY)".to_string(),
+                    );
+
+                    Ok(stream)
+                })();
+
+                match connect_result {
                     Ok(s) => {
-                        let _ = s.set_nodelay(true);
                         current_stream = Some(s);
                         emit_log(
                             &app_handle_net,
                             "success",
-                            "Reconnected successfully!".to_string(),
+                            "Reconnected successfully with optimized socket!".to_string(),
                         );
                     }
                     Err(e) => {
@@ -301,6 +441,16 @@ fn start_audio_stream(
 
             if usage > 0.9 {
                 dropped_packets += 1;
+                if dropped_packets % 100 == 0 {
+                    emit_log(
+                        &app_handle_net,
+                        "warning",
+                        format!(
+                            "High buffer usage: {:.1}%. Dropping packets.",
+                            usage * 100.0
+                        ),
+                    );
+                }
             }
 
             // Emit health event occasionally
@@ -359,7 +509,7 @@ fn start_audio_stream(
                 };
 
                 let _ = app_handle_net.emit(
-                    "stats-update",
+                    "stats-event",
                     StatsEvent {
                         uptime_seconds: uptime,
                         bytes_sent: current_bytes,
@@ -384,6 +534,8 @@ fn start_audio_stream(
 
     // RMS Silence Detection State
     let silence_threshold = 50.0; // Adjust as needed
+    let mut silence_start: Option<Instant> = None;
+    let app_handle_audio = app_handle.clone();
 
     let audio_stream = device
         .build_input_stream(
@@ -398,6 +550,21 @@ fn start_audio_stream(
                 let rms = (sum_squares / data.len() as f32).sqrt();
 
                 if rms > silence_threshold {
+                    if let Some(start) = silence_start {
+                        let duration = start.elapsed();
+                        if duration.as_secs() > 1 {
+                            emit_log(
+                                &app_handle_audio,
+                                "info",
+                                format!(
+                                    "Audio detected after silence of {:.1}s",
+                                    duration.as_secs_f32()
+                                ),
+                            );
+                        }
+                        silence_start = None;
+                    }
+
                     // 2. Push to Ring Buffer
                     // This is non-blocking (unless buffer is full, but HeapRb handles it)
                     // If full, it returns number of elements pushed (could be 0)
@@ -406,6 +573,12 @@ fn start_audio_stream(
                         // Buffer overflow! Producer is too fast for Consumer (Network)
                         // This means XRUN (Overrun)
                         // We just drop the rest of the samples
+                        // Logging here might be too spammy if it happens often, maybe rate limit it?
+                    }
+                } else {
+                    if silence_start.is_none() {
+                        silence_start = Some(Instant::now());
+                        // emit_log(&app_handle_audio, "trace", "Silence detected".to_string());
                     }
                 }
             },
@@ -431,7 +604,8 @@ pub fn get_input_devices() -> Result<Vec<String>, String> {
     // Try all available hosts
     for host_id in cpal::available_hosts() {
         let host = cpal::host_from_id(host_id).map_err(|e| e.to_string())?;
-        println!("Scanning host: {:?}", host_id);
+        // println!("Scanning host: {:?}", host_id); // Replaced with log
+        debug!("Scanning host: {:?}", host_id);
 
         if let Ok(devices) = host.input_devices() {
             for device in devices {
@@ -459,7 +633,7 @@ pub fn get_input_devices() -> Result<Vec<String>, String> {
         }
     }
 
-    println!("Found devices: {:?}", all_devices);
+    info!("Found devices: {:?}", all_devices);
     Ok(all_devices)
 }
 
@@ -471,7 +645,11 @@ pub async fn start_stream(
     port: u16,
     sample_rate: u32,
     buffer_size: u32,
+    ring_buffer_duration_ms: u32,
     auto_reconnect: bool,
+    high_priority: bool,
+    dscp_strategy: String,
+    chunk_size: u32,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -481,7 +659,11 @@ pub async fn start_stream(
         port,
         sample_rate,
         buffer_size,
+        ring_buffer_duration_ms,
         auto_reconnect,
+        high_priority,
+        dscp_strategy,
+        chunk_size,
         app_handle,
     })
     .map_err(|e| e.to_string())?;

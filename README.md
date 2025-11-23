@@ -77,10 +77,16 @@
 
 ### User Experience
 
-- 🎨 **Modern UI** - Clean, tabbed interface
+- 🎨 **Modern UI** - Clean, icon-based tabbed interface
 - 📈 **Real-time Statistics** - Monitor bitrate, uptime, data sent
-- 📝 **Activity Logs** - Track connection events and errors
+- 📝 **Activity Logs** - Track connection events and errors with filtering
 - 🌙 **Minimize to Tray** - Never quits, always accessible
+
+### Advanced Network Optimization
+
+- ⚡ **Thread Priority** - High priority thread option for reduced jitter
+- 🚦 **DSCP/TOS Support** - QoS tagging (VoIP, Low Delay, Throughput)
+- 📦 **Dynamic Chunk Size** - Configurable buffer chunks (128-4096 samples) for latency tuning
 
 ---
 

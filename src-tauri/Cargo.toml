@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "0.5.4"
+version = "0.6.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -27,4 +27,8 @@ tauri-plugin-autostart = "2"
 tauri-plugin-store = "2"
 chrono = { version = "0.4", features = ["serde"] }
 ringbuf = "0.3"
+socket2 = "0.5"
+tauri-plugin-log = "2.7.1"
+log = "0.4.28"
+thread-priority = "3.0.0"
 
