@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "0.6.0"
+version = "0.7.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -31,4 +31,6 @@ socket2 = "0.5"
 tauri-plugin-log = "2.7.1"
 log = "0.4.28"
 thread-priority = "3.0.0"
+hostname = "0.4"
+
 

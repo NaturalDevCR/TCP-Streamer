@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
+use hostname;
 
 // Audio Packet Header (16 bytes)
 // Magic: "TCP\0" (4 bytes)
@@ -120,6 +121,7 @@ impl Drop for StreamStats {
 enum AudioCommand {
     Start {
         device_name: String,
+        stream_name: String,
         ip: String,
         port: u16,
         sample_rate: u32,
@@ -129,6 +131,7 @@ enum AudioCommand {
         high_priority: bool,
         dscp_strategy: String,
         chunk_size: u32,
+        silence_threshold: f32,
         app_handle: AppHandle,
     },
     Stop,
@@ -154,6 +157,7 @@ impl AudioState {
                 match command {
                     AudioCommand::Start {
                         device_name,
+                        stream_name,
                         ip,
                         port,
                         sample_rate,
@@ -163,6 +167,7 @@ impl AudioState {
                         high_priority,
                         dscp_strategy,
                         chunk_size,
+                        silence_threshold,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -187,6 +192,7 @@ impl AudioState {
 
                         match start_audio_stream(
                             device_name,
+                            stream_name,
                             ip,
                             port,
                             sample_rate,
@@ -195,6 +201,7 @@ impl AudioState {
                             high_priority,
                             dscp_strategy,
                             chunk_size,
+                            silence_threshold,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -236,8 +243,37 @@ impl AudioState {
     }
 }
 
+// Build Snapcast-compatible header for stream metadata
+fn build_snapcast_header(
+    stream_name: &str,
+    sample_rate: u32,
+    device_name: &str,
+) -> String {
+    let hostname = hostname::get()
+        .ok()
+        .and_then(|h| h.into_string().ok())
+        .unwrap_or_else(|| "unknown".to_string());
+    
+    format!(
+        "StreamName: {}\r\n\
+         SampleRate: {}\r\n\
+         Channels: 2\r\n\
+         SampleFormat: s16le\r\n\
+         Hostname: {}\r\n\
+         Client: TCP-Streamer/{}\r\n\
+         Device: {}\r\n\
+         \r\n",
+        stream_name,
+        sample_rate,
+        hostname,
+        env!("CARGO_PKG_VERSION"),
+        device_name
+    )
+}
+
 fn start_audio_stream(
     device_name: String,
+    stream_name: String,
     ip: String,
     port: u16,
     sample_rate: u32,
@@ -246,14 +282,15 @@ fn start_audio_stream(
     high_priority: bool,
     dscp_strategy: String,
     chunk_size: u32,
+    silence_threshold: f32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size
+            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}, SilenceThreshold={}",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold
         ),
     );
 
@@ -293,6 +330,8 @@ fn start_audio_stream(
     let is_running_clone = is_running.clone();
     let app_handle_net = app_handle.clone();
     let ip_clone = ip.clone();
+    let stream_name_clone = stream_name.clone();
+    let device_name_clone = device_name.clone();
 
     // 2. Spawn Network Thread (Consumer)
     // Use ThreadBuilder to set priority
@@ -414,12 +453,28 @@ fn start_audio_stream(
                 })();
 
                 match connect_result {
-                    Ok(s) => {
+                    Ok(mut s) => {
+                        // Send Snapcast headers
+                        let header = build_snapcast_header(&stream_name_clone, sample_rate, &device_name_clone);
+                        if let Err(e) = s.write_all(header.as_bytes()) {
+                            emit_log(
+                                &app_handle_net,
+                                "warning",
+                                format!("Failed to send Snapcast headers: {}", e),
+                            );
+                        } else {
+                            emit_log(
+                                &app_handle_net,
+                                "debug",
+                                format!("Snapcast headers sent: {} ({} Hz, {})", stream_name_clone, sample_rate, device_name_clone),
+                            );
+                        }
+                        
                         current_stream = Some(s);
                         emit_log(
                             &app_handle_net,
                             "success",
-                            "Reconnected successfully with optimized socket!".to_string(),
+                            "Connected successfully with Snapcast metadata!".to_string(),
                         );
                     }
                     Err(e) => {
@@ -533,7 +588,7 @@ fn start_audio_stream(
     };
 
     // RMS Silence Detection State
-    let silence_threshold = 50.0; // Adjust as needed
+    // silence_threshold is now passed as a parameter
     let mut silence_start: Option<Instant> = None;
     let app_handle_audio = app_handle.clone();
 
@@ -557,17 +612,15 @@ fn start_audio_stream(
                                 &app_handle_audio,
                                 "info",
                                 format!(
-                                    "Audio detected after silence of {:.1}s",
-                                    duration.as_secs_f32()
+                                    "Audio resumed (RMS: {:.1}) after {:.1}s silence [Threshold: {:.1}]",
+                                    rms, duration.as_secs_f32(), silence_threshold
                                 ),
                             );
                         }
                         silence_start = None;
                     }
 
-                    // 2. Push to Ring Buffer
-                    // This is non-blocking (unless buffer is full, but HeapRb handles it)
-                    // If full, it returns number of elements pushed (could be 0)
+                    // Push actual audio to Ring Buffer
                     let pushed = prod.push_slice(data);
                     if pushed < data.len() {
                         // Buffer overflow! Producer is too fast for Consumer (Network)
@@ -576,9 +629,24 @@ fn start_audio_stream(
                         // Logging here might be too spammy if it happens often, maybe rate limit it?
                     }
                 } else {
+                    // Silence detected - send zeros instead of skipping transmission
                     if silence_start.is_none() {
                         silence_start = Some(Instant::now());
-                        // emit_log(&app_handle_audio, "trace", "Silence detected".to_string());
+                        emit_log(
+                            &app_handle_audio, 
+                            "debug", 
+                            format!(
+                                "Silence detected (RMS: {:.1} < Threshold: {:.1}) - Transmitting zeros",
+                                rms, silence_threshold
+                            )
+                        );
+                    }
+                    
+                    // Create zero-filled buffer of same size and push to ring buffer
+                    let zeros = vec![0i16; data.len()];
+                    let pushed = prod.push_slice(&zeros);
+                    if pushed < zeros.len() {
+                        // Buffer overflow (rare case)
                     }
                 }
             },
@@ -641,6 +709,7 @@ pub fn get_input_devices() -> Result<Vec<String>, String> {
 pub async fn start_stream(
     state: tauri::State<'_, AudioState>,
     device_name: String,
+    stream_name: String,
     ip: String,
     port: u16,
     sample_rate: u32,
@@ -650,11 +719,13 @@ pub async fn start_stream(
     high_priority: bool,
     dscp_strategy: String,
     chunk_size: u32,
+    silence_threshold: f32,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Start {
         device_name,
+        stream_name,
         ip,
         port,
         sample_rate,
@@ -664,6 +735,7 @@ pub async fn start_stream(
         high_priority,
         dscp_strategy,
         chunk_size,
+        silence_threshold,
         app_handle,
     })
     .map_err(|e| e.to_string())?;
