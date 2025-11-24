@@ -21,7 +21,11 @@ let deviceSelect,
   toggleBtn,
   statusBadge,
   statusText;
-let priorityCheck, dscpSelect, chunkSizeSelect, silenceThresholdInput;
+let priorityCheck,
+  dscpSelect,
+  chunkSizeSelect,
+  silenceThresholdInput,
+  silenceTimeoutInput;
 let profileSelect,
   btnSaveProfile,
   btnNewProfile,
@@ -230,6 +234,9 @@ async function loadSettings() {
     if (settings.silence_threshold !== undefined)
       silenceThresholdInput.value = settings.silence_threshold;
     else silenceThresholdInput.value = 5; // Default value
+    if (settings.silence_timeout !== undefined)
+      silenceTimeoutInput.value = settings.silence_timeout;
+    else silenceTimeoutInput.value = 10; // Default value
 
     // EQ and Gain removed
 
@@ -270,6 +277,7 @@ async function saveSettings() {
       dscp_strategy: dscpSelect.value,
       chunk_size: parseInt(chunkSizeSelect.value),
       silence_threshold: parseFloat(silenceThresholdInput.value),
+      silence_timeout: parseInt(silenceTimeoutInput.value),
     };
 
     // Get existing profiles
@@ -434,6 +442,7 @@ async function toggleStream() {
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
         silenceThreshold: parseFloat(silenceThresholdInput.value),
+        silenceTimeoutSeconds: parseInt(silenceTimeoutInput.value),
         appHandle: null, // Backend handles this
       });
       isStreaming = true;
@@ -502,6 +511,7 @@ async function init() {
   dscpSelect = document.getElementById("dscp-select");
   chunkSizeSelect = document.getElementById("chunk-size-select");
   silenceThresholdInput = document.getElementById("silence-threshold");
+  silenceTimeoutInput = document.getElementById("silence-timeout");
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");
@@ -586,6 +596,8 @@ async function init() {
   if (chunkSizeSelect) chunkSizeSelect.addEventListener("change", saveSettings);
   if (silenceThresholdInput)
     silenceThresholdInput.addEventListener("change", saveSettings);
+  if (silenceTimeoutInput)
+    silenceTimeoutInput.addEventListener("change", saveSettings);
 
   // Logs toggle (Removed)
 

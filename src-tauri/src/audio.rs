@@ -132,6 +132,7 @@ enum AudioCommand {
         dscp_strategy: String,
         chunk_size: u32,
         silence_threshold: f32,
+        silence_timeout_seconds: u64,
         app_handle: AppHandle,
     },
     Stop,
@@ -168,6 +169,7 @@ impl AudioState {
                         dscp_strategy,
                         chunk_size,
                         silence_threshold,
+                        silence_timeout_seconds,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -202,6 +204,7 @@ impl AudioState {
                             dscp_strategy,
                             chunk_size,
                             silence_threshold,
+                            silence_timeout_seconds,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -283,14 +286,15 @@ fn start_audio_stream(
     dscp_strategy: String,
     chunk_size: u32,
     silence_threshold: f32,
+    silence_timeout_seconds: u64,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}, SilenceThreshold={}",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold
+            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}, SilenceThreshold={}, SilenceTimeout={}s",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds
         ),
     );
 
@@ -596,16 +600,15 @@ fn start_audio_stream(
         .build_input_stream(
             &config,
             move |data: &[i16], _: &_| {
-                // 1. Silence Detection (for logging only)
-                // Calculate RMS of this chunk
+                // Calculate RMS for silence detection
                 let mut sum_squares = 0.0;
                 for &sample in data {
                     sum_squares += (sample as f32) * (sample as f32);
                 }
                 let rms = (sum_squares / data.len() as f32).sqrt();
 
-                // Track silence periods for logging
                 if rms > silence_threshold {
+                    // Audio detected
                     if let Some(start) = silence_start {
                         let duration = start.elapsed();
                         if duration.as_secs() > 1 {
@@ -620,26 +623,44 @@ fn start_audio_stream(
                         }
                         silence_start = None;
                     }
+                    // Always push actual audio data
+                    let pushed = prod.push_slice(data);
+                    if pushed < data.len() {
+                        // Buffer overflow
+                    }
                 } else {
+                    // Silence detected
                     if silence_start.is_none() {
                         silence_start = Some(Instant::now());
                         emit_log(
                             &app_handle_audio, 
                             "debug", 
                             format!(
-                                "Silence detected (RMS: {:.1} < Threshold: {:.1}) - Continuing transmission",
+                                "Silence detected (RMS: {:.1} < Threshold: {:.1})",
                                 rms, silence_threshold
                             )
                         );
                     }
-                }
-
-                // ALWAYS push actual audio data to Ring Buffer (never replace with zeros)
-                let pushed = prod.push_slice(data);
-                if pushed < data.len() {
-                    // Buffer overflow! Producer is too fast for Consumer (Network)
-                    // This means XRUN (Overrun)
-                    // We just drop the rest of the samples
+                    
+                    let silence_duration = silence_start.as_ref().unwrap().elapsed();
+                    
+                    if silence_timeout_seconds == 0 || silence_duration.as_secs() < silence_timeout_seconds {
+                        // Within grace period or timeout disabled - keep transmitting
+                        let pushed = prod.push_slice(data);
+                        if pushed < data.len() {
+                            // Buffer overflow
+                        }
+                    } else {
+                        // Timeout exceeded - stop transmission to save bandwidth
+                        if silence_duration.as_secs() == silence_timeout_seconds {
+                            emit_log(
+                                &app_handle_audio,
+                                "info",
+                                format!("Silence timeout ({}s) - stopping transmission", silence_timeout_seconds)
+                            );
+                        }
+                        // Don't push anything - saves bandwidth
+                    }
                 }
             },
             err_fn,
@@ -712,6 +733,7 @@ pub async fn start_stream(
     dscp_strategy: String,
     chunk_size: u32,
     silence_threshold: f32,
+    silence_timeout_seconds: u64,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -728,6 +750,7 @@ pub async fn start_stream(
         dscp_strategy,
         chunk_size,
         silence_threshold,
+        silence_timeout_seconds,
         app_handle,
     })
     .map_err(|e| e.to_string())?;

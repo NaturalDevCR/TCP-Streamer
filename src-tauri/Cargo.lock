@@ -4396,7 +4396,7 @@ dependencies = [
 
 [[package]]
 name = "tcp-streamer"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "chrono",
  "cpal",
