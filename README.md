@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-0.9.1-blue.svg)
+![Version](https://img.shields.io/badge/version-0.9.2-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -62,6 +62,7 @@
 - ✅ **Auto-Reconnect** - Resilient connection management
 - ✅ **Multi-Profile Support** - Save and switch between configurations
 - ✅ **System Tray Integration** - Runs in background, accessible from tray
+- ✅ **Windows Native Loopback** - Capture system audio without virtual cables (WASAPI)
 
 ### Audio Configuration
 
@@ -169,6 +170,7 @@ npm run tauri build
 
 Choose the audio source you want to stream (microphone, virtual audio device, etc.).
 
+> **Windows Loopback**: Check the **"Enable Loopback (Windows)"** box to capture system audio directly (no extra software needed, but you need to have speakers, or headphones plugged in to your computer in order to capture audio). or use software like VB Audio Cable to create a virtual audio device.
 > **macOS Loopback**: Use software like [BlackHole](https://github.com/ExistentialAudio/BlackHole) or [Loopback](https://rogueamoeba.com/loopback/) to capture system audio.
 
 ### 2. **Configure Destination**
