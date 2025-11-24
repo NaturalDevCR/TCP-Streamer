@@ -165,7 +165,7 @@ async function loadDevices() {
     let devices;
     // Pass loopback mode to backend
     devices = await invoke("get_input_devices", {
-      include_loopback: loopbackMode,
+      includeLoopback: loopbackMode,
     });
     console.log("Devices received:", devices);
 
@@ -479,8 +479,8 @@ async function toggleStream() {
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
         silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
-        silence_timeout_seconds: silenceTimeoutSeconds, // Changed from silenceTimeoutSeconds: silenceTimeoutSeconds
-        is_loopback: isLoopback, // Added is_loopback
+        silenceTimeoutSeconds: silenceTimeoutSeconds, // Changed back to camelCase
+        isLoopback: isLoopback, // Changed back to camelCase
         appHandle: null, // Backend handles this
       });
       isStreaming = true;
