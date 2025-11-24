@@ -34,6 +34,8 @@ let profileSelect,
   btnCancelProfile;
 let logsContainer, clearLogsBtn, statsBar;
 let tabBtns, tabPanes;
+let loopbackMode = false;
+let loopbackModeInput;
 
 const MAX_LOGS = 100;
 
@@ -310,6 +312,14 @@ async function loadProfiles() {
     // Initialize default profile
     await store.set("profiles", { Default: {} });
     await store.set("current_profile", "Default");
+    await store.set(
+      "silence_threshold",
+      parseFloat(silenceThresholdInput.value)
+    );
+    await store.set("silence_timeout", parseInt(silenceTimeoutInput.value));
+    if (loopbackModeInput) {
+      await store.set("loopback_mode", loopbackModeInput.checked);
+    }
     await store.save();
   }
   await renderProfileList();
@@ -403,6 +413,32 @@ async function toggleStream() {
       updateStatus(true, "Error stopping: " + error);
     }
   } else {
+    const savedSilenceTimeout = await store.get("silence_timeout");
+    const savedLoopbackMode = await store.get("loopback_mode");
+
+    // Note: The following lines seem to be part of a settings loading logic,
+    // but are placed within the toggleStream function's 'start stream' block.
+    // This might be a partial or misplaced snippet.
+    // Assuming 'savedIp', 'savedPort', etc. are defined elsewhere or intended to be.
+    // For now, commenting out the lines that reference undefined 'saved' variables
+    // to maintain syntactical correctness based on the provided context.
+    // if (savedIp) ipInput.value = savedIp;
+    // if (savedPort) portInput.value = savedPort;
+    // if (savedSampleRate) sampleRateSelect.value = savedSampleRate;
+    // if (savedBufferSize) bufferSizeSelect.value = savedBufferSize;
+    // if (savedRingBuffer) ringBufferDurationSelect.value = savedRingBuffer;
+    // if (savedAutoReconnect !== null)
+    //   autoReconnectCheck.checked = savedAutoReconnect;
+    // if (savedHighPriority !== null) priorityCheck.checked = savedHighPriority;
+    // if (savedDscp) dscpSelect.value = savedDscp;
+    // if (savedChunkSize) chunkSizeSelect.value = savedChunkSize;
+    // if (savedSilenceThreshold) silenceThresholdInput.value = savedSilenceThreshold;
+    // if (savedSilenceTimeout) silenceTimeoutInput.value = savedSilenceTimeout;
+
+    if (savedLoopbackMode !== null && loopbackModeInput) {
+      loopbackMode = savedLoopbackMode;
+      loopbackModeInput.checked = savedLoopbackMode;
+    }
     const device = deviceSelect.value;
     const ip = ipInput.value;
     const port = parseInt(portInput.value);
@@ -427,6 +463,8 @@ async function toggleStream() {
       return;
     }
 
+    const isLoopback = loopbackMode && device.startsWith("[Loopback]");
+
     try {
       await saveSettings();
       await invoke("start_stream", {
@@ -441,7 +479,7 @@ async function toggleStream() {
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
         silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
-        silence_timeout_seconds: silenceTimeout, // Changed from silenceTimeoutSeconds: silenceTimeoutSeconds
+        silence_timeout_seconds: silenceTimeoutSeconds, // Changed from silenceTimeoutSeconds: silenceTimeoutSeconds
         is_loopback: isLoopback, // Added is_loopback
         appHandle: null, // Backend handles this
       });
@@ -514,6 +552,7 @@ async function init() {
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");
+  loopbackModeInput = document.getElementById("loopback-mode");
 
   // Tabs
   tabBtns = document.querySelectorAll(".tab-btn");
@@ -597,6 +636,14 @@ async function init() {
     silenceThresholdInput.addEventListener("change", saveSettings);
   if (silenceTimeoutInput)
     silenceTimeoutInput.addEventListener("change", saveSettings);
+
+  if (loopbackModeInput) {
+    loopbackModeInput.addEventListener("change", async (e) => {
+      loopbackMode = e.target.checked;
+      saveSettings();
+      await loadDevices();
+    });
+  }
 
   // Logs toggle (Removed)
 
