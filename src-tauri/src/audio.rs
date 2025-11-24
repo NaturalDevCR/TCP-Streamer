@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 use hostname;
+use mac_address::get_mac_address;
 
 
 // Log Event
@@ -214,20 +215,32 @@ fn build_snapcast_header(
         .and_then(|h| h.into_string().ok())
         .unwrap_or_else(|| "unknown".to_string());
     
+    let mac = get_mac_address()
+        .ok()
+        .flatten()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+    
     format!(
         "StreamName: {}\r\n\
          SampleRate: {}\r\n\
          Channels: 2\r\n\
          SampleFormat: s16le\r\n\
          Hostname: {}\r\n\
+         MAC: {}\r\n\
          Client: TCP-Streamer/{}\r\n\
          Device: {}\r\n\
+         OS: {}\r\n\
+         Arch: {}\r\n\
          \r\n",
         stream_name,
         sample_rate,
         hostname,
+        mac,
         env!("CARGO_PKG_VERSION"),
-        device_name
+        device_name,
+        std::env::consts::OS,
+        std::env::consts::ARCH
     )
 }
 
@@ -328,6 +341,10 @@ fn start_audio_stream(
         let mut dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
+        
+        // Exponential backoff for reconnection
+        let mut retry_delay = Duration::from_secs(1);
+        const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 
         // We wrap the stream in an Option to handle reconnection
         let mut current_stream: Option<TcpStream> = None;
@@ -344,8 +361,12 @@ fn start_audio_stream(
                 emit_log(
                     &app_handle_net,
                     "warning",
-                    format!("Reconnecting to {}...", server_addr),
+                    format!("Reconnecting to {} (retry in {}s)...", 
+                        server_addr, retry_delay.as_secs()),
                 );
+                
+                // Wait before attempting reconnection (exponential backoff)
+                thread::sleep(retry_delay);
 
                 // Advanced Socket Setup using socket2
                 let connect_result = (|| -> Result<TcpStream, Box<dyn std::error::Error>> {
@@ -415,6 +436,9 @@ fn start_audio_stream(
 
                 match connect_result {
                     Ok(mut s) => {
+                        // Reset retry delay on successful connection
+                        retry_delay = Duration::from_secs(1);
+                        
                         // Send Snapcast headers
                         let header = build_snapcast_header(&stream_name_clone, sample_rate, &device_name_clone);
                         if let Err(e) = s.write_all(header.as_bytes()) {
@@ -444,7 +468,8 @@ fn start_audio_stream(
                             "error",
                             format!("Reconnection failed: {}", e),
                         );
-                        thread::sleep(Duration::from_secs(2));
+                        // Exponential backoff: double the delay for next attempt
+                        retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
                         continue; // Retry loop
                     }
                 }
