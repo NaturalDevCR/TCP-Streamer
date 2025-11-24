@@ -712,7 +712,7 @@ fn start_audio_stream(
 }
 
 #[tauri::command]
-pub fn get_input_devices(_include_loopback: bool) -> Result<Vec<String>, String> {
+pub fn get_input_devices(#[allow(unused_variables)] _include_loopback: bool) -> Result<Vec<String>, String> {
     let mut all_devices = Vec::new();
 
     // Try all available hosts
