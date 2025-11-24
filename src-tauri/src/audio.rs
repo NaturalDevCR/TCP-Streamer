@@ -206,7 +206,7 @@ impl AudioState {
 
 fn start_audio_stream(
     device_name: String,
-    stream_name: String,
+
     ip: String,
     port: u16,
     sample_rate: u32,

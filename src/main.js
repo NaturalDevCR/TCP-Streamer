@@ -21,11 +21,9 @@ let deviceSelect,
   toggleBtn,
   statusBadge,
   statusText;
-let priorityCheck,
-  dscpSelect,
-  chunkSizeSelect,
-  silenceThresholdInput,
-  silenceTimeoutInput;
+let priorityCheck, dscpSelect, chunkSizeSelect;
+let silenceThreshold = 5;
+let silenceTimeoutSeconds = 10;
 let profileSelect,
   btnSaveProfile,
   btnNewProfile,
@@ -216,8 +214,6 @@ async function loadSettings() {
 
     if (settings.ip) ipInput.value = settings.ip;
     if (settings.port) portInput.value = settings.port;
-    if (settings.stream_name) streamNameInput.value = settings.stream_name;
-    else streamNameInput.value = "TCP Streamer"; // Default value
     if (settings.sample_rate) sampleRateSelect.value = settings.sample_rate;
     if (settings.sample_rate) sampleRateSelect.value = settings.sample_rate;
     if (settings.buffer_size) bufferSizeSelect.value = settings.buffer_size;
@@ -232,11 +228,11 @@ async function loadSettings() {
     if (settings.dscp_strategy) dscpSelect.value = settings.dscp_strategy;
     if (settings.chunk_size) chunkSizeSelect.value = settings.chunk_size;
     if (settings.silence_threshold !== undefined)
-      silenceThresholdInput.value = settings.silence_threshold;
-    else silenceThresholdInput.value = 5; // Default value
+      silenceThreshold = settings.silence_threshold;
+    else silenceThreshold = 5; // Default value
     if (settings.silence_timeout !== undefined)
-      silenceTimeoutInput.value = settings.silence_timeout;
-    else silenceTimeoutInput.value = 10; // Default value
+      silenceTimeoutSeconds = settings.silence_timeout;
+    else silenceTimeoutSeconds = 10; // Default value
 
     // EQ and Gain removed
 
@@ -266,7 +262,6 @@ async function saveSettings() {
       device: deviceSelect.value,
       ip: ipInput.value,
       port: parseInt(portInput.value),
-      stream_name: streamNameInput.value,
       sample_rate: parseInt(sampleRateSelect.value),
       sample_rate: parseInt(sampleRateSelect.value),
       buffer_size: parseInt(bufferSizeSelect.value),
@@ -276,8 +271,8 @@ async function saveSettings() {
       high_priority: priorityCheck.checked,
       dscp_strategy: dscpSelect.value,
       chunk_size: parseInt(chunkSizeSelect.value),
-      silence_threshold: parseFloat(silenceThresholdInput.value),
-      silence_timeout: parseInt(silenceTimeoutInput.value),
+      silence_threshold: silenceThreshold,
+      silence_timeout: silenceTimeoutSeconds,
     };
 
     // Get existing profiles
@@ -405,7 +400,6 @@ async function toggleStream() {
     const device = deviceSelect.value;
     const ip = ipInput.value;
     const port = parseInt(portInput.value);
-    const streamName = streamNameInput.value || "TCP Streamer";
     const sampleRate = parseInt(sampleRateSelect.value);
     const bufferSize = parseInt(bufferSizeSelect.value);
     const ringBufferDuration = parseInt(ringBufferDurationSelect.value);
@@ -431,7 +425,6 @@ async function toggleStream() {
       await saveSettings();
       await invoke("start_stream", {
         deviceName: device,
-        streamName: streamName,
         ip,
         port,
         sampleRate,
@@ -441,8 +434,8 @@ async function toggleStream() {
         highPriority: highPriority,
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
-        silenceThreshold: parseFloat(silenceThresholdInput.value),
-        silenceTimeoutSeconds: parseInt(silenceTimeoutInput.value),
+        silenceThreshold: silenceThreshold,
+        silenceTimeoutSeconds: silenceTimeoutSeconds,
         appHandle: null, // Backend handles this
       });
       isStreaming = true;
@@ -500,7 +493,6 @@ async function init() {
   deviceSelect = document.getElementById("device-select");
   ipInput = document.getElementById("ip-input");
   portInput = document.getElementById("port-input");
-  streamNameInput = document.getElementById("stream-name");
   sampleRateSelect = document.getElementById("sample-rate");
   bufferSizeSelect = document.getElementById("buffer-size");
   ringBufferDurationSelect = document.getElementById("ring-buffer-duration");
@@ -510,8 +502,8 @@ async function init() {
   priorityCheck = document.getElementById("priority-check");
   dscpSelect = document.getElementById("dscp-select");
   chunkSizeSelect = document.getElementById("chunk-size-select");
-  silenceThresholdInput = document.getElementById("silence-threshold");
-  silenceTimeoutInput = document.getElementById("silence-timeout");
+  const silenceThresholdInput = document.getElementById("silence-threshold");
+  const silenceTimeoutInput = document.getElementById("silence-timeout");
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");
