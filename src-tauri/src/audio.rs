@@ -596,7 +596,7 @@ fn start_audio_stream(
         .build_input_stream(
             &config,
             move |data: &[i16], _: &_| {
-                // 1. Silence Detection
+                // 1. Silence Detection (for logging only)
                 // Calculate RMS of this chunk
                 let mut sum_squares = 0.0;
                 for &sample in data {
@@ -604,6 +604,7 @@ fn start_audio_stream(
                 }
                 let rms = (sum_squares / data.len() as f32).sqrt();
 
+                // Track silence periods for logging
                 if rms > silence_threshold {
                     if let Some(start) = silence_start {
                         let duration = start.elapsed();
@@ -619,35 +620,26 @@ fn start_audio_stream(
                         }
                         silence_start = None;
                     }
-
-                    // Push actual audio to Ring Buffer
-                    let pushed = prod.push_slice(data);
-                    if pushed < data.len() {
-                        // Buffer overflow! Producer is too fast for Consumer (Network)
-                        // This means XRUN (Overrun)
-                        // We just drop the rest of the samples
-                        // Logging here might be too spammy if it happens often, maybe rate limit it?
-                    }
                 } else {
-                    // Silence detected - send zeros instead of skipping transmission
                     if silence_start.is_none() {
                         silence_start = Some(Instant::now());
                         emit_log(
                             &app_handle_audio, 
                             "debug", 
                             format!(
-                                "Silence detected (RMS: {:.1} < Threshold: {:.1}) - Transmitting zeros",
+                                "Silence detected (RMS: {:.1} < Threshold: {:.1}) - Continuing transmission",
                                 rms, silence_threshold
                             )
                         );
                     }
-                    
-                    // Create zero-filled buffer of same size and push to ring buffer
-                    let zeros = vec![0i16; data.len()];
-                    let pushed = prod.push_slice(&zeros);
-                    if pushed < zeros.len() {
-                        // Buffer overflow (rare case)
-                    }
+                }
+
+                // ALWAYS push actual audio data to Ring Buffer (never replace with zeros)
+                let pushed = prod.push_slice(data);
+                if pushed < data.len() {
+                    // Buffer overflow! Producer is too fast for Consumer (Network)
+                    // This means XRUN (Overrun)
+                    // We just drop the rest of the samples
                 }
             },
             err_fn,
