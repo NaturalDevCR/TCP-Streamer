@@ -48,7 +48,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "TCP Streamer v__VERSION__"
+          releaseName: "TCP Streamer ${{ github.ref_name }}"
           releaseBody: "See the assets to download and install this version."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
