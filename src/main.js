@@ -158,7 +158,13 @@ function updateStats(stats) {
 async function loadDevices() {
   try {
     console.log("Requesting devices...");
-    const devices = await invoke("get_input_devices");
+    // Assuming loopbackMode is defined elsewhere or will be added.
+    // For now, we'll declare 'devices' with 'let' to allow reassignment.
+    let devices;
+    // Pass loopback mode to backend
+    devices = await invoke("get_input_devices", {
+      include_loopback: loopbackMode,
+    });
     console.log("Devices received:", devices);
 
     deviceSelect.innerHTML = "";
@@ -434,8 +440,9 @@ async function toggleStream() {
         highPriority: highPriority,
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
-        silenceThreshold: silenceThreshold,
-        silenceTimeoutSeconds: silenceTimeoutSeconds,
+        silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
+        silence_timeout_seconds: silenceTimeout, // Changed from silenceTimeoutSeconds: silenceTimeoutSeconds
+        is_loopback: isLoopback, // Added is_loopback
         appHandle: null, // Backend handles this
       });
       isStreaming = true;
