@@ -13,8 +13,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
-use hostname;
-use mac_address::get_mac_address;
 
 
 // Log Event
@@ -204,45 +202,7 @@ impl AudioState {
     }
 }
 
-// Build Snapcast-compatible header for stream metadata
-fn build_snapcast_header(
-    stream_name: &str,
-    sample_rate: u32,
-    device_name: &str,
-) -> String {
-    let hostname = hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
-    
-    let mac = get_mac_address()
-        .ok()
-        .flatten()
-        .map(|addr| addr.to_string())
-        .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
-    
-    format!(
-        "StreamName: {}\r\n\
-         SampleRate: {}\r\n\
-         Channels: 2\r\n\
-         SampleFormat: s16le\r\n\
-         Hostname: {}\r\n\
-         MAC: {}\r\n\
-         Client: TCP-Streamer/{}\r\n\
-         Device: {}\r\n\
-         OS: {}\r\n\
-         Arch: {}\r\n\
-         \r\n",
-        stream_name,
-        sample_rate,
-        hostname,
-        mac,
-        env!("CARGO_PKG_VERSION"),
-        device_name,
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    )
-}
+
 
 fn start_audio_stream(
     device_name: String,
@@ -304,8 +264,6 @@ fn start_audio_stream(
     let is_running_clone = is_running.clone();
     let app_handle_net = app_handle.clone();
     let ip_clone = ip.clone();
-    let stream_name_clone = stream_name.clone();
-    let device_name_clone = device_name.clone();
 
     // 2. Spawn Network Thread (Consumer)
     // Use ThreadBuilder to set priority
@@ -435,31 +393,20 @@ fn start_audio_stream(
                 })();
 
                 match connect_result {
-                    Ok(mut s) => {
+                    Ok(s) => {
                         // Reset retry delay on successful connection
                         retry_delay = Duration::from_secs(1);
                         
-                        // Send Snapcast headers
-                        let header = build_snapcast_header(&stream_name_clone, sample_rate, &device_name_clone);
-                        if let Err(e) = s.write_all(header.as_bytes()) {
-                            emit_log(
-                                &app_handle_net,
-                                "warning",
-                                format!("Failed to send Snapcast headers: {}", e),
-                            );
-                        } else {
-                            emit_log(
-                                &app_handle_net,
-                                "debug",
-                                format!("Snapcast headers sent: {} ({} Hz, {})", stream_name_clone, sample_rate, device_name_clone),
-                            );
-                        }
+                        // We do NOT send headers anymore because Snapserver TCP source expects RAW PCM.
+                        // Sending text headers causes byte misalignment (byte shift) if the length
+                        // is not a multiple of 4 (16-bit stereo), resulting in severe audio distortion.
+                        // The stream format must be configured on the Snapserver side (e.g., sampleformat=48000:16:2).
                         
                         current_stream = Some(s);
                         emit_log(
                             &app_handle_net,
                             "success",
-                            "Connected successfully with Snapcast metadata!".to_string(),
+                            "Connected successfully! (Raw PCM)".to_string(),
                         );
                     }
                     Err(e) => {
