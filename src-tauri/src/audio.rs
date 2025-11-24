@@ -10,54 +10,11 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 use hostname;
 
-// Audio Packet Header (16 bytes)
-// Magic: "TCP\0" (4 bytes)
-// Sequence: u32 (4 bytes)
-// Timestamp: u64 (8 bytes) - Microseconds
-// Data Length: u32 (4 bytes)
-// Total Header: 20 bytes (Wait, let's stick to a simple format first)
-
-// Let's use a simple struct for the packet header to send over TCP
-#[repr(C, packed)]
-struct PacketHeader {
-    magic: [u8; 4],
-    sequence: u32,
-    timestamp: u64,
-    data_len: u32,
-}
-
-impl PacketHeader {
-    #[allow(dead_code)]
-    fn new(sequence: u32, data_len: u32) -> Self {
-        let start = SystemTime::now();
-        let since_the_epoch = start
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
-        let timestamp = since_the_epoch.as_micros() as u64;
-
-        Self {
-            magic: *b"TCP\0",
-            sequence,
-            timestamp,
-            data_len,
-        }
-    }
-
-    #[allow(dead_code)]
-    fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                (self as *const PacketHeader) as *const u8,
-                std::mem::size_of::<PacketHeader>(),
-            )
-        }
-    }
-}
 
 // Log Event
 #[derive(Clone, Serialize)]
