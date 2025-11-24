@@ -77,7 +77,7 @@ impl Drop for StreamStats {
 enum AudioCommand {
     Start {
         device_name: String,
-        stream_name: String,
+
         ip: String,
         port: u16,
         sample_rate: u32,
@@ -89,6 +89,7 @@ enum AudioCommand {
         chunk_size: u32,
         silence_threshold: f32,
         silence_timeout_seconds: u64,
+        is_loopback: bool,
         app_handle: AppHandle,
     },
     Stop,
@@ -108,13 +109,13 @@ impl AudioState {
             let should_reconnect = Arc::new(AtomicBool::new(false));
 
             // Keep track of current params for reconnection
-            let mut _current_params: Option<(String, String, u16, u32, u32, AppHandle)> = None;
+            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, app_handle)
+            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, AppHandle)> = None;
 
             for command in rx {
                 match command {
                     AudioCommand::Start {
                         device_name,
-                        stream_name,
                         ip,
                         port,
                         sample_rate,
@@ -126,10 +127,14 @@ impl AudioState {
                         chunk_size,
                         silence_threshold,
                         silence_timeout_seconds,
+                        is_loopback,
                         app_handle,
                     } => {
                         // Stop existing stream if any
-                        _current_stream_handle = None;
+                        if let Some((stream, stats)) = _current_stream_handle.take() {
+                            drop(stream);
+                            drop(stats); // Signals stats thread to stop
+                        }
 
                         // Store params for reconnection
                         _current_params = Some((
@@ -138,6 +143,14 @@ impl AudioState {
                             port,
                             sample_rate,
                             buffer_size,
+                            ring_buffer_duration_ms,
+                            auto_reconnect,
+                            high_priority,
+                            dscp_strategy.clone(),
+                            chunk_size,
+                            silence_threshold,
+                            silence_timeout_seconds,
+                            is_loopback,
                             app_handle.clone(),
                         ));
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
@@ -150,7 +163,6 @@ impl AudioState {
 
                         match start_audio_stream(
                             device_name,
-                            stream_name,
                             ip,
                             port,
                             sample_rate,
@@ -161,6 +173,7 @@ impl AudioState {
                             chunk_size,
                             silence_threshold,
                             silence_timeout_seconds,
+                            is_loopback,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -195,6 +208,70 @@ impl AudioState {
                         // But the frontend knows it called stop.
                     }
                 }
+
+                // Reconnection check (simple polling for now, ideally would be event driven)
+                if should_reconnect.load(Ordering::Relaxed) && _current_stream_handle.is_none() {
+                    if let Some((
+                        device_name,
+                        ip,
+                        port,
+                        sample_rate,
+                        buffer_size,
+                        ring_buffer_duration_ms,
+                        _auto_reconnect,
+                        high_priority,
+                        dscp_strategy,
+                        chunk_size,
+                        silence_threshold,
+                        silence_timeout_seconds,
+                        is_loopback,
+                        app_handle,
+                    )) = &_current_params
+                    {
+                        // Try to reconnect
+                        // In a real app, we'd want a delay here to avoid tight loops
+                        thread::sleep(Duration::from_secs(2));
+                        
+                        emit_log(
+                            app_handle,
+                            "info",
+                            "Attempting to reconnect...".to_string(),
+                        );
+
+                        match start_audio_stream(
+                            device_name.clone(),
+                            ip.clone(),
+                            port.clone(),
+                            sample_rate.clone(),
+                            buffer_size.clone(),
+                            ring_buffer_duration_ms.clone(),
+                            high_priority.clone(),
+                            dscp_strategy.clone(),
+                            chunk_size.clone(),
+                            silence_threshold.clone(),
+                            silence_timeout_seconds.clone(),
+                            is_loopback.clone(),
+                            app_handle.clone(),
+                        ) {
+                            Ok((stream, stats)) => {
+                                stream.play().unwrap();
+                                _current_stream_handle = Some((stream, stats));
+                                emit_log(
+                                    app_handle,
+                                    "success",
+                                    "Reconnected successfully".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                emit_log(
+                                    app_handle,
+                                    "warning",
+                                    format!("Reconnection failed: {}", e),
+                                );
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -217,26 +294,53 @@ fn start_audio_stream(
     chunk_size: u32,
     silence_threshold: f32,
     silence_timeout_seconds: u64,
+    is_loopback: bool,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}, SilenceThreshold={}, SilenceTimeout={}s",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds
+            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}, SilenceThreshold={}, SilenceTimeout={}s, Loopback={}",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback
         ),
     );
 
     let host = cpal::default_host();
-    let device = if device_name == "default" {
-        host.default_input_device()
+    
+    // Device selection logic
+    let device = if is_loopback {
+        // Loopback mode: Search in OUTPUT devices
+        // Remove "[Loopback] " prefix if present for matching
+        let clean_name = device_name.replace("[Loopback] ", "");
+        let mut found_device = None;
+        
+        if let Ok(devices) = host.output_devices() {
+            for dev in devices {
+                if let Ok(name) = dev.name() {
+                    if name == clean_name {
+                        found_device = Some(dev);
+                        break;
+                    }
+                }
+            }
+        }
+        found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))?
     } else {
-        host.input_devices()
-            .map_err(|e| e.to_string())?
-            .find(|d| d.name().map(|n| n == device_name).unwrap_or(false))
-    }
-    .ok_or("Device not found")?;
+        // Standard mode: Search in INPUT devices
+        let mut found_device = None;
+        if let Ok(devices) = host.input_devices() {
+            for dev in devices {
+                if let Ok(name) = dev.name() {
+                    if name == device_name {
+                        found_device = Some(dev);
+                        break;
+                    }
+                }
+            }
+        }
+        found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
+    };
 
     let config = cpal::StreamConfig {
         channels: 2,
@@ -608,28 +712,42 @@ fn start_audio_stream(
 }
 
 #[tauri::command]
-pub fn get_input_devices() -> Result<Vec<String>, String> {
+pub fn get_input_devices(_include_loopback: bool) -> Result<Vec<String>, String> {
     let mut all_devices = Vec::new();
 
     // Try all available hosts
     for host_id in cpal::available_hosts() {
         let host = cpal::host_from_id(host_id).map_err(|e| e.to_string())?;
-        // println!("Scanning host: {:?}", host_id); // Replaced with log
         debug!("Scanning host: {:?}", host_id);
 
+        // 1. Standard Input Devices
         if let Ok(devices) = host.input_devices() {
             for device in devices {
                 if let Ok(name) = device.name() {
-                    // Avoid duplicates
                     if !all_devices.contains(&name) {
                         all_devices.push(name);
                     }
                 }
             }
         }
+
+        // 2. Loopback Devices (Windows only)
+        #[cfg(target_os = "windows")]
+        if include_loopback {
+            if let Ok(devices) = host.output_devices() {
+                for device in devices {
+                    if let Ok(name) = device.name() {
+                        let loopback_name = format!("[Loopback] {}", name);
+                        if !all_devices.contains(&loopback_name) {
+                            all_devices.push(loopback_name);
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    // If no devices found via specific hosts, try default host as fallback
+    // Fallback to default host if empty
     if all_devices.is_empty() {
         let host = cpal::default_host();
         if let Ok(devices) = host.input_devices() {
@@ -637,6 +755,20 @@ pub fn get_input_devices() -> Result<Vec<String>, String> {
                 if let Ok(name) = device.name() {
                     if !all_devices.contains(&name) {
                         all_devices.push(name);
+                    }
+                }
+            }
+        }
+        
+        #[cfg(target_os = "windows")]
+        if include_loopback {
+             if let Ok(devices) = host.output_devices() {
+                for device in devices {
+                    if let Ok(name) = device.name() {
+                        let loopback_name = format!("[Loopback] {}", name);
+                        if !all_devices.contains(&loopback_name) {
+                            all_devices.push(loopback_name);
+                        }
                     }
                 }
             }
@@ -651,7 +783,6 @@ pub fn get_input_devices() -> Result<Vec<String>, String> {
 pub async fn start_stream(
     state: tauri::State<'_, AudioState>,
     device_name: String,
-    stream_name: String,
     ip: String,
     port: u16,
     sample_rate: u32,
@@ -663,12 +794,12 @@ pub async fn start_stream(
     chunk_size: u32,
     silence_threshold: f32,
     silence_timeout_seconds: u64,
+    is_loopback: bool,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Start {
         device_name,
-        stream_name,
         ip,
         port,
         sample_rate,
@@ -680,6 +811,7 @@ pub async fn start_stream(
         chunk_size,
         silence_threshold,
         silence_timeout_seconds,
+        is_loopback,
         app_handle,
     })
     .map_err(|e| e.to_string())?;
