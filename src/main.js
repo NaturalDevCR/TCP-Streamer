@@ -23,7 +23,7 @@ let deviceSelect,
   statusText;
 let priorityCheck, dscpSelect, chunkSizeSelect;
 let silenceThreshold = 5;
-let silenceTimeoutSeconds = 10;
+let silenceTimeoutSeconds = 0; // Default to 0 (disabled) to prevent confusion
 let profileSelect,
   btnSaveProfile,
   btnNewProfile,
@@ -240,7 +240,7 @@ async function loadSettings() {
     else silenceThreshold = 5; // Default value
     if (settings.silence_timeout !== undefined)
       silenceTimeoutSeconds = settings.silence_timeout;
-    else silenceTimeoutSeconds = 10; // Default value
+    else silenceTimeoutSeconds = 0; // Default value (disabled)
 
     // EQ and Gain removed
 

@@ -625,8 +625,8 @@ fn start_audio_stream(
     };
 
     // RMS Silence Detection State
-    // silence_threshold is now passed as a parameter
     let mut silence_start: Option<Instant> = None;
+    let mut transmission_stopped = false;
     let app_handle_audio = app_handle.clone();
 
     let audio_stream = device
@@ -655,6 +655,7 @@ fn start_audio_stream(
                             );
                         }
                         silence_start = None;
+                        transmission_stopped = false;
                     }
                     // Always push actual audio data
                     let pushed = prod.push_slice(data);
@@ -685,12 +686,13 @@ fn start_audio_stream(
                         }
                     } else {
                         // Timeout exceeded - stop transmission to save bandwidth
-                        if silence_duration.as_secs() == silence_timeout_seconds {
+                        if !transmission_stopped {
                             emit_log(
                                 &app_handle_audio,
                                 "info",
                                 format!("Silence timeout ({}s) - stopping transmission", silence_timeout_seconds)
                             );
+                            transmission_stopped = true;
                         }
                         // Don't push anything - saves bandwidth
                     }
