@@ -4419,7 +4419,7 @@ dependencies = [
 
 [[package]]
 name = "tcp-streamer"
-version = "0.9.6"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "cpal",
