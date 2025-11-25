@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "0.9.7"
+version = "0.9.6"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"

@@ -165,7 +165,7 @@ async function loadDevices() {
     let devices;
     // Pass loopback mode to backend
     devices = await invoke("get_input_devices", {
-      include_loopback: loopbackMode,
+      includeLoopback: loopbackMode,
     });
     console.log("Devices received:", devices);
 
@@ -468,20 +468,20 @@ async function toggleStream() {
     try {
       await saveSettings();
       await invoke("start_stream", {
-        device_name: device,
+        deviceName: device,
         ip,
         port,
-        sample_rate: sampleRate,
-        buffer_size: bufferSize,
-        ring_buffer_duration_ms: ringBufferDuration,
-        auto_reconnect: autoReconnect,
-        high_priority: highPriority,
-        dscp_strategy: dscpStrategy,
-        chunk_size: chunkSize,
-        silence_threshold: silenceThreshold,
-        silence_timeout_seconds: silenceTimeoutSeconds,
-        is_loopback: isLoopback,
-        app_handle: null, // Backend handles this
+        sampleRate,
+        bufferSize,
+        ringBufferDurationMs: ringBufferDuration,
+        autoReconnect: autoReconnect,
+        highPriority: highPriority,
+        dscpStrategy: dscpStrategy,
+        chunkSize: chunkSize,
+        silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
+        silenceTimeoutSeconds: silenceTimeoutSeconds, // Changed back to camelCase
+        isLoopback: isLoopback, // Changed back to camelCase
+        appHandle: null, // Backend handles this
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
