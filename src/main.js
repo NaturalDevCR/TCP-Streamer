@@ -479,9 +479,8 @@ async function toggleStream() {
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
         silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
-        silenceTimeoutSeconds: silenceTimeoutSeconds, // Changed back to camelCase
-        isLoopback: isLoopback, // Changed back to camelCase
-        appHandle: null, // Backend handles this
+        silenceTimeoutSeconds: silenceTimeoutSeconds,
+        isLoopback: !!isLoopback, // Force boolean to prevent undefined
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
