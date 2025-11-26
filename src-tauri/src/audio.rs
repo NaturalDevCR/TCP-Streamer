@@ -315,16 +315,28 @@ fn start_audio_stream(
         let clean_name = device_name.replace("[Loopback] ", "");
         let mut found_device = None;
         
-        if let Ok(devices) = host.output_devices() {
-            for dev in devices {
-                if let Ok(name) = dev.name() {
-                    if name == clean_name {
-                        found_device = Some(dev);
-                        break;
-                    }
+        let available_devices = host.output_devices().map_err(|e| e.to_string())?;
+        let mut device_list_log = Vec::new();
+
+        for dev in available_devices {
+            if let Ok(name) = dev.name() {
+                device_list_log.push(name.clone());
+                // Try exact match or match without whitespace
+                if name == clean_name || name.trim() == clean_name.trim() {
+                    found_device = Some(dev);
+                    break;
                 }
             }
         }
+        
+        if found_device.is_none() {
+             emit_log(
+                &app_handle,
+                "error",
+                format!("Loopback device '{}' not found. Available outputs: {:?}", clean_name, device_list_log),
+            );
+        }
+
         found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))?
     } else {
         // Standard mode: Search in INPUT devices
@@ -670,10 +682,19 @@ fn start_audio_stream(
                             &app_handle_audio, 
                             "debug", 
                             format!(
-                                "Silence detected (RMS: {:.1} < Threshold: {:.1})",
+                                "Silence detected (RMS: {:.2} < Threshold: {:.2})",
                                 rms, silence_threshold
                             )
                         );
+                    } else {
+                        // Log RMS occasionally even during silence to debug
+                        let silence_duration = silence_start.as_ref().unwrap().elapsed();
+                        if silence_duration.as_millis() % 5000 < 50 { // Log roughly every 5s
+                             let rms_val = rms; // Capture for closure
+                             // We can't easily emit log here without cloning app_handle again or using a different structure
+                             // But we can use the standard log crate for debugging
+                             debug!("Current RMS: {:.2} (Silence for {:.1}s)", rms_val, silence_duration.as_secs_f32());
+                        }
                     }
                     
                     let silence_duration = silence_start.as_ref().unwrap().elapsed();

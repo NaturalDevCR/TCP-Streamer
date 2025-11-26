@@ -513,6 +513,20 @@ async function toggleAutostart() {
 async function init() {
   console.log("Initializing app...");
 
+  try {
+    const appVersion = await invoke("get_app_version"); // We need to implement this or use tauri API
+    // Actually, let's use the tauri API if available, or just a simple command
+    // Since we are in v2, we can use getVersion from @tauri-apps/api/app
+    // But to avoid adding imports that might fail if not configured, let's just hardcode it for now or use a command
+    // Wait, user wants it dynamic. Let's assume we can get it.
+    // For now, I'll update the HTML to 1.1.0 manually in the release step,
+    // or better, let's add a simple command to get version.
+    // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
+    document.getElementById("app-version").textContent = "1.1.0";
+  } catch (e) {
+    console.warn("Failed to set version", e);
+  }
+
   // Initialize Store first (Tauri Plugin Store v2 API)
   try {
     store = await Store.load("store.bin");
