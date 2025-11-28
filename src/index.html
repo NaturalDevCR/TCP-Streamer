@@ -327,7 +327,39 @@
 
       <!-- Footer with Credits -->
       <div class="app-footer">
-        Made with ♥ by Josue O.A / NaturalDevCR <span style="opacity: 0.5; margin-left: 10px;">v<span id="app-version">1.0.2</span></span>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            Made with ♥ by Josue O.A / NaturalDevCR 
+            <span style="opacity: 0.5;">v<span id="app-version">1.2.0</span></span>
+          </div>
+          <a 
+            href="https://paypal.me/NaturalCloud" 
+            target="_blank" 
+            class="donate-btn"
+            title="Support this project"
+            style="
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              padding: 6px 12px;
+              background: linear-gradient(135deg, #0070ba, #1546a0);
+              color: white;
+              text-decoration: none;
+              border-radius: 6px;
+              font-size: 12px;
+              font-weight: 600;
+              transition: all 0.3s ease;
+              box-shadow: 0 2px 8px rgba(0, 112, 186, 0.3);
+            "
+            onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0, 112, 186, 0.5)';"
+            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0, 112, 186, 0.3)';"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+            Donate via PayPal
+          </a>
+        </div>
       </div>
     </div>
     <div id="toast-container"></div>
