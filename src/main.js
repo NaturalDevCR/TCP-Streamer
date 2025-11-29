@@ -36,6 +36,7 @@ let logsContainer, clearLogsBtn, statsBar;
 let tabBtns, tabPanes;
 let loopbackMode = false;
 let loopbackModeInput;
+let networkPresetSelect, adaptiveBufferCheck, minBufferInput, maxBufferInput;
 
 const MAX_LOGS = 100;
 
@@ -98,6 +99,50 @@ function clearLogs() {
   logsContainer.innerHTML = "";
 }
 
+// Network Presets
+const PRESETS = {
+  ethernet: {
+    name: "Ethernet (Stable)",
+    ring_buffer_duration: 2000,
+    chunk_size: 512,
+    min_buffer: 2000,
+    max_buffer: 6000,
+    adaptive_buffer: true,
+  },
+  wifi: {
+    name: "WiFi (Standard)",
+    ring_buffer_duration: 4000,
+    chunk_size: 1024,
+    min_buffer: 3000,
+    max_buffer: 10000,
+    adaptive_buffer: true,
+  },
+  "wifi-poor": {
+    name: "WiFi (Poor Signal)",
+    ring_buffer_duration: 8000,
+    chunk_size: 2048,
+    min_buffer: 5000,
+    max_buffer: 15000,
+    adaptive_buffer: true,
+  },
+};
+
+function applyNetworkPreset(presetId) {
+  if (presetId === "custom") return;
+
+  const preset = PRESETS[presetId];
+  if (!preset) return;
+
+  ringBufferDurationSelect.value = preset.ring_buffer_duration;
+  chunkSizeSelect.value = preset.chunk_size;
+  minBufferInput.value = preset.min_buffer;
+  maxBufferInput.value = preset.max_buffer;
+  adaptiveBufferCheck.checked = preset.adaptive_buffer;
+
+  saveSettings();
+  showNotification(`Applied ${preset.name} preset`, "success");
+}
+
 // Toast Notifications
 function showNotification(message, type = "success") {
   const container = document.getElementById("toast-container");
@@ -155,6 +200,56 @@ function updateStats(stats) {
   );
   document.getElementById("stat-bitrate").textContent =
     stats.bitrate_kbps.toFixed(1) + " kbps";
+}
+
+function updateQualityDisplay(quality) {
+  const indicator = document.querySelector(".quality-indicator");
+  const value = document.getElementById("stat-quality");
+  const jitter = document.getElementById("stat-jitter");
+
+  // Update quality score with color
+  let color, text;
+  if (quality.score >= 90) {
+    color = "#00ff88";
+    text = "Excellent";
+  } else if (quality.score >= 70) {
+    color = "#ffcc00";
+    text = "Good";
+  } else if (quality.score >= 50) {
+    color = "#ff9900";
+    text = "Fair";
+  } else {
+    color = "#ff4444";
+    text = "Poor";
+  }
+
+  if (indicator) indicator.style.color = color;
+  if (value)
+    value.innerHTML = `<span class="quality-indicator" style="color: ${color}">●</span> ${text} (${quality.score})`;
+  if (jitter) jitter.textContent = quality.jitter.toFixed(1) + " ms";
+
+  // Show warning BOTH as toast AND log if quality drops
+  if (quality.score < 50 && !window.qualityWarningShown) {
+    const warningMsg = `Network quality degraded to ${
+      quality.score
+    }. Jitter: ${quality.jitter.toFixed(1)}ms`;
+    showNotification(warningMsg, "warning");
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      level: "warning",
+      message: warningMsg,
+    });
+    window.qualityWarningShown = true;
+  } else if (quality.score >= 70 && window.qualityWarningShown) {
+    const recoveryMsg = `Network quality recovered to ${quality.score}`;
+    showNotification(recoveryMsg, "success");
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      level: "info",
+      message: recoveryMsg,
+    });
+    window.qualityWarningShown = false;
+  }
 }
 
 async function loadDevices() {
@@ -242,6 +337,14 @@ async function loadSettings() {
       silenceTimeoutSeconds = settings.silence_timeout;
     else silenceTimeoutSeconds = 0; // Default value (disabled)
 
+    // Adaptive buffer and network preset settings
+    if (settings.adaptive_buffer !== undefined)
+      adaptiveBufferCheck.checked = settings.adaptive_buffer;
+    if (settings.min_buffer) minBufferInput.value = settings.min_buffer;
+    if (settings.max_buffer) maxBufferInput.value = settings.max_buffer;
+    if (settings.network_preset)
+      networkPresetSelect.value = settings.network_preset;
+
     // EQ and Gain removed
 
     // Set profile dropdown
@@ -281,6 +384,10 @@ async function saveSettings() {
       chunk_size: parseInt(chunkSizeSelect.value),
       silence_threshold: silenceThreshold,
       silence_timeout: silenceTimeoutSeconds,
+      adaptive_buffer: adaptiveBufferCheck.checked,
+      min_buffer: parseInt(minBufferInput.value),
+      max_buffer: parseInt(maxBufferInput.value),
+      network_preset: networkPresetSelect.value,
     };
 
     // Get existing profiles
@@ -481,9 +588,18 @@ async function toggleStream() {
         silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
         silenceTimeoutSeconds: silenceTimeoutSeconds,
         isLoopback: !!isLoopback, // Force boolean to prevent undefined
+        enableAdaptiveBuffer: adaptiveBufferCheck.checked,
+        minBufferMs: parseInt(minBufferInput.value),
+        maxBufferMs: parseInt(maxBufferInput.value),
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
+
+      // Initialize buffer display with starting ring buffer size
+      const bufferStat = document.getElementById("stat-buffer");
+      if (bufferStat) {
+        bufferStat.textContent = ringBufferDuration + " ms";
+      }
       deviceSelect.disabled = true;
       ipInput.disabled = true;
       portInput.disabled = true;
@@ -562,10 +678,28 @@ async function init() {
   chunkSizeSelect = document.getElementById("chunk-size-select");
   const silenceThresholdInput = document.getElementById("silence-threshold");
   const silenceTimeoutInput = document.getElementById("silence-timeout");
+
+  // Update threshold marker when value changes
+  if (silenceThresholdInput) {
+    silenceThresholdInput.addEventListener("input", (e) => {
+      const thresholdMarker = document.getElementById("threshold-marker");
+      if (thresholdMarker) {
+        const maxRms = 500;
+        const thresholdValue = parseInt(e.target.value) || 5;
+        const thresholdPercent = Math.min((thresholdValue / maxRms) * 100, 100);
+        thresholdMarker.style.left = thresholdPercent + "%";
+      }
+      silenceThreshold = parseFloat(e.target.value);
+    });
+  }
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");
   loopbackModeInput = document.getElementById("loopback-mode");
+  networkPresetSelect = document.getElementById("network-preset");
+  adaptiveBufferCheck = document.getElementById("adaptive-buffer-check");
+  minBufferInput = document.getElementById("min-buffer");
+  maxBufferInput = document.getElementById("max-buffer");
 
   // Tabs
   tabBtns = document.querySelectorAll(".tab-btn");
@@ -600,6 +734,50 @@ async function init() {
 
   await listen("stats-event", (event) => {
     updateStats(event.payload);
+  });
+
+  await listen("quality-event", (event) => {
+    updateQualityDisplay(event.payload);
+  });
+
+  await listen("buffer-resize-event", (event) => {
+    const bufferStat = document.getElementById("stat-buffer");
+    if (bufferStat) {
+      bufferStat.textContent = event.payload.new_size_ms + " ms";
+    }
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      level: "info",
+      message: `Buffer resized to ${event.payload.new_size_ms}ms: ${event.payload.reason}`,
+    });
+  });
+
+  await listen("volume-level", (event) => {
+    const volumeBar = document.getElementById("volume-bar");
+    const volumeValue = document.getElementById("volume-value");
+    const thresholdMarker = document.getElementById("threshold-marker");
+
+    if (volumeBar && volumeValue) {
+      const rms = event.payload;
+      const maxRms = 500; // Max value for visualization
+      const percentage = Math.min((rms / maxRms) * 100, 100);
+
+      volumeBar.style.width = percentage + "%";
+      volumeValue.textContent = Math.round(rms);
+
+      // Update threshold marker position
+      if (thresholdMarker) {
+        const thresholdInput = document.getElementById("silence-threshold");
+        if (thresholdInput) {
+          const thresholdValue = parseInt(thresholdInput.value) || 5;
+          const thresholdPercent = Math.min(
+            (thresholdValue / maxRms) * 100,
+            100
+          );
+          thresholdMarker.style.left = thresholdPercent + "%";
+        }
+      }
+    }
   });
 
   await listen("health-event", (event) => {
@@ -738,6 +916,13 @@ async function init() {
     btnCancelProfile.addEventListener("click", () => {
       newProfileContainer.style.display = "none";
       newProfileName.value = "";
+    });
+  }
+
+  // Network preset listener
+  if (networkPresetSelect) {
+    networkPresetSelect.addEventListener("change", (e) => {
+      applyNetworkPreset(e.target.value);
     });
   }
 

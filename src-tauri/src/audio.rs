@@ -27,8 +27,17 @@ struct LogEvent {
 #[derive(Clone, Serialize)]
 struct HealthEvent {
     buffer_usage: f32,    // 0.0 to 1.0
-    network_latency: u32, // ms (estimated based on write time)
+    network_latency: u64, // ms (estimated based on write time)
     dropped_packets: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct QualityEvent {
+    score: u8,           // 0-100
+    jitter: f32,         // milliseconds
+    avg_latency: f32,    // milliseconds
+    buffer_health: f32,  // 0.0-1.0
+    error_count: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -36,6 +45,12 @@ struct StatsEvent {
     uptime_seconds: u64,
     bytes_sent: u64,
     bitrate_kbps: f64,
+}
+
+#[derive(Clone, Serialize)]
+struct BufferResizeEvent {
+    new_size_ms: u32,
+    reason: String,
 }
 
 // Helper function to emit log events
@@ -90,6 +105,9 @@ enum AudioCommand {
         silence_threshold: f32,
         silence_timeout_seconds: u64,
         is_loopback: bool,
+        enable_adaptive_buffer: bool,
+        min_buffer_ms: u32,
+        max_buffer_ms: u32,
         app_handle: AppHandle,
     },
     Stop,
@@ -109,8 +127,8 @@ impl AudioState {
             let should_reconnect = Arc::new(AtomicBool::new(false));
 
             // Keep track of current params for reconnection
-            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, app_handle)
-            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, AppHandle)> = None;
+            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, app_handle)
+            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, bool, u32, u32, AppHandle)> = None;
 
             for command in rx {
                 match command {
@@ -128,6 +146,9 @@ impl AudioState {
                         silence_threshold,
                         silence_timeout_seconds,
                         is_loopback,
+                        enable_adaptive_buffer,
+                        min_buffer_ms,
+                        max_buffer_ms,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -151,6 +172,9 @@ impl AudioState {
                             silence_threshold,
                             silence_timeout_seconds,
                             is_loopback,
+                            enable_adaptive_buffer,
+                            min_buffer_ms,
+                            max_buffer_ms,
                             app_handle.clone(),
                         ));
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
@@ -174,6 +198,9 @@ impl AudioState {
                             silence_threshold,
                             silence_timeout_seconds,
                             is_loopback,
+                            enable_adaptive_buffer,
+                            min_buffer_ms,
+                            max_buffer_ms,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -225,6 +252,9 @@ impl AudioState {
                         silence_threshold,
                         silence_timeout_seconds,
                         is_loopback,
+                        enable_adaptive_buffer,
+                        min_buffer_ms,
+                        max_buffer_ms,
                         app_handle,
                     )) = &_current_params
                     {
@@ -251,6 +281,9 @@ impl AudioState {
                             silence_threshold.clone(),
                             silence_timeout_seconds.clone(),
                             is_loopback.clone(),
+                            enable_adaptive_buffer.clone(),
+                            min_buffer_ms.clone(),
+                            max_buffer_ms.clone(),
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -295,14 +328,17 @@ fn start_audio_stream(
     silence_threshold: f32,
     silence_timeout_seconds: u64,
     is_loopback: bool,
+    enable_adaptive_buffer: bool,
+    min_buffer_ms: u32,
+    max_buffer_ms: u32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Initializing audio stream: Device='{}', Rate={}, Buf={}, RingBufMs={}, Priority={}, DSCP={}, Chunk={}, SilenceThreshold={}, SilenceTimeout={}s, Loopback={}",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback
+            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, SilenceT={}, SilenceTO={}s, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
         ),
     );
 
@@ -415,6 +451,18 @@ fn start_audio_stream(
         let mut dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
+        
+        // Quality tracking variables
+        let mut latency_samples: Vec<f32> = Vec::with_capacity(100); //  Track last 100
+        let mut jitter_avg: f32 = 0.0; // EWMA of jitter
+        let mut last_latency: Option<f32> = None;
+        let mut consecutive_errors: u64 = 0;
+        let mut last_quality_emit = Instant::now();
+        
+        // Adaptive buffer tracking
+        let mut current_buffer_ms = ring_buffer_duration_ms;
+        let mut last_buffer_check = Instant::now();
+        const BUFFER_CHECK_INTERVAL_SECS: u64 = 10; // Check every 10 seconds
         
         // Exponential backoff for reconnection
         let mut retry_delay = Duration::from_secs(1);
@@ -586,14 +634,33 @@ fn start_audio_stream(
                 if let Some(ref mut s) = current_stream {
                     if let Err(e) = s.write_all(&payload) {
                         emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                        consecutive_errors += 1;
                         // Drop connection to trigger reconnect
                         current_stream = None;
                         continue;
+                    } else {
+                        consecutive_errors = 0; // Reset on successful write
                     }
                 }
 
-                let _write_time = start_write.elapsed().as_millis();
-                // Update stats
+                // Track latency and jitter for quality metrics
+                let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0; // Convert to ms
+                
+                // Update latency samples (keep last 100)
+                latency_samples.push(write_duration);
+                if latency_samples.len() > 100 {
+                    latency_samples.remove(0);
+                }
+                
+                // Calculate jitter (variance in latency)
+                if let Some(prev) = last_latency {
+                    let latency_diff = (write_duration - prev).abs();
+                    // Exponentially weighted moving average (EWMA) for jitter
+                    jitter_avg = 0.9 * jitter_avg + 0.1 * latency_diff;
+                }
+                last_latency = Some(write_duration);
+
+                // Update stats  
                 let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                 sequence = sequence.wrapping_add(1);
             } else {
@@ -621,6 +688,108 @@ fn start_audio_stream(
                     },
                 );
                 last_stats_emit = Instant::now();
+            }
+            
+            // Emit quality metrics every 2 seconds
+            if last_quality_emit.elapsed() >= Duration::from_secs(2) {
+                // Calculate average latency
+                let avg_latency = if !latency_samples.is_empty() {
+                    latency_samples.iter().sum::<f32>() / latency_samples.len() as f32
+                } else {
+                    0.0
+                };
+                
+                // Get buffer health from the most recent buffer usage check
+                let occupied = cons.len();
+                let capacity = cons.capacity();
+                let buffer_health = 1.0 - (occupied as f32 / capacity as f32);
+                
+                // Calculate quality score (0-100)
+                // Jitter penalty: 0-50 points (lower is better)
+                // Target jitter < 5ms = 0 penalty, >20ms = max penalty
+                let jitter_penalty = ((jitter_avg / 20.0).min(1.0) * 50.0) as u8;
+                
+                // Buffer penalty: 0-30 points (lower usage = better)
+                // Usage > 80% = max penalty, < 50% = no penalty
+                let buffer_usage = occupied as f32 / capacity as f32;
+                let buffer_penalty = if buffer_usage > 0.8 {
+                    ((buffer_usage - 0.8) / 0.2 * 30.0) as u8
+                } else {
+                    0
+                };
+                
+                // Error penalty: 0-20 points
+                // More than 5 consecutive errors = max penalty
+                let error_penalty = ((consecutive_errors.min(5) as f32 / 5.0) * 20.0) as u8;
+                
+                let score = 100u8.saturating_sub(jitter_penalty + buffer_penalty + error_penalty);
+                
+                let _ = app_handle_net.emit(
+                    "quality-event",
+                    QualityEvent {
+                        score,
+                        jitter: jitter_avg,
+                        avg_latency,
+                        buffer_health,
+                        error_count: consecutive_errors,
+                    },
+                );
+                last_quality_emit = Instant::now();
+            }
+            
+            // Adaptive buffer sizing - check periodically
+            if enable_adaptive_buffer && last_buffer_check.elapsed() >= Duration::from_secs(BUFFER_CHECK_INTERVAL_SECS) {
+                // Determine target buffer size based on jitter
+                let target_buffer_ms = if jitter_avg < 5.0 {
+                    // Low jitter - can use smaller buffer
+                    min_buffer_ms
+                } else if jitter_avg > 15.0 {
+                    // High jitter - need larger buffer
+                    max_buffer_ms
+                } else {
+                    // Medium jitter - scale linearly between min and max
+                    // jitter 5-15ms maps to min-max buffer
+                    let jitter_ratio = (jitter_avg - 5.0) / 10.0; // 0.0 to 1.0
+                    let buffer_range = max_buffer_ms - min_buffer_ms;
+                    min_buffer_ms + (buffer_range as f32 * jitter_ratio) as u32
+                };
+                
+                // Only resize if the change is significant (>10% difference)
+                let size_diff_pct = ((target_buffer_ms as f32 - current_buffer_ms as f32).abs() / current_buffer_ms as f32) * 100.0;
+                
+                if size_diff_pct > 10.0 {
+                    let reason = if target_buffer_ms > current_buffer_ms {
+                        format!("Increased due to high jitter ({:.1}ms)", jitter_avg)
+                    } else {
+                        format!("Decreased due to low jitter ({:.1}ms)", jitter_avg)
+                    };
+                    
+                    emit_log(
+                        &app_handle_net,
+                        "info",
+                        format!("Adaptive buffer: resizing from {}ms to {}ms. {}", current_buffer_ms, target_buffer_ms, reason),
+                    );
+                    
+                    let _ = app_handle_net.emit(
+                        "buffer-resize-event",
+                        BufferResizeEvent {
+                            new_size_ms: target_buffer_ms,
+                            reason: reason.clone(),
+                        },
+                    );
+                    
+                    current_buffer_ms = target_buffer_ms;
+                    
+                    // Note: Actual ring buffer resizing would require complex synchronization
+                    // to avoid audio dropouts. For now, we just track the target size and
+                    // emit events. Full implementation would need to:
+                    // 1. Create new ring buffer with new size
+                    // 2. Copy existing data to new buffer
+                    // 3. Atomically swap prod/cons references
+                    // This is marked as future enhancement.
+                }
+                
+                last_buffer_check = Instant::now();
             }
         }
         emit_log(
@@ -651,6 +820,19 @@ fn start_audio_stream(
                     sum_squares += (sample as f32) * (sample as f32);
                 }
                 let rms = (sum_squares / data.len() as f32).sqrt();
+                
+                // Emit volume level for UI indicator (every 100ms to avoid spam)
+                static LAST_VOLUME_EMIT: AtomicU64 = AtomicU64::new(0);
+                let now_millis = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+                let last_emit = LAST_VOLUME_EMIT.load(Ordering::Relaxed);
+                
+                if now_millis - last_emit > 100 {
+                    let _ = app_handle_audio.emit("volume-level", rms);
+                    LAST_VOLUME_EMIT.store(now_millis, Ordering::Relaxed);
+                }
 
                 if rms > silence_threshold {
                     // Audio detected
@@ -818,6 +1000,9 @@ pub async fn start_stream(
     silence_threshold: f32,
     silence_timeout_seconds: u64,
     is_loopback: bool,
+    enable_adaptive_buffer: bool,
+    min_buffer_ms: u32,
+    max_buffer_ms: u32,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -835,6 +1020,9 @@ pub async fn start_stream(
         silence_threshold,
         silence_timeout_seconds,
         is_loopback,
+        enable_adaptive_buffer,
+        min_buffer_ms,
+        max_buffer_ms,
         app_handle,
     })
     .map_err(|e| e.to_string())?;

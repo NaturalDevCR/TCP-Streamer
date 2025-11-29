@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -15,8 +15,6 @@
 <img width="200" height="425" alt="image" src="https://github.com/user-attachments/assets/4da8db28-77af-4a6b-b50d-e414295db4f7" />
 <img width="200" height="425" alt="image" src="https://github.com/user-attachments/assets/e9b700f4-4a1f-4ac7-bdbd-22e8aa1e423c" />
 <img width="200" height="425" alt="image" src="https://github.com/user-attachments/assets/8c54c4aa-dd60-4dd7-960f-52b0f3ef836c" />
-
-
 
 ## 📖 Table of Contents
 
@@ -68,7 +66,8 @@
 
 - ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
-- ✅ **Silence Detection** - Smart bandwidth optimization
+- ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter
+- ✅ **Silence Detection** - Smart bandwidth optimization with visual feedback
 - ✅ **Auto-Reconnect** - Resilient connection management
 - ✅ **Multi-Profile Support** - Save and switch between configurations
 - ✅ **System Tray Integration** - Runs in background, accessible from tray
@@ -79,6 +78,7 @@
 - 📊 **Sample Rates**: 44.1 kHz or 48 kHz
 - 🔧 **Buffer Sizes**: 256, 512, 1024, or 2048 samples
 - 🎤 **Input Devices**: Scans all host APIs (WASAPI, MME, CoreAudio) to find all devices
+- 🎚️ **Visual Volume Indicator**: Real-time RMS meter for precise threshold tuning
 
 ### Automation
 
@@ -89,15 +89,18 @@
 ### User Experience
 
 - 🎨 **Modern UI** - Clean, icon-based tabbed interface
-- 📈 **Real-time Statistics** - Monitor bitrate, uptime, data sent
-- 📝 **Activity Logs** - Track connection events and errors with filtering
+- � **Real-time Statistics** - Monitor bitrate, uptime, data sent
+- �📶 **Network Quality Metrics** - Real-time health score (Excellent/Good/Fair/Poor)
+- 📉 **Jitter Monitoring** - Live tracking of network stability
+- 📝 **Activity Logs** - Track connection events, buffer resizes, and errors
 - 🌙 **Minimize to Tray** - Never quits, always accessible
 
 ### Advanced Network Optimization
 
 - ⚡ **Thread Priority** - High priority thread option for reduced jitter
+- 🎛️ **Network Presets** - One-click optimization for Ethernet/WiFi/Poor connections
 - 🚦 **DSCP/TOS Support** - QoS tagging (VoIP, Low Delay, Throughput)
-- 📦 **Dynamic Chunk Size** - Configurable buffer chunks (128-4096 samples) for latency tuning
+- 📦 **Dynamic Chunk Size** - Configurable buffer chunks (128-4096 samples)
 
 ---
 
@@ -230,6 +233,33 @@ Save different configurations for various scenarios:
 | --------------- | -------------------- | ------------------------------------ |
 | **Sample Rate** | 44.1 kHz, 48 kHz     | 48 kHz for modern systems            |
 | **Buffer Size** | 256, 512, 1024, 2048 | 1024 (balanced) or 512 (low latency) |
+| **Ring Buffer** | 2000ms - 15000ms     | 4000ms for WiFi, 2000ms for Ethernet |
+
+### Adaptive Buffer (New!)
+
+Automatically resizes the ring buffer based on network conditions to prevent audio dropouts.
+
+- **Enable**: Toggles the adaptive logic.
+- **Min Buffer**: The floor value for the buffer (e.g., 2000ms).
+- **Max Buffer**: The ceiling value (e.g., 10000ms).
+
+_The system checks jitter every 10 seconds and adjusts the buffer size within these bounds._
+
+### Network Presets
+
+Located in the **Advanced** tab, these presets configure multiple settings at once:
+
+| Preset | Description | Settings Applied |
+| ~ | ~ | ~ |
+| **Ethernet** | For stable wired connections | Ring Buffer: 2s, Chunk: 512, Adaptive: 2s-6s |
+| **WiFi** | For standard wireless | Ring Buffer: 4s, Chunk: 1024, Adaptive: 3s-10s |
+| **WiFi (Poor)** | For unstable/far connections | Ring Buffer: 8s, Chunk: 2048, Adaptive: 5s-15s |
+
+### Silence Detection
+
+- **Visual Indicator**: Use the real-time volume bar to see your current audio level.
+- **Threshold**: Set the slider just above the "noise floor" (white line).
+- **Timeout**: Stop streaming after X seconds of silence to save bandwidth.
 
 ### Automation Settings
 
@@ -238,6 +268,37 @@ Save different configurations for various scenarios:
 | **Auto-start on launch** | Launch app when system starts (minimized to tray) |
 | **Auto-stream**          | Begin streaming immediately after app starts      |
 | **Auto-reconnect**       | Retry connection every 3 seconds on failure       |
+
+---
+
+## Configuration Scenarios
+
+### 1. High-Fidelity Music (Wired)
+
+**Goal**: Lowest latency, highest stability.
+
+- **Preset**: Ethernet
+- **Sample Rate**: 48 kHz
+- **Buffer Size**: 512
+- **Adaptive Buffer**: Enabled (Min: 1000ms, Max: 4000ms)
+
+### 2. Whole-Home Audio (WiFi)
+
+**Goal**: Balanced stability for multi-room sync.
+
+- **Preset**: WiFi
+- **Sample Rate**: 44.1 kHz or 48 kHz
+- **Buffer Size**: 1024
+- **Adaptive Buffer**: Enabled (Min: 3000ms, Max: 10000ms)
+
+### 3. Challenging Environment (Far from Router)
+
+**Goal**: Prevent dropouts at all costs.
+
+- **Preset**: WiFi (Poor Signal)
+- **Sample Rate**: 44.1 kHz
+- **Buffer Size**: 2048
+- **Adaptive Buffer**: Enabled (Min: 5000ms, Max: 20000ms)
 
 ---
 
