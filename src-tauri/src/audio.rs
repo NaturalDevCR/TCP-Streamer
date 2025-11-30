@@ -7,7 +7,7 @@ use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use std::io::Write;
 use std::net::SocketAddr;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -52,6 +52,10 @@ struct BufferResizeEvent {
     new_size_ms: u32,
     reason: String,
 }
+
+// Global Atomic Settings for Dynamic Updates
+static SILENCE_THRESHOLD_BITS: AtomicU32 = AtomicU32::new(0); // f32 stored as u32 bits
+static SILENCE_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(0);
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
@@ -121,7 +125,8 @@ impl AudioState {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
 
-        thread::spawn(move || {
+
+    thread::spawn(move || {
             let mut _current_stream_handle: Option<(cpal::Stream, StreamStats)> = None;
             let mut _reconnect_handle: Option<thread::JoinHandle<()>> = None;
             let should_reconnect = Arc::new(AtomicBool::new(false));
@@ -156,6 +161,10 @@ impl AudioState {
                             drop(stream);
                             drop(stats); // Signals stats thread to stop
                         }
+
+                        // Initialize global settings with new values
+                        SILENCE_THRESHOLD_BITS.store(silence_threshold.to_bits(), Ordering::Relaxed);
+                        SILENCE_TIMEOUT_SECS.store(silence_timeout_seconds, Ordering::Relaxed);
 
                         // Store params for reconnection
                         _current_params = Some((
@@ -455,7 +464,7 @@ fn start_audio_stream(
         // Quality tracking variables
         let mut latency_samples: Vec<f32> = Vec::with_capacity(100); //  Track last 100
         let mut jitter_avg: f32 = 0.0; // EWMA of jitter
-        let mut last_latency: Option<f32> = None;
+        let mut last_write_time: Option<Instant> = None;
         let mut consecutive_errors: u64 = 0;
         let mut last_quality_emit = Instant::now();
         
@@ -643,22 +652,33 @@ fn start_audio_stream(
                     }
                 }
 
-                // Track latency and jitter for quality metrics
-                let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0; // Convert to ms
+                // Track jitter based on Inter-Write Interval
+                // This measures how regular the network allows us to send data.
+                // If the network blocks, the interval between writes increases.
+                let now = Instant::now();
                 
-                // Update latency samples (keep last 100)
+                if let Some(last_time) = last_write_time {
+                    let delta_ms = now.duration_since(last_time).as_micros() as f32 / 1000.0;
+                    
+                    // Expected duration for this chunk of audio
+                    // count is samples (stereo), so frames = count / 2
+                    let frames = count as f32 / 2.0;
+                    let expected_duration_ms = (frames / sample_rate as f32) * 1000.0;
+                    
+                    // Jitter is the deviation from the expected cadence
+                    let diff = (delta_ms - expected_duration_ms).abs();
+                    
+                    // Exponentially weighted moving average (EWMA)
+                    jitter_avg = 0.9 * jitter_avg + 0.1 * diff;
+                }
+                last_write_time = Some(now);
+                
+                // Track latency (still useful to see write duration spikes)
+                let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0;
                 latency_samples.push(write_duration);
                 if latency_samples.len() > 100 {
                     latency_samples.remove(0);
                 }
-                
-                // Calculate jitter (variance in latency)
-                if let Some(prev) = last_latency {
-                    let latency_diff = (write_duration - prev).abs();
-                    // Exponentially weighted moving average (EWMA) for jitter
-                    jitter_avg = 0.9 * jitter_avg + 0.1 * latency_diff;
-                }
-                last_latency = Some(write_duration);
 
                 // Update stats  
                 let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
@@ -805,23 +825,79 @@ fn start_audio_stream(
         emit_log(&app_handle_err, "error", format!("Stream error: {}", err));
     };
 
+
     // RMS Silence Detection State
     let mut silence_start: Option<Instant> = None;
     let mut transmission_stopped = false;
     let app_handle_audio = app_handle.clone();
+    
+    // Smoothing state for UI indicator
+    let mut smoothed_rms: f32 = 0.0;
+    let mut signal_average: f32 = 0.0; // Average volume ONLY when audio is present
+
+    // Define the data callback (closure)
+    // We need to clone the necessary variables to move them into the closure
+    // But since we might need to create the stream twice (retry logic), we need a way to create the callback twice.
+    // However, the callback consumes 'prod' (the ring buffer producer), which is not Clone.
+    // So we cannot easily retry by just calling build_input_stream twice with the same closure.
+    // We would need to recreate the producer or wrap it in a Mutex/Arc, but that defeats the lock-free purpose.
+    
+    // ALTERNATIVE: We can try to build the stream with the config FIRST, and if it fails, try another config.
+    // But build_input_stream takes the callback.
+    
+    // Solution: Since we can't clone the producer, we will try to clone the config and check support BEFORE building?
+    // Or we can just use BufferSize::Default for Loopback ALWAYS?
+    // Loopback is sensitive. Fixed buffer size is often not supported.
+    // Let's try to use Default buffer size for Loopback if Fixed is not strictly required.
+    // The user's "Buffer Size" setting is technically "Hardware Latency". 
+    // If we use Default, we get whatever the system gives (usually 10ms).
+    
+    // Let's modify the config based on is_loopback
+    let stream_config = if is_loopback {
+        // For loopback, prefer Default buffer size to avoid "Invalid Parameter" errors
+        cpal::StreamConfig {
+            channels: 2,
+            sample_rate: cpal::SampleRate(sample_rate),
+            buffer_size: cpal::BufferSize::Default, 
+        }
+    } else {
+        config
+    };
 
     let audio_stream = device
         .build_input_stream(
-            &config,
+            &stream_config,
             move |data: &[i16], _: &_| {
+                // Read dynamic settings
+                let silence_threshold = f32::from_bits(SILENCE_THRESHOLD_BITS.load(Ordering::Relaxed));
+                let silence_timeout_seconds = SILENCE_TIMEOUT_SECS.load(Ordering::Relaxed);
+
                 // Calculate RMS for silence detection
                 let mut sum_squares = 0.0;
                 for &sample in data {
                     sum_squares += (sample as f32) * (sample as f32);
                 }
-                let rms = (sum_squares / data.len() as f32).sqrt();
+                let current_rms = (sum_squares / data.len() as f32).sqrt();
                 
-                // Emit volume level for UI indicator (every 100ms to avoid spam)
+                // 1. Visual Smoothing (Attack/Decay) for the Bar
+                if current_rms > smoothed_rms {
+                    smoothed_rms = 0.5 * current_rms + 0.5 * smoothed_rms;
+                } else {
+                    smoothed_rms = 0.05 * current_rms + 0.95 * smoothed_rms;
+                }
+
+                // 2. Signal Average (Only update when above threshold)
+                // This helps the user see the "average volume of the music" ignoring silence
+                if current_rms > silence_threshold {
+                    if signal_average == 0.0 {
+                        signal_average = current_rms;
+                    } else {
+                        // Very slow moving average for stability
+                        signal_average = 0.01 * current_rms + 0.99 * signal_average;
+                    }
+                }
+                
+                // Emit volume levels for UI (every 100ms)
                 static LAST_VOLUME_EMIT: AtomicU64 = AtomicU64::new(0);
                 let now_millis = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -830,11 +906,31 @@ fn start_audio_stream(
                 let last_emit = LAST_VOLUME_EMIT.load(Ordering::Relaxed);
                 
                 if now_millis - last_emit > 100 {
-                    let _ = app_handle_audio.emit("volume-level", rms);
+                    // Emit JSON payload with both metrics
+                    // We construct a simple JSON string manually to avoid complex struct definitions here
+                    // or just emit a tuple/struct if defined. Let's use a simple format string for now
+                    // or better, emit a struct if we can. 
+                    // Actually, emit() takes a Serialize type. Let's use a tuple or map.
+                    // Or simply emit a custom struct. Let's define a quick struct or use serde_json::json! if available.
+                    // Since we don't want to add deps inside the closure easily, let's just emit a tuple (current, average)
+                    // But the frontend expects a single value currently. We will update frontend.
+                    
+                    #[derive(serde::Serialize, Clone)]
+                    struct VolumePayload {
+                        current: f32,
+                        average: f32,
+                    }
+                    
+                    let _ = app_handle_audio.emit("volume-level", VolumePayload { 
+                        current: smoothed_rms, 
+                        average: signal_average 
+                    });
+                    
                     LAST_VOLUME_EMIT.store(now_millis, Ordering::Relaxed);
                 }
 
-                if rms > silence_threshold {
+                // Use raw RMS for actual threshold logic to be precise
+                if current_rms > silence_threshold {
                     // Audio detected
                     if let Some(start) = silence_start {
                         let duration = start.elapsed();
@@ -844,7 +940,7 @@ fn start_audio_stream(
                                 "info",
                                 format!(
                                     "Audio resumed (RMS: {:.1}) after {:.1}s silence [Threshold: {:.1}]",
-                                    rms, duration.as_secs_f32(), silence_threshold
+                                    current_rms, duration.as_secs_f32(), silence_threshold
                                 ),
                             );
                         }
@@ -865,17 +961,14 @@ fn start_audio_stream(
                             "debug", 
                             format!(
                                 "Silence detected (RMS: {:.2} < Threshold: {:.2})",
-                                rms, silence_threshold
+                                current_rms, silence_threshold
                             )
                         );
                     } else {
                         // Log RMS occasionally even during silence to debug
                         let silence_duration = silence_start.as_ref().unwrap().elapsed();
                         if silence_duration.as_millis() % 5000 < 50 { // Log roughly every 5s
-                             let rms_val = rms; // Capture for closure
-                             // We can't easily emit log here without cloning app_handle again or using a different structure
-                             // But we can use the standard log crate for debugging
-                             debug!("Current RMS: {:.2} (Silence for {:.1}s)", rms_val, silence_duration.as_secs_f32());
+                             // Debug log removed to reduce noise
                         }
                     }
                     
@@ -1027,6 +1120,13 @@ pub async fn start_stream(
     })
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn update_silence_settings(threshold: f32, timeout: u64) {
+    SILENCE_THRESHOLD_BITS.store(threshold.to_bits(), Ordering::Relaxed);
+    SILENCE_TIMEOUT_SECS.store(timeout, Ordering::Relaxed);
+    debug!("Updated silence settings: Threshold={:.1}, Timeout={}s", threshold, timeout);
 }
 
 #[tauri::command]

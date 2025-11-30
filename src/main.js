@@ -22,7 +22,7 @@ let deviceSelect,
   statusBadge,
   statusText;
 let priorityCheck, dscpSelect, chunkSizeSelect;
-let silenceThreshold = 5;
+let silenceThreshold = 0;
 let silenceTimeoutSeconds = 0; // Default to 0 (disabled) to prevent confusion
 let profileSelect,
   btnSaveProfile,
@@ -756,14 +756,21 @@ async function init() {
     const volumeBar = document.getElementById("volume-bar");
     const volumeValue = document.getElementById("volume-value");
     const thresholdMarker = document.getElementById("threshold-marker");
+    const avgValueDisplay = document.getElementById("avg-volume-value"); // New element
 
     if (volumeBar && volumeValue) {
-      const rms = event.payload;
+      const { current, average } = event.payload;
       const maxRms = 500; // Max value for visualization
-      const percentage = Math.min((rms / maxRms) * 100, 100);
 
+      // Update Bar (Current Smoothed)
+      const percentage = Math.min((current / maxRms) * 100, 100);
       volumeBar.style.width = percentage + "%";
-      volumeValue.textContent = Math.round(rms);
+      volumeValue.textContent = Math.round(current);
+
+      // Update Average Display
+      if (avgValueDisplay) {
+        avgValueDisplay.textContent = `Avg: ${Math.round(average)}`;
+      }
 
       // Update threshold marker position
       if (thresholdMarker) {

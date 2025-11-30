@@ -80,7 +80,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             audio::get_input_devices,
             audio::start_stream,
-            audio::stop_stream
+            audio::stop_stream,
+            audio::update_silence_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -18,7 +18,7 @@
       </div>
 
       <!-- Statistics Bar -->
-      <div class="stats-bar" id="stats-bar" style="display: none">
+      <div class="stats-bar" id="stats-bar">
         <div class="stat-item">
           <span class="stat-label">Uptime</span>
           <span class="stat-value" id="stat-uptime">--:--</span>
@@ -193,7 +193,10 @@
                                     <div id="volume-bar" style="height: 100%; width: 0%; background: linear-gradient(to right, #10b981, #3b82f6, #f59e0b, #ef4444); transition: width 0.1s ease-out; border-radius: 12px;"></div>
                                     <div id="threshold-marker" style="position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; left: 5%; box-shadow: 0 0 4px rgba(255,255,255,0.8);"></div>
                                 </div>
-                                <span id="volume-value" style="font-family: 'Fira Code', monospace; font-size: 0.9rem; min-width: 60px; text-align: right; color: var(--accent-color);">0</span>
+                                <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                                    <span id="volume-value" style="font-family: 'Fira Code', monospace; font-size: 0.9rem; min-width: 40px; text-align: right; color: var(--accent-color); font-weight: bold;">0</span>
+                                    <span id="avg-volume-value" style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: rgba(255,255,255,0.5);">Avg: 0</span>
+                                </div>
                             </div>
                             <small style="display: block; margin-top: 8px; color: rgba(255,255,255,0.5); text-align: center;">
                                 White line shows threshold. Volume below = silence detected
@@ -204,7 +207,7 @@
                     <div class="control-group" style="margin-bottom: 16px;">
                         <label for="silence-threshold" style="margin-bottom: 8px; display: block;">Silence Threshold (RMS)</label>
                         <input type="number" id="silence-threshold" 
-                               min="0" max="500" step="1" value="5" 
+                               min="0" max="500" step="1" value="0" 
                                style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
                         <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
                             Lower values = less aggressive silence detection (prevents fade-out cuts). Default: 5
