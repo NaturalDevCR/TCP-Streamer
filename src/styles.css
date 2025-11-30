@@ -309,6 +309,7 @@ input[type="checkbox"]:checked::after {
   font-weight: 600;
   color: var(--accent-color);
   font-family: "Fira Code", "Courier New", monospace;
+  white-space: nowrap;
 }
 
 /* Quality Indicator */

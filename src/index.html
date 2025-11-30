@@ -210,7 +210,7 @@
                     <div class="control-group" style="margin-bottom: 16px;">
                         <label for="silence-threshold" style="margin-bottom: 8px; display: block;">Silence Threshold (RMS)</label>
                         <input type="number" id="silence-threshold" 
-                               min="0" max="500" step="1" value="0" 
+                               min="0" max="10000" step="1" value="0" 
                                style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
                         <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
                             Lower values = less aggressive silence detection (prevents fade-out cuts). Default: 5
@@ -658,7 +658,7 @@ source = tcp://0.0.0.0:4956?name=Bedroom-Laptop&codec=flac&sampleformat=48000:16
         <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;">
           <div style="display: flex; align-items: center; gap: 10px;">
             Made with ♥ by Josue O.A / NaturalDevCR 
-            <span style="opacity: 0.5;">v<span id="app-version">1.5.0</span></span>
+            <span style="opacity: 0.5;">v<span id="app-version">1.5.1</span></span>
           </div>
           <a 
             href="https://paypal.me/NaturalCloud" 
