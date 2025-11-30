@@ -638,7 +638,7 @@ async function init() {
     // For now, I'll update the HTML to 1.1.0 manually in the release step,
     // or better, let's add a simple command to get version.
     // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
-    document.getElementById("app-version").textContent = "1.2.0";
+    document.getElementById("app-version").textContent = "1.5.0";
   } catch (e) {
     console.warn("Failed to set version", e);
   }
@@ -950,6 +950,35 @@ async function init() {
   }
 
   console.log("App initialized");
+
+  // Scroll to Top Button functionality
+  const scrollToTopBtn = document.getElementById("scroll-to-top-btn");
+  const glassPanel = document.querySelector(".glass-panel");
+
+  if (scrollToTopBtn && glassPanel) {
+    // Show/hide button based on scroll position
+    glassPanel.addEventListener("scroll", () => {
+      if (glassPanel.scrollTop > 300) {
+        scrollToTopBtn.classList.add("visible");
+        scrollToTopBtn.style.display = "flex";
+      } else {
+        scrollToTopBtn.classList.remove("visible");
+        setTimeout(() => {
+          if (!scrollToTopBtn.classList.contains("visible")) {
+            scrollToTopBtn.style.display = "none";
+          }
+        }, 300); // Match transition duration
+      }
+    });
+
+    // Scroll to top when button is clicked
+    scrollToTopBtn.addEventListener("click", () => {
+      glassPanel.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    });
+  }
 }
 
 window.addEventListener("DOMContentLoaded", init);

@@ -35,15 +35,9 @@ body {
 }
 
 .glass-panel {
-  background: var(--card-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: var(--glass-border);
-  box-shadow: var(--glass-shadow);
-  border-radius: 16px;
+  background: transparent;
   padding: 24px;
   width: 100%;
-  max-width: 360px;
   height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
@@ -53,23 +47,14 @@ body {
   box-sizing: border-box;
 }
 
-/* Custom scrollbar for glass panel */
+/* Hide scrollbar for glass panel */
+.glass-panel {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
 .glass-panel::-webkit-scrollbar {
-  width: 8px;
-}
-
-.glass-panel::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-}
-
-.glass-panel::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-}
-
-.glass-panel::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  display: none; /* Chrome, Safari, Opera */
 }
 
 .header {
@@ -900,4 +885,127 @@ input:checked + .slider:before {
     opacity: 0;
     transform: translateY(-20px);
   }
+}
+
+/* Documentation Section Styles */
+.doc-section {
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+}
+
+.doc-section h4 {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-top: 18px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+
+.doc-section p {
+  margin: 8px 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.88rem;
+}
+
+.doc-section ul {
+  margin: 10px 0;
+  padding-left: 20px;
+  list-style-type: none;
+}
+
+.doc-section ul li {
+  position: relative;
+  margin-bottom: 8px;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.87rem;
+}
+
+.doc-section ul li::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--accent-color);
+  font-weight: bold;
+}
+
+.doc-section ul li strong {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.doc-section code {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-color);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Fira Code", "Courier New", monospace;
+  font-size: 0.85rem;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.doc-section pre {
+  margin: 12px 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.doc-section ol {
+  margin: 10px 0;
+  padding-left: 24px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.doc-section ol li {
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.87rem;
+}
+
+/* Scroll to Top Button */
+.scroll-to-top-btn {
+  position: fixed;
+  bottom: 90px;
+  right: 24px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  transition: all 0.3s ease;
+  z-index: 1000;
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.scroll-to-top-btn.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.scroll-to-top-btn:hover {
+  background: var(--accent-color);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.6);
+}
+
+.scroll-to-top-btn:active {
+  transform: translateY(-1px);
+}
+
+.scroll-to-top-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.scroll-to-top-btn:hover svg {
+  transform: translateY(-2px);
 }

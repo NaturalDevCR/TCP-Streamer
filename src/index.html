@@ -64,6 +64,9 @@
         <button class="tab-btn" data-tab="tab-logs" data-tooltip="Logs">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
         </button>
+        <button class="tab-btn" data-tab="tab-docs" data-tooltip="Documentation">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        </button>
       </div>
 
       <div class="tab-content">
@@ -302,10 +305,11 @@
                 <span class="checkmark"></span>
                 Auto-stream on load
               </label>
-              <div class="form-group checkbox-group">
+              <label class="checkbox-container">
                 <input type="checkbox" id="autoreconnect-check" />
-                <label for="autoreconnect-check">Auto-Reconnect</label>
-              </div>
+                <span class="checkmark"></span>
+                Auto-Reconnect
+              </label>
 
               </div>
             </div>
@@ -360,7 +364,7 @@
           </div>
         </div>
 
-        <!-- Tab 4: Logs -->
+        <!-- Tab: Logs -->
         <div class="tab-pane" id="tab-logs">
           <div class="settings-card" style="margin-top: 0">
             <div
@@ -396,6 +400,250 @@
             </div>
           </div>
         </div>
+
+        <!-- Tab: Documentation -->
+        <div class="tab-pane" id="tab-docs">
+          <div class="settings-card">
+            <h3>📚 Documentation</h3>
+            <div style="line-height: 1.6; color: rgba(255,255,255,0.8);">
+              <p style="margin-top: 0;">Welcome to TCP Streamer! This guide will help you understand each setting and optimize your streaming experience.</p>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>🎯 Audio Configuration</h3>
+            <div class="doc-section">
+              <h4>Sample Rate</h4>
+              <p>The number of audio samples captured per second.</p>
+              <ul>
+                <li><strong>48 kHz (Recommended)</strong>: Standard for professional audio and video production</li>
+                <li><strong>44.1 kHz</strong>: CD quality, slightly lower bandwidth</li>
+              </ul>
+
+              <h4>Buffer Size</h4>
+              <p>Controls the audio processing chunk size. Smaller = lower latency, larger = more stability.</p>
+              <ul>
+                <li><strong>Low (256)</strong>: Minimal latency, requires stable system</li>
+                <li><strong>Medium (512)</strong>: Balanced performance</li>
+                <li><strong>High (1024)</strong>: Recommended for most users</li>
+                <li><strong>Max (2048)</strong>: Use if experiencing audio glitches</li>
+              </ul>
+
+              <h4>Ring Buffer</h4>
+              <p>Internal buffer for smooth audio capture.</p>
+              <ul>
+                <li><strong>Balanced (4000ms)</strong>: Best for most scenarios</li>
+                <li><strong>High/Max</strong>: Use if CPU usage is high or system is under load</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>🔄 Adaptive Buffer</h3>
+            <div class="doc-section">
+              <p>Automatically adjusts buffer size based on network jitter to maintain optimal quality.</p>
+              <h4>When to enable:</h4>
+              <ul>
+                <li>Streaming over WiFi with variable signal strength</li>
+                <li>Network conditions are unpredictable</li>
+                <li>Experience occasional stuttering</li>
+              </ul>
+              <h4>Settings:</h4>
+              <ul>
+                <li><strong>Min Buffer</strong>: Lowest buffer size (lower = less latency)</li>
+                <li><strong>Max Buffer</strong>: Highest buffer size (higher = more stability)</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>🔇 Silence Detection</h3>
+            <div class="doc-section">
+              <p>Automatically stops transmission when no audio is detected.</p>
+              <h4>Silence Threshold</h4>
+              <p>Audio level (RMS) below which is considered silence. Higher values = more aggressive detection.</p>
+              <ul>
+                <li><strong>0</strong>: Disabled, always transmit</li>
+                <li><strong>5-10</strong>: Catch complete silence only</li>
+                <li><strong>10-50</strong>: Detect quiet audio (may cut fade-outs)</li>
+              </ul>
+
+              <h4>Silence Timeout</h4>
+              <p>How long (in seconds) silence must persist before stopping transmission.</p>
+              <ul>
+                <li><strong>0</strong>: Never stop, always transmit</li>
+                <li><strong>5-10 seconds</strong>: Good for music with pauses</li>
+                <li><strong>30+ seconds</strong>: Only stop on extended silence</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>⚡ Network Optimization</h3>
+            <div class="doc-section">
+              <h4>DSCP Strategy</h4>
+              <p>Network packet priority marking (Quality of Service).</p>
+              <ul>
+                <li><strong>VoIP (EF)</strong>: Highest priority, recommended for audio</li>
+                <li><strong>Low Delay</strong>: Good for real-time applications</li>
+                <li><strong>Best Effort</strong>: No special priority</li>
+              </ul>
+
+              <h4>Chunk Size</h4>
+              <p>Number of samples sent per network packet.</p>
+              <ul>
+                <li><strong>128-256</strong>: Ultra-low latency, requires excellent network</li>
+                <li><strong>512 (Recommended)</strong>: Balanced latency/stability</li>
+                <li><strong>1024-4096</strong>: Maximum stability for poor networks</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>🎬 Optimization Scenarios</h3>
+            <div class="doc-section">
+              <h4>Scenario 1: Home Ethernet (Low Latency)</h4>
+              <ul>
+                <li>Sample Rate: 48 kHz</li>
+                <li>Buffer Size: Low (256) or Medium (512)</li>
+                <li>Ring Buffer: Balanced (4000ms)</li>
+                <li>Adaptive Buffer: Disabled</li>
+                <li>DSCP: VoIP (EF)</li>
+                <li>Chunk Size: 512</li>
+              </ul>
+
+              <h4>Scenario 2: WiFi/Wireless (Stable)</h4>
+              <ul>
+                <li>Sample Rate: 48 kHz</li>
+                <li>Buffer Size: High (1024)</li>
+                <li>Ring Buffer: High (8000ms)</li>
+                <li>Adaptive Buffer: Enabled (Min: 2000, Max: 10000)</li>
+                <li>DSCP: VoIP (EF)</li>
+                <li>Chunk Size: 1024</li>
+              </ul>
+
+              <h4>Scenario 3: Poor Network (Maximum Stability)</h4>
+              <ul>
+                <li>Sample Rate: 44.1 kHz (lower bandwidth)</li>
+                <li>Buffer Size: Max (2048)</li>
+                <li>Ring Buffer: Max (15000ms)</li>
+                <li>Adaptive Buffer: Enabled (Min: 5000, Max: 20000)</li>
+                <li>DSCP: VoIP (EF)</li>
+                <li>Chunk Size: 2048 or 4096</li>
+              </ul>
+
+              <h4>Scenario 4: Music Streaming (Quality Priority)</h4>
+              <ul>
+                <li>Sample Rate: 48 kHz</li>
+                <li>Buffer Size: High (1024)</li>
+                <li>Ring Buffer: High (8000ms)</li>
+                <li>Silence Detection: Threshold 5, Timeout 10 seconds</li>
+                <li>Adaptive Buffer: Enabled for network fluctuations</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>💡 Tips & Troubleshooting</h3>
+            <div class="doc-section">
+              <h4>Audio Stuttering/Dropouts</h4>
+              <ul>
+                <li>Increase Buffer Size to High or Max</li>
+                <li>Increase Ring Buffer duration</li>
+                <li>Enable Adaptive Buffer</li>
+                <li>Increase Chunk Size</li>
+              </ul>
+
+              <h4>Too Much Latency</h4>
+              <ul>
+                <li>Decrease Buffer Size</li>
+                <li>Decrease Chunk Size (if network is stable)</li>
+                <li>Use wired Ethernet instead of WiFi</li>
+              </ul>
+
+              <h4>Network Congestion</h4>
+              <ul>
+                <li>Ensure DSCP is set to VoIP (EF)</li>
+                <li>Lower Sample Rate to 44.1 kHz</li>
+                <li>Enable High Priority Thread (Advanced tab)</li>
+              </ul>
+
+              <h4>Windows Loopback Issues</h4>
+              <ul>
+                <li>Make sure speakers/headphones are connected</li>
+                <li>Check Windows sound settings</li>
+                <li>Try different audio devices</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>🔌 Snapcast Server Configuration</h3>
+            <div class="doc-section">
+              <p>To use TCP-Streamer with Snapcast, you need to configure TCP sources in your Snapcast server configuration file.</p>
+              
+              <h4>Configuration File Location</h4>
+              <ul>
+                <li><strong>Linux</strong>: <code>/etc/snapserver.conf</code></li>
+                <li><strong>Docker</strong>: Mount configuration file to <code>/etc/snapserver.conf</code></li>
+              </ul>
+
+              <h4>Basic Stream Settings</h4>
+              <p>Add these global stream settings to your snapserver.conf:</p>
+              <pre style="background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5; color: #e0e0e0;">[stream]
+buffer = 5000
+chunk_ms = 20
+codec = flac</pre>
+
+              <h4>TCP Source Configuration</h4>
+              <p>Each TCP-Streamer client needs its own TCP source. Add sources like this:</p>
+              <pre style="background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5; color: #e0e0e0;"># Living Room PC
+source = tcp://0.0.0.0:4953?name=LivingRoom-PC&codec=flac&sampleformat=48000:16:2&idle_threshold=2000&send_silence=true
+
+# Kitchen Laptop
+source = tcp://0.0.0.0:4954?name=Kitchen-Laptop&codec=flac&sampleformat=48000:16:2&idle_threshold=2000&send_silence=true
+
+# Office Desktop
+source = tcp://0.0.0.0:4955?name=Office-Desktop&codec=flac&sampleformat=48000:16:2&idle_threshold=2000&send_silence=true
+
+# Bedroom Laptop
+source = tcp://0.0.0.0:4956?name=Bedroom-Laptop&codec=flac&sampleformat=48000:16:2&idle_threshold=2000&send_silence=true</pre>
+
+              <h4>TCP Source Parameters Explained</h4>
+              <ul>
+                <li><strong>tcp://0.0.0.0:PORT</strong>: Listen on all interfaces on specified port (each source needs unique port)</li>
+                <li><strong>name=</strong>: Friendly name for the stream (will appear in Snapcast clients)</li>
+                <li><strong>codec=flac</strong>: Audio codec (flac recommended for quality)</li>
+                <li><strong>sampleformat=48000:16:2</strong>: Sample rate (48000 Hz), bit depth (16), channels (2=stereo)</li>
+                <li><strong>idle_threshold=2000</strong>: Milliseconds before stream considered idle</li>
+                <li><strong>send_silence=true</strong>: Send silence packets when no audio (keeps sync)</li>
+              </ul>
+
+              <h4>TCP-Streamer Configuration</h4>
+              <p>In TCP-Streamer, configure the connection to match your Snapcast server:</p>
+              <ul>
+                <li><strong>Target IP</strong>: IP address of your Snapcast server (e.g., 192.168.1.100)</li>
+                <li><strong>Port</strong>: The port you configured in the TCP source (e.g., 4953, 4954, etc.)</li>
+                <li><strong>Sample Rate</strong>: Must match sampleformat (48 kHz = 48000)</li>
+              </ul>
+
+              <h4>Testing Your Configuration</h4>
+              <ol style="list-style-type: decimal; padding-left: 24px;">
+                <li style="margin-bottom: 8px;">Restart Snapcast server after configuration changes</li>
+                <li style="margin-bottom: 8px;">Configure TCP-Streamer with server IP and port</li>
+                <li style="margin-bottom: 8px;">Start streaming - you should see the source appear in Snapcast clients</li>
+                <li style="margin-bottom: 8px;">Check Snapcast server logs for connection confirmation</li>
+              </ol>
+
+              <h4>Common Port Assignments</h4>
+              <ul>
+                <li>Default Snapcast control port: <strong>1704</strong> (don't use for TCP streams)</li>
+                <li>TCP stream ports: <strong>4950-4999</strong> (recommended range)</li>
+                <li>Ensure firewall allows incoming connections on configured ports</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Main Action Footer -->
@@ -410,7 +658,7 @@
         <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;">
           <div style="display: flex; align-items: center; gap: 10px;">
             Made with ♥ by Josue O.A / NaturalDevCR 
-            <span style="opacity: 0.5;">v<span id="app-version">1.2.0</span></span>
+            <span style="opacity: 0.5;">v<span id="app-version">1.5.0</span></span>
           </div>
           <a 
             href="https://paypal.me/NaturalCloud" 
@@ -441,6 +689,13 @@
           </a>
         </div>
       </div>
+
+      <!-- Scroll to Top Button -->
+      <button id="scroll-to-top-btn" class="scroll-to-top-btn" style="display: none;" title="Back to top">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+      </button>
     </div>
     <div id="toast-container"></div>
     <style>
