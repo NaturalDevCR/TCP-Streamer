@@ -187,6 +187,18 @@
                 <div class="settings-card" style="margin-top: 15px;">
                     <h3>Silence Detection</h3>
                     
+                    <!-- Disable Silence Detection Checkbox -->
+                    <div class="control-group" style="margin-bottom: 16px;">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="disable-silence-detection" />
+                            <span class="checkmark"></span>
+                            Disable Silence Detection (Always Transmit)
+                        </label>
+                        <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
+                            Bypass all silence detection logic and always transmit audio
+                        </small>
+                    </div>
+                    
                     <!-- Real-time Volume Indicator -->
                     <div class="control-group" style="margin-bottom: 20px;">
                         <label style="margin-bottom: 8px; display: block;">Current Volume (RMS)</label>
@@ -453,8 +465,45 @@
                 <li><strong>Min Buffer</strong>: Lowest buffer size (lower = less latency)</li>
                 <li><strong>Max Buffer</strong>: Highest buffer size (higher = more stability)</li>
               </ul>
+              
+              <h4>Smart Buffer Sizing by Device Type (v1.5.3+)</h4>
+              <p>The application automatically adjusts buffer settings based on whether you're using WASAPI loopback or standard input:</p>
+              
+              <table style="width: 100%; margin-top: 12px; border-collapse: collapse;">
+                <thead>
+                  <tr style="background: rgba(255,255,255,0.05);">
+                    <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1);">Device Type</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1);">Base Buffer</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1);">Adaptive Range</th>
+                    <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1);">Best/Worst Latency</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);"><strong>WASAPI Loopback</strong></td>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);">8000ms</td>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);">4000-12000ms</td>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);">4s / 12s</td>
+                  </tr>
+                  <tr style="background: rgba(255,255,255,0.02);">
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);"><strong>Standard Input</strong></td>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);">5000ms</td>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);">2000-6000ms</td>
+                    <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.1);">2s / 6s</td>
+                  </tr>
+                </tbody>
+              </table>
+              
+              <p style="margin-top: 12px;"><strong>Why different ranges?</strong></p>
+              <ul style="margin-top: 8px;">
+                <li><strong>WASAPI Loopback</strong>: Needs more buffering to handle WiFi jitter (50-100ms), laptop CPU throttling (20-50ms), and inherent WASAPI timing unpredictability</li>
+                <li><strong>VB Audio Cable</strong>: More predictable timing allows tighter buffer control and lower latency</li>
+              </ul>
+              
+              <p style="margin-top: 12px;"><strong>How it works:</strong> The adaptive buffer monitors network jitter in real-time and adjusts within these ranges. On stable wired networks, it shrinks to minimum. On WiFi or under CPU load, it expands to maximum. Memory usage is minimal (~2.3MB max @ 12 seconds).</p>
             </div>
           </div>
+
 
           <div class="settings-card">
             <h3>🔇 Silence Detection</h3>
@@ -568,11 +617,14 @@
                 <li>Enable High Priority Thread (Advanced tab)</li>
               </ul>
 
-              <h4>Windows Loopback Issues</h4>
+              <h4>Windows Loopback (WASAPI) Stuttering</h4>
               <ul>
+                <li><strong>Enable Adaptive Buffer</strong>: Critical for handling network + WASAPI timing variability</li>
+                <li><strong>WiFi laptops</strong>: Expect 4-12s latency (automatically applied)</li>
+                <li><strong>Wired networks</strong>: Adaptive buffer will optimize toward ~4s</li>
                 <li>Make sure speakers/headphones are connected</li>
                 <li>Check Windows sound settings</li>
-                <li>Try different audio devices</li>
+                <li>For lowest latency, use VB Audio Cable instead (2-6s range)</li>
               </ul>
             </div>
           </div>
@@ -658,7 +710,7 @@ source = tcp://0.0.0.0:4956?name=Bedroom-Laptop&codec=flac&sampleformat=48000:16
         <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;">
           <div style="display: flex; align-items: center; gap: 10px;">
             Made with ♥ by Josue O.A / NaturalDevCR 
-            <span style="opacity: 0.5;">v<span id="app-version">1.5.2</span></span>
+            <span style="opacity: 0.5;">v<span id="app-version">1.5.3</span></span>
           </div>
           <a 
             href="https://paypal.me/NaturalCloud" 

@@ -405,15 +405,33 @@ fn start_audio_stream(
         buffer_size: cpal::BufferSize::Fixed(buffer_size),
     };
 
-    // 1. Setup Ring Buffer
-    // Size calculated from duration (ms)
-    // ring_buffer_duration_ms default should be around 4000ms for stability
-    let ring_buffer_size = (sample_rate as usize) * 2 * (ring_buffer_duration_ms as usize) / 1000;
+    // 1. Setup Ring Buffer with Smart Sizing
+    // Adjust ring buffer duration based on device type for network-aware buffering
+    let adjusted_ring_buffer_duration_ms = if is_loopback {
+        // WASAPI Loopback: Use larger default (8000ms) to handle:
+        // - WiFi jitter (50-100ms)
+        // - Laptop CPU throttling (20-50ms)
+        // - WASAPI loopback timing unpredictability
+        8000.max(ring_buffer_duration_ms)
+    } else {
+        // Standard Input/VB Cable: Use 5000ms default for WiFi tolerance
+        5000.max(ring_buffer_duration_ms)
+    };
+    
+    let ring_buffer_size = (sample_rate as usize) * 2 * (adjusted_ring_buffer_duration_ms as usize) / 1000;
+    let buffer_size_mb = (ring_buffer_size * 2) as f32 / (1024.0 * 1024.0);
+    
     emit_log(
         &app_handle,
-        "trace",
-        format!("Allocating ring buffer of size: {}", ring_buffer_size),
+        "info",
+        format!(
+            "Ring buffer: {}ms ({:.2}MB) - Device type: {}",
+            adjusted_ring_buffer_duration_ms,
+            buffer_size_mb,
+            if is_loopback { "WASAPI Loopback" } else { "Standard Input" }
+        ),
     );
+    
     let rb = HeapRb::<i16>::new(ring_buffer_size);
     let (mut prod, mut cons) = rb.split();
 
@@ -468,10 +486,19 @@ fn start_audio_stream(
         let mut consecutive_errors: u64 = 0;
         let mut last_quality_emit = Instant::now();
         
-        // Adaptive buffer tracking
-        let mut current_buffer_ms = ring_buffer_duration_ms;
+        // Adaptive buffer tracking with network-aware ranges
+        let mut current_buffer_ms = adjusted_ring_buffer_duration_ms;
         let mut last_buffer_check = Instant::now();
         const BUFFER_CHECK_INTERVAL_SECS: u64 = 10; // Check every 10 seconds
+        
+        // Adjust adaptive buffer ranges based on device type
+        let (adaptive_min_ms, adaptive_max_ms) = if is_loopback {
+            // WASAPI Loopback: 4000-12000ms range
+            (4000.max(min_buffer_ms), 12000.min(max_buffer_ms))
+        } else {
+            // Standard Input: 2000-6000ms range  
+            (2000.max(min_buffer_ms), 6000.min(max_buffer_ms))
+        };
         
         // Exponential backoff for reconnection
         let mut retry_delay = Duration::from_secs(1);
@@ -759,19 +786,19 @@ fn start_audio_stream(
             
             // Adaptive buffer sizing - check periodically
             if enable_adaptive_buffer && last_buffer_check.elapsed() >= Duration::from_secs(BUFFER_CHECK_INTERVAL_SECS) {
-                // Determine target buffer size based on jitter
+                // Determine target buffer size based on jitter (using network-aware ranges)
                 let target_buffer_ms = if jitter_avg < 5.0 {
                     // Low jitter - can use smaller buffer
-                    min_buffer_ms
+                    adaptive_min_ms
                 } else if jitter_avg > 15.0 {
                     // High jitter - need larger buffer
-                    max_buffer_ms
+                    adaptive_max_ms
                 } else {
-                    // Medium jitter - scale linearly between min and max
+                    // Medium jitter scale linearly between min and max
                     // jitter 5-15ms maps to min-max buffer
                     let jitter_ratio = (jitter_avg - 5.0) / 10.0; // 0.0 to 1.0
-                    let buffer_range = max_buffer_ms - min_buffer_ms;
-                    min_buffer_ms + (buffer_range as f32 * jitter_ratio) as u32
+                    let buffer_range = adaptive_max_ms - adaptive_min_ms;
+                    adaptive_min_ms + (buffer_range as f32 * jitter_ratio) as u32
                 };
                 
                 // Only resize if the change is significant (>10% difference)
@@ -787,7 +814,11 @@ fn start_audio_stream(
                     emit_log(
                         &app_handle_net,
                         "info",
-                        format!("Adaptive buffer: resizing from {}ms to {}ms. {}", current_buffer_ms, target_buffer_ms, reason),
+                        format!(
+                            "Adaptive buffer: {}ms → {}ms (jitter: {:.1}ms, range: {}-{}ms). {}",
+                            current_buffer_ms, target_buffer_ms, jitter_avg,
+                            adaptive_min_ms, adaptive_max_ms, reason
+                        ),
                     );
                     
                     let _ = app_handle_net.emit(
@@ -852,15 +883,26 @@ fn start_audio_stream(
     // The user's "Buffer Size" setting is technically "Hardware Latency". 
     // If we use Default, we get whatever the system gives (usually 10ms).
     
-    // Let's modify the config based on is_loopback
+    // Configure WASAPI buffer: use Default for loopback (more compatible)
+    // Fixed buffer size often fails with loopback, so we use Default and rely on
+    // the larger ring buffer for stability
     let stream_config = if is_loopback {
-        // For loopback, prefer Default buffer size to avoid "Invalid Parameter" errors
+        emit_log(
+            &app_handle,
+            "debug",
+            "WASAPI loopback: Using Default buffer size for compatibility".to_string(),
+        );
         cpal::StreamConfig {
             channels: 2,
             sample_rate: cpal::SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default, 
+            buffer_size: cpal::BufferSize::Default,
         }
     } else {
+        emit_log(
+            &app_handle,
+            "debug",
+            format!("Standard input: Using Fixed buffer size ({})", buffer_size),
+        );
         config
     };
 

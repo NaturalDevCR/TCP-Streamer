@@ -24,6 +24,7 @@ let deviceSelect,
 let priorityCheck, dscpSelect, chunkSizeSelect;
 let silenceThreshold = 0;
 let silenceTimeoutSeconds = 0; // Default to 0 (disabled) to prevent confusion
+let disableSilenceDetection = false; // Complete bypass of silence detection
 let profileSelect,
   btnSaveProfile,
   btnNewProfile,
@@ -336,6 +337,21 @@ async function loadSettings() {
     if (settings.silence_timeout !== undefined)
       silenceTimeoutSeconds = settings.silence_timeout;
     else silenceTimeoutSeconds = 0; // Default value (disabled)
+    if (settings.disable_silence_detection !== undefined)
+      disableSilenceDetection = settings.disable_silence_detection;
+    else disableSilenceDetection = false; // Default value (enabled)
+
+    // Sync UI with loaded values
+    const silenceThresholdInput = document.getElementById("silence-threshold");
+    const silenceTimeoutInput = document.getElementById("silence-timeout");
+    const disableSilenceDetectionInput = document.getElementById(
+      "disable-silence-detection"
+    );
+
+    if (silenceThresholdInput) silenceThresholdInput.value = silenceThreshold;
+    if (silenceTimeoutInput) silenceTimeoutInput.value = silenceTimeoutSeconds;
+    if (disableSilenceDetectionInput)
+      disableSilenceDetectionInput.checked = disableSilenceDetection;
 
     // Adaptive buffer and network preset settings
     if (settings.adaptive_buffer !== undefined)
@@ -384,6 +400,7 @@ async function saveSettings() {
       chunk_size: parseInt(chunkSizeSelect.value),
       silence_threshold: silenceThreshold,
       silence_timeout: silenceTimeoutSeconds,
+      disable_silence_detection: disableSilenceDetection,
       adaptive_buffer: adaptiveBufferCheck.checked,
       min_buffer: parseInt(minBufferInput.value),
       max_buffer: parseInt(maxBufferInput.value),
@@ -587,6 +604,7 @@ async function toggleStream() {
         chunkSize: chunkSize,
         silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
         silenceTimeoutSeconds: silenceTimeoutSeconds,
+        disableSilenceDetection: disableSilenceDetection,
         isLoopback: !!isLoopback, // Force boolean to prevent undefined
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
         minBufferMs: parseInt(minBufferInput.value),
@@ -678,6 +696,9 @@ async function init() {
   chunkSizeSelect = document.getElementById("chunk-size-select");
   const silenceThresholdInput = document.getElementById("silence-threshold");
   const silenceTimeoutInput = document.getElementById("silence-timeout");
+  const disableSilenceDetectionInput = document.getElementById(
+    "disable-silence-detection"
+  );
 
   // Update threshold marker when value changes
   if (silenceThresholdInput) {
@@ -692,6 +713,15 @@ async function init() {
       silenceThreshold = parseFloat(e.target.value);
     });
   }
+
+  // Handle disable silence detection checkbox
+  if (disableSilenceDetectionInput) {
+    disableSilenceDetectionInput.addEventListener("change", (e) => {
+      disableSilenceDetection = e.target.checked;
+      saveSettings();
+    });
+  }
+
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
   statusText = document.getElementById("status-text");

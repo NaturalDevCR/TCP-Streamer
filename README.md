@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -245,6 +245,26 @@ Automatically resizes the ring buffer based on network conditions to prevent aud
 
 _The system checks jitter every 10 seconds and adjusts the buffer size within these bounds._
 
+#### Smart Buffer Sizing by Device Type
+
+As of v1.5.3, the application automatically adjusts buffer settings based on device type:
+
+**WASAPI Loopback (Windows)**:
+
+- Base ring buffer: **8000ms** (handles WiFi jitter + laptop CPU throttling + WASAPI timing variability)
+- Adaptive range: **4000-12000ms** (wider range for unpredictable conditions)
+- Best latency: ~4 seconds (wired network, low jitter)
+- Worst latency: ~12 seconds (WiFi laptop, high jitter)
+
+**Standard Input/VB Audio Cable**:
+
+- Base ring buffer: **5000ms** (WiFi tolerance)
+- Adaptive range: **2000-6000ms** (more aggressive, tighter control)
+- Best latency: ~2 seconds (wired network, low jitter)
+- Worst latency: ~6 seconds (WiFi, high jitter)
+
+**How it works**: The adaptive buffer uses real-time jitter measurements to dynamically adjust within these device-specific ranges. On stable wired networks, it shrinks toward the minimum. On WiFi or under load, it expands toward the maximum.
+
 ### Network Presets
 
 Located in the **Advanced** tab, these presets configure multiple settings at once:
@@ -396,7 +416,22 @@ Contributions are welcome! Please:
 
 ---
 
-## Troubleshooting
+### Troubleshooting
+
+### WASAPI Loopback Stuttering (Windows)
+
+**Problem**: Audio stutters or has dropouts when using Windows WASAPI loopback
+
+**Solutions**:
+
+- WASAPI loopback is more sensitive to network conditions than VB Audio Cable
+- The application automatically uses larger buffers (8000ms base) for loopback mode
+- Enable **Adaptive Buffer** to handle varying network conditions
+- On WiFi laptops, expect 4-12 seconds of latency (trade-off for stability)
+- For wired networks, adaptive buffer will shrink toward 4 seconds
+- Memory usage is minimal (~2.3MB max @ 12 seconds)
+
+---
 
 ### Connection Issues
 
