@@ -513,7 +513,27 @@ fn start_audio_stream(
             "Network thread started".to_string(),
         );
 
+        // Heartbeat tracking for detecting silent failures
+        let mut last_heartbeat = Instant::now();
+        const HEARTBEAT_INTERVAL_SECS: u64 = 30;
+
         while is_running_clone.load(Ordering::Relaxed) {
+            // Periodic heartbeat to confirm network thread is alive
+            if last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
+                let occupied = cons.len();
+                let capacity = cons.capacity();
+                let buffer_pct = occupied as f32 / capacity as f32 * 100.0;
+                emit_log(
+                    &app_handle_net,
+                    "debug",
+                    format!(
+                        "Network thread heartbeat: ✓ Active | Buffer: {:.1}% | Connection: {}",
+                        buffer_pct,
+                        if current_stream.is_some() { "Connected" } else { "Disconnected" }
+                    ),
+                );
+                last_heartbeat = Instant::now();
+            }
             // 1. Handle Reconnection if needed
             if current_stream.is_none() {
                 emit_log(
@@ -843,17 +863,30 @@ fn start_audio_stream(
                 last_buffer_check = Instant::now();
             }
         }
+        
+        // Log why network thread is exiting
+        let exit_reason = if !is_running_clone.load(Ordering::Relaxed) {
+            "User stopped stream"
+        } else {
+            "Unexpected termination - is_running flag false"
+        };
+        
         emit_log(
             &app_handle_net,
             "info",
-            "Network thread stopped".to_string(),
+            format!("Network thread stopped: {}", exit_reason),
         );
     });
 
     // 3. Setup Audio Stream (Producer)
     let app_handle_err = app_handle.clone();
     let err_fn = move |err| {
-        emit_log(&app_handle_err, "error", format!("Stream error: {}", err));
+        // Enhanced error logging with more context
+        emit_log(
+            &app_handle_err, 
+            "error", 
+            format!("⚠️ AUDIO STREAM ERROR: {} - This may cause stream to stop!", err)
+        );
     };
 
 
@@ -992,7 +1025,26 @@ fn start_audio_stream(
                     // Always push actual audio data
                     let pushed = prod.push_slice(data);
                     if pushed < data.len() {
-                        // Buffer overflow
+                        // Buffer overflow - log this as it indicates network can't keep up
+                        static LAST_OVERFLOW_LOG: AtomicU64 = AtomicU64::new(0);
+                        let now_millis = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64;
+                        let last_log = LAST_OVERFLOW_LOG.load(Ordering::Relaxed);
+                        
+                        // Log overflow every 5 seconds to avoid spam
+                        if now_millis - last_log > 5000 {
+                            emit_log(
+                                &app_handle_audio,
+                                "warning",
+                                format!(
+                                    "Buffer overflow: Dropped {} samples. Network/CPU too slow! Consider increasing ring buffer or improving network.",
+                                    data.len() - pushed
+                                ),
+                            );
+                            LAST_OVERFLOW_LOG.store(now_millis, Ordering::Relaxed);
+                        }
                     }
                 } else {
                     // Silence detected
@@ -1020,15 +1072,38 @@ fn start_audio_stream(
                         // Within grace period or timeout disabled - keep transmitting
                         let pushed = prod.push_slice(data);
                         if pushed < data.len() {
-                            // Buffer overflow
+                            // Buffer overflow during silence - log this
+                            static LAST_SILENCE_OVERFLOW_LOG: AtomicU64 = AtomicU64::new(0);
+                            let now_millis = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u64;
+                            let last_log = LAST_SILENCE_OVERFLOW_LOG.load(Ordering::Relaxed);
+                            
+                            // Log overflow every 5 seconds
+                            if now_millis - last_log > 5000 {
+                                emit_log(
+                                    &app_handle_audio,
+                                    "warning",
+                                    format!(
+                                        "Buffer overflow during silence: Dropped {} samples. Network/CPU too slow!",
+                                        data.len() - pushed
+                                    ),
+                                );
+                                LAST_SILENCE_OVERFLOW_LOG.store(now_millis, Ordering::Relaxed);
+                            }
                         }
                     } else {
                         // Timeout exceeded - stop transmission to save bandwidth
                         if !transmission_stopped {
+                            // Use WARNING level so user clearly sees why streaming stopped
                             emit_log(
                                 &app_handle_audio,
-                                "info",
-                                format!("Silence timeout ({}s) - stopping transmission", silence_timeout_seconds)
+                                "warning",
+                                format!(
+                                    "⚠️ TRANSMISSION STOPPED: Silence timeout exceeded ({}s). Audio below threshold {:.1}. Disable silence detection or increase timeout if this is unexpected.",
+                                    silence_timeout_seconds, silence_threshold
+                                )
                             );
                             transmission_stopped = true;
                         }
