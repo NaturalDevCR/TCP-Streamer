@@ -730,6 +730,10 @@ fn start_audio_stream(
                 // Update stats  
                 let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                 sequence = sequence.wrapping_add(1);
+                
+                // Yield CPU time to audio callback thread to prevent buffer overflow
+                // This reduces contention and allows audio thread to run smoothly
+                thread::yield_now();
             } else {
                 // Buffer empty, sleep briefly to avoid busy loop
                 thread::sleep(Duration::from_millis(1));

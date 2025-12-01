@@ -656,7 +656,7 @@ async function init() {
     // For now, I'll update the HTML to 1.1.0 manually in the release step,
     // or better, let's add a simple command to get version.
     // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
-    document.getElementById("app-version").textContent = "1.5.4";
+    document.getElementById("app-version").textContent = "1.5.5";
   } catch (e) {
     console.warn("Failed to set version", e);
   }
