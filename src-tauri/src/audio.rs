@@ -673,66 +673,73 @@ fn start_audio_stream(
                 );
             }
 
-            // Read from Ring Buffer
-            let count = cons.pop_slice(&mut temp_buffer);
-
-            if count > 0 {
-                let start_write = Instant::now();
-
-                // Prepare Payload (Raw PCM)
-                let data_len = (count * 2) as u32;
-                let mut payload = Vec::with_capacity(data_len as usize);
-                for i in 0..count {
-                    payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
+            // Batch Processing: Drain up to 10 chunks from the buffer before yielding
+            // This helps the network thread catch up if audio accumulates
+            let mut processed_count = 0;
+            const MAX_BATCH_SIZE: i32 = 10;
+            
+            loop {
+                if processed_count >= MAX_BATCH_SIZE {
+                    break;
                 }
 
-                // Send Payload
-                if let Some(ref mut s) = current_stream {
-                    if let Err(e) = s.write_all(&payload) {
-                        emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                        consecutive_errors += 1;
-                        // Drop connection to trigger reconnect
-                        current_stream = None;
-                        continue;
-                    } else {
-                        consecutive_errors = 0; // Reset on successful write
+                // Read from Ring Buffer
+                let count = cons.pop_slice(&mut temp_buffer);
+
+                if count > 0 {
+                    let start_write = Instant::now();
+
+                    // Prepare Payload (Raw PCM)
+                    let data_len = (count * 2) as u32;
+                    let mut payload = Vec::with_capacity(data_len as usize);
+                    for i in 0..count {
+                        payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
                     }
-                }
 
-                // Track jitter based on Inter-Write Interval
-                // This measures how regular the network allows us to send data.
-                // If the network blocks, the interval between writes increases.
-                let now = Instant::now();
-                
-                if let Some(last_time) = last_write_time {
-                    let delta_ms = now.duration_since(last_time).as_micros() as f32 / 1000.0;
-                    
-                    // Expected duration for this chunk of audio
-                    // count is samples (stereo), so frames = count / 2
-                    let frames = count as f32 / 2.0;
-                    let expected_duration_ms = (frames / sample_rate as f32) * 1000.0;
-                    
-                    // Jitter is the deviation from the expected cadence
-                    let diff = (delta_ms - expected_duration_ms).abs();
-                    
-                    // Exponentially weighted moving average (EWMA)
-                    jitter_avg = 0.9 * jitter_avg + 0.1 * diff;
-                }
-                last_write_time = Some(now);
-                
-                // Track latency (still useful to see write duration spikes)
-                let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0;
-                latency_samples.push(write_duration);
-                if latency_samples.len() > 100 {
-                    latency_samples.remove(0);
-                }
+                    // Send Payload
+                    if let Some(ref mut s) = current_stream {
+                        if let Err(e) = s.write_all(&payload) {
+                            emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                            consecutive_errors += 1;
+                            // Drop connection to trigger reconnect
+                            current_stream = None;
+                            break; // Stop batch processing on error
+                        } else {
+                            consecutive_errors = 0; // Reset on successful write
+                        }
+                    }
 
-                // Update stats  
-                let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
-                sequence = sequence.wrapping_add(1);
-                
-                // Yield CPU time to audio callback thread to prevent buffer overflow
-                // This reduces contention and allows audio thread to run smoothly
+                    // Track jitter based on Inter-Write Interval
+                    let now = Instant::now();
+                    
+                    if let Some(last_time) = last_write_time {
+                        let delta_ms = now.duration_since(last_time).as_micros() as f32 / 1000.0;
+                        let frames = count as f32 / 2.0;
+                        let expected_duration_ms = (frames / sample_rate as f32) * 1000.0;
+                        let diff = (delta_ms - expected_duration_ms).abs();
+                        jitter_avg = 0.9 * jitter_avg + 0.1 * diff;
+                    }
+                    last_write_time = Some(now);
+
+                    // Track latency (still useful to see write duration spikes)
+                    let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0;
+                    latency_samples.push(write_duration);
+                    if latency_samples.len() > 100 {
+                        latency_samples.remove(0);
+                    }
+
+                    // Update stats  
+                    let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                    sequence = sequence.wrapping_add(1);
+                    
+                    processed_count += 1;
+                } else {
+                    break; // Buffer empty
+                }
+            }
+
+            if processed_count > 0 {
+                // Yield CPU time after processing a batch
                 thread::yield_now();
             } else {
                 // Buffer empty, sleep briefly to avoid busy loop
