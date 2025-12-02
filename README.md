@@ -516,6 +516,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+## Support the Project
+
+If you find TCP Streamer useful and would like to support its development, consider making a donation:
+
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/NaturalCloud)
+
+Your support helps maintain and improve this project. Thank you! 🙏
+
+---
+
 ## Acknowledgments
 
 - Built with [Tauri](https://tauri.app/)
