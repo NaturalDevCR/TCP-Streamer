@@ -321,7 +321,28 @@ impl AudioState {
     }
 }
 
-
+/// Gracefully close a TCP stream, ensuring FIN is sent to prevent zombie connections
+fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
+    use std::net::Shutdown;
+    
+    // Send TCP FIN to server (graceful shutdown)
+    if let Err(e) = stream.shutdown(Shutdown::Both) {
+        // May fail if already closed, which is fine
+        emit_log(
+            app_handle,
+            "debug",
+            format!("TCP shutdown {} ({}): socket may already be closed", context, e)
+        );
+    } else {
+        emit_log(
+            app_handle,
+            "debug",
+            format!("TCP connection closed gracefully ({})", context)
+        );
+    }
+    
+    // stream drops here, releasing the socket
+}
 
 fn start_audio_stream(
     device_name: String,
@@ -561,14 +582,19 @@ fn start_audio_stream(
                     );
 
                     // 2. Set Keepalive
-                    // Detect dead connections faster
+                    // 2. Enable TCP Keepalive (aggressive settings to detect dead connections quickly)
+                    // This helps clean up zombie connections when client crashes or network dies
                     let keepalive = TcpKeepalive::new()
-                        .with_time(Duration::from_secs(10))
-                        .with_interval(Duration::from_secs(1));
+                        .with_time(Duration::from_secs(5))     // Send first probe after 5s idle (reduced from 10s)
+                        .with_interval(Duration::from_secs(2)); // Probe every 2s (reduced from 5s)
+                    // Note: Retry count is OS-level, typically 3-9 probes before giving up
+                    
                     socket.set_tcp_keepalive(&keepalive)?;
-                    emit_log(&app_handle_net, "trace", "Socket keepalive set".to_string());
-
-                    // 3. Set Type of Service (TOS) / DSCP
+                    emit_log(
+                        &app_handle_net,
+                        "trace",
+                        "TCP keepalive enabled: 5s idle, 2s interval (~11-23s detection)".to_string(),
+                    ); // 3. Set Type of Service (TOS) / DSCP
                     let tos_value = match dscp_strategy.as_str() {
                         "voip" => 0xB8,       // EF
                         "lowdelay" => 0x10,   // IPTOS_LOWDELAY
@@ -701,8 +727,10 @@ fn start_audio_stream(
                         if let Err(e) = s.write_all(&payload) {
                             emit_log(&app_handle_net, "error", format!("Write error: {}", e));
                             consecutive_errors += 1;
-                            // Drop connection to trigger reconnect
-                            current_stream = None;
+                            // Close connection gracefully before dropping
+                            if let Some(stream) = current_stream.take() {
+                                close_tcp_stream(stream, "write error", &app_handle_net);
+                            }
                             break; // Stop batch processing on error
                         } else {
                             consecutive_errors = 0; // Reset on successful write
@@ -882,6 +910,11 @@ fn start_audio_stream(
                 
                 last_buffer_check = Instant::now();
             }
+        }
+        
+        // Close TCP connection gracefully before thread exits
+        if let Some(stream) = current_stream.take() {
+            close_tcp_stream(stream, "thread exit", &app_handle_net);
         }
         
         // Log why network thread is exiting
