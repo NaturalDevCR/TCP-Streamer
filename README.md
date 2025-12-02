@@ -532,6 +532,9 @@ Your support helps maintain and improve this project. Thank you! 🙏
 - Audio library: [cpal](https://github.com/RustAudio/cpal)
 - Inspired by multi-room audio systems like [Snapcast](https://github.com/badaix/snapcast)
 
+## Notice
+For anyone concerned, this project was vibe-coded (with some personal tweaks) using Gemini 3 Pro and Sonnet 4.5, I did this, just because I needed something specific to send audio from computers to a Snapcast server, it started simple, but it beceame more complex as I was realizing there are many things to optimize and many scenarios... so, while this is a work in progress, so far it's working well.
+
 ---
 
 **Made with ❤️ for the audio streaming community**
