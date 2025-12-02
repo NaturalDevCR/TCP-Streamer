@@ -728,6 +728,15 @@ fn start_audio_stream(
                         latency_samples.remove(0);
                     }
 
+                    // Alert if server is responding slowly (>200ms indicates network or server issues)
+                    if write_duration > 200.0 {
+                        emit_log(
+                            &app_handle_net,
+                            "warning",
+                            format!("⚠️ Server slow response: {:.1}ms (network congestion or server overload)", write_duration)
+                        );
+                    }
+
                     // Update stats  
                     let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                     sequence = sequence.wrapping_add(1);
@@ -1150,6 +1159,15 @@ pub fn get_input_devices(#[allow(unused_variables)] include_loopback: bool) -> R
         if let Ok(devices) = host.input_devices() {
             for device in devices {
                 if let Ok(name) = device.name() {
+                    // Filter out ALSA virtual devices on Linux that don't work well
+                    #[cfg(target_os = "linux")]
+                    {
+                        if name.contains("default") || name.contains("sysdefault") 
+                           || name.contains("null") || name.starts_with("hw:") {
+                            continue; // Skip this device
+                        }
+                    }
+                    
                     if !all_devices.contains(&name) {
                         all_devices.push(name);
                     }
@@ -1179,6 +1197,15 @@ pub fn get_input_devices(#[allow(unused_variables)] include_loopback: bool) -> R
         if let Ok(devices) = host.input_devices() {
             for device in devices {
                 if let Ok(name) = device.name() {
+                    // Filter out ALSA virtual devices on Linux that don't work well
+                    #[cfg(target_os = "linux")]
+                    {
+                        if name.contains("default") || name.contains("sysdefault") 
+                           || name.contains("null") || name.starts_with("hw:") {
+                            continue; // Skip this device
+                        }
+                    }
+                    
                     if !all_devices.contains(&name) {
                         all_devices.push(name);
                     }
@@ -1262,4 +1289,9 @@ pub async fn stop_stream(state: tauri::State<'_, AudioState>) -> Result<(), Stri
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
     tx.send(AudioCommand::Stop).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_os_type() -> String {
+    std::env::consts::OS.to_string()
 }

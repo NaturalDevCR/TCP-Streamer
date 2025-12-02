@@ -81,7 +81,8 @@ pub fn run() {
             audio::get_input_devices,
             audio::start_stream,
             audio::stop_stream,
-            audio::update_silence_settings
+            audio::update_silence_settings,
+            audio::get_os_type
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

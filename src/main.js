@@ -656,9 +656,44 @@ async function init() {
     // For now, I'll update the HTML to 1.1.0 manually in the release step,
     // or better, let's add a simple command to get version.
     // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
-    document.getElementById("app-version").textContent = "1.5.6";
+    document.getElementById("app-version").textContent = "1.5.7";
   } catch (e) {
     console.warn("Failed to set version", e);
+  }
+
+  // Hide loopback checkbox on non-Windows platforms
+  try {
+    const osType = await invoke("get_os_type");
+    const loopbackContainer = document.getElementById("loopback-container");
+    if (loopbackContainer && osType !== "windows") {
+      loopbackContainer.style.display = "none";
+    }
+  } catch (e) {
+    console.warn("Failed to detect OS type", e);
+  }
+
+  // Silence Detection UI Toggle
+  const disableSilenceDetectionCheck = document.getElementById(
+    "disable-silence-detection"
+  );
+  const silenceSettingsContainer = document.getElementById(
+    "silence-settings-container"
+  );
+
+  if (disableSilenceDetectionCheck && silenceSettingsContainer) {
+    // Initial state
+    if (disableSilenceDetectionCheck.checked) {
+      silenceSettingsContainer.style.display = "none";
+    }
+
+    // Toggle on change
+    disableSilenceDetectionCheck.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        silenceSettingsContainer.style.display = "none";
+      } else {
+        silenceSettingsContainer.style.display = "block";
+      }
+    });
   }
 
   // Initialize Store first (Tauri Plugin Store v2 API)

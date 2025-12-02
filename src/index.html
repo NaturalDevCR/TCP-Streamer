@@ -82,7 +82,7 @@
                 </select>
               </div>
             </div>
-            <div class="control-group" style="margin-top: 10px;">
+            <div id="loopback-container" class="control-group" style="margin-top: 10px;">
               <label class="checkbox-container">
                 <input type="checkbox" id="loopback-mode" />
                 <span class="checkmark"></span>
@@ -218,25 +218,28 @@
                             </small>
                         </div>
                     </div>
+                    
+                    <!-- Silence Detection Controls (hideable when disabled) -->
+                    <div id="silence-settings-container">
+                        <div class="control-group" style="margin-bottom: 16px;">
+                            <label for="silence-threshold" style="margin-bottom: 8px; display: block;">Silence Threshold (RMS)</label>
+                            <input type="number" id="silence-threshold" 
+                                   min="0" max="10000" step="1" value="0" 
+                                   style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
+                            <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
+                                Lower values = less aggressive silence detection (prevents fade-out cuts). Default: 5
+                            </small>
+                        </div>
 
-                    <div class="control-group" style="margin-bottom: 16px;">
-                        <label for="silence-threshold" style="margin-bottom: 8px; display: block;">Silence Threshold (RMS)</label>
-                        <input type="number" id="silence-threshold" 
-                               min="0" max="10000" step="1" value="0" 
-                               style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
-                        <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
-                            Lower values = less aggressive silence detection (prevents fade-out cuts). Default: 5
-                        </small>
-                    </div>
-
-                    <div class="control-group">
-                        <label for="silence-timeout" style="margin-bottom: 8px; display: block;">Silence Timeout (seconds)</label>
-                        <input type="number" id="silence-timeout" 
-                               min="0" max="300" step="1" value="0" 
-                               style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
-                        <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
-                            Stop transmission after X seconds of silence (0 = never stop, always transmit)
-                        </small>
+                        <div class="control-group">
+                            <label for="silence-timeout" style="margin-bottom: 8px; display: block;">Silence Timeout (seconds)</label>
+                            <input type="number" id="silence-timeout" 
+                                   min="0" max="300" step="1" value="0" 
+                                   style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
+                            <small style="color: rgba(255,255,255,0.5); font-size: 11px; margin-top: 6px; display: block; line-height: 1.4;">
+                                Stop transmission after X seconds of silence (0 = never stop, always transmit)
+                            </small>
+                        </div>
                     </div>
                 </div>
 
@@ -466,7 +469,7 @@
                 <li><strong>Max Buffer</strong>: Highest buffer size (higher = more stability)</li>
               </ul>
               
-              <h4>Smart Buffer Sizing by Device Type (v1.5.6+)</h4>
+              <h4>Smart Buffer Sizing by Device Type (v1.5.7+)</h4>
               <p>The application automatically adjusts buffer settings based on whether you're using WASAPI loopback or standard input:</p>
               
               <table style="width: 100%; margin-top: 12px; border-collapse: collapse;">
@@ -710,7 +713,7 @@ source = tcp://0.0.0.0:4956?name=Bedroom-Laptop&codec=flac&sampleformat=48000:16
         <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%;">
           <div style="display: flex; align-items: center; gap: 10px;">
             Made with ♥ by Josue O.A / NaturalDevCR 
-            <span style="opacity: 0.5;">v<span id="app-version">1.5.6</span></span>
+            <span style="opacity: 0.5;">v<span id="app-version">1.5.7</span></span>
           </div>
           <a 
             href="https://paypal.me/NaturalCloud" 
