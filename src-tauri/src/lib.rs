@@ -84,6 +84,14 @@ pub fn run() {
             audio::update_silence_settings,
             audio::get_os_type
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error building tauri application")
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { .. } => {
+                let state = app_handle.state::<AudioState>();
+                state.shutdown();
+                // Allow the exit to proceed
+            }
+            _ => {}
+        });
 }

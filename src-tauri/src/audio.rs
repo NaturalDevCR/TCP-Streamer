@@ -319,6 +319,12 @@ impl AudioState {
 
         Self { tx: Mutex::new(tx) }
     }
+
+    pub fn shutdown(&self) {
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(AudioCommand::Stop);
+        }
+    }
 }
 
 /// Gracefully close a TCP stream, ensuring FIN is sent to prevent zombie connections
@@ -543,8 +549,11 @@ fn start_audio_stream(
         let mut pacer_frames_sent: u64 = 0;
         let mut pacer_initialized = false;
 
+        // Initialize Silence Detection
+        let mut last_audio_activity = Instant::now();
+
         while is_running_clone.load(Ordering::Relaxed) {
-            // Periodic heartbeat to confirm network thread is alive
+            // Periodic heartbeat
             if last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
                 let occupied = cons.len();
                 let capacity = cons.capacity();
@@ -560,8 +569,47 @@ fn start_audio_stream(
                 );
                 last_heartbeat = Instant::now();
             }
-            // 1. Handle Reconnection if needed
+
+            // 1. Fetch Audio Chunk (Blocking/Sleeping if empty to save CPU)
+            // We need a full chunk to calculate RMS and send properly
+            if cons.len() < temp_buffer.len() {
+                thread::sleep(Duration::from_millis(1));
+                continue;
+            }
+
+            // Pop chunk (we know we have enough data)
+            let count = cons.pop_slice(&mut temp_buffer);
+            if count == 0 { continue; } // Should not happen given check above, but safety
+
+            // 2. RMS Calculation (Smart Silence Detection)
+            let silence_threshold = f32::from_bits(SILENCE_THRESHOLD_BITS.load(Ordering::Relaxed));
+            let silence_timeout_secs = SILENCE_TIMEOUT_SECS.load(Ordering::Relaxed);
+            
+            let mut sum_squares = 0.0;
+            for sample in &temp_buffer[0..count] {
+                let norm = *sample as f32 / 32768.0;
+                sum_squares += norm * norm;
+            }
+            let rms = (sum_squares / count as f32).sqrt();
+            let is_silent = rms < silence_threshold;
+
+            if !is_silent {
+                last_audio_activity = Instant::now();
+            }
+
+            let silence_duration = last_audio_activity.elapsed();
+            // Timeout 0 means disabled
+            let is_deep_sleep = silence_timeout_secs > 0 && silence_duration.as_secs() > silence_timeout_secs;
+
+            // 3. Connection Management (Reconnection or Auto-Disconnect)
             if current_stream.is_none() {
+                // If we are deep sleeping (long silence), ignore this packet and stay disconnected
+                if is_silent && is_deep_sleep {
+                    // Drop packet (implied by loop continue)
+                    continue; 
+                }
+
+                // Otherwise, we have audio (or short silence), so we try to connect
                 emit_log(
                     &app_handle_net,
                     "warning",
@@ -576,30 +624,14 @@ fn start_audio_stream(
                 let connect_result = (|| -> Result<TcpStream, Box<dyn std::error::Error>> {
                     let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
 
-                    // 1. Set Send Buffer Size (1MB)
-                    // This allows the kernel to buffer more data if the network is momentarily slow,
-                    // preventing the application from blocking on write immediately.
                     socket.set_send_buffer_size(1024 * 1024)?;
-                    emit_log(
-                        &app_handle_net,
-                        "trace",
-                        "Socket send buffer set to 1MB".to_string(),
-                    );
-
-                    // 2. Set Keepalive
-                    // 2. Enable TCP Keepalive (aggressive settings to detect dead connections quickly)
-                    // This helps clean up zombie connections when client crashes or network dies
+                    // TCP Keepalive
                     let keepalive = TcpKeepalive::new()
-                        .with_time(Duration::from_secs(5))     // Send first probe after 5s idle (reduced from 10s)
-                        .with_interval(Duration::from_secs(2)); // Probe every 2s (reduced from 5s)
-                    // Note: Retry count is OS-level, typically 3-9 probes before giving up
-                    
+                        .with_time(Duration::from_secs(5))
+                        .with_interval(Duration::from_secs(2));
                     socket.set_tcp_keepalive(&keepalive)?;
-                    emit_log(
-                        &app_handle_net,
-                        "trace",
-                        "TCP keepalive enabled: 5s idle, 2s interval (~11-23s detection)".to_string(),
-                    ); // 3. Set Type of Service (TOS) / DSCP
+
+                     // TOS / DSCP
                     let tos_value = match dscp_strategy.as_str() {
                         "voip" => 0xB8,       // EF
                         "lowdelay" => 0x10,   // IPTOS_LOWDELAY
@@ -607,220 +639,107 @@ fn start_audio_stream(
                         "besteffort" => 0x00,
                         _ => 0xB8, // Default to EF
                     };
+                    let _ = socket.set_tos(tos_value);
 
-                    if let Err(e) = socket.set_tos(tos_value) {
-                        emit_log(
-                            &app_handle_net,
-                            "warning",
-                            format!("Failed to set DSCP {:#x}: {}. Using default.", tos_value, e),
-                        );
-                    } else {
-                        emit_log(
-                            &app_handle_net,
-                            "debug",
-                            format!("DSCP set to {:#x} ({})", tos_value, dscp_strategy),
-                        );
-                    }
-
-                    // 4. Connect
                     let addr: SocketAddr = server_addr.parse()?;
-                    emit_log(
-                        &app_handle_net,
-                        "debug",
-                        format!("Connecting to address: {:?}", addr),
-                    );
                     socket.connect(&addr.into())?;
 
-                    // 5. Convert to std::net::TcpStream
                     let stream: TcpStream = socket.into();
-                    stream.set_nodelay(true)?; // Ensure Nagle's algo is off
-                    emit_log(
-                        &app_handle_net,
-                        "trace",
-                        "Nagle's algorithm disabled (TCP_NODELAY)".to_string(),
-                    );
+                    stream.set_nodelay(true)?;
+
+                     // Write Timeout (Critical)
+                    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+                    emit_log(&app_handle_net, "trace", "Write timeout set to 5s".to_string());
 
                     Ok(stream)
                 })();
 
                 match connect_result {
                     Ok(s) => {
-                        // Reset retry delay on successful connection
                         retry_delay = Duration::from_secs(1);
-                        
-                        // We do NOT send headers anymore because Snapserver TCP source expects RAW PCM.
-                        // Sending text headers causes byte misalignment (byte shift) if the length
-                        // is not a multiple of 4 (16-bit stereo), resulting in severe audio distortion.
-                        // The stream format must be configured on the Snapserver side (e.g., sampleformat=48000:16:2).
-                        
                         current_stream = Some(s);
-                        emit_log(
-                            &app_handle_net,
-                            "success",
-                            "Connected successfully! (Raw PCM)".to_string(),
-                        );
+                        emit_log(&app_handle_net, "success", "Connected successfully!".to_string());
+                        // Important: logic falls through to Sending block
+                        // We reset pacer on new connection
+                         pacer_initialized = false;
                     }
                     Err(e) => {
-                        emit_log(
-                            &app_handle_net,
-                            "error",
-                            format!("Reconnection failed: {}", e),
-                        );
-                        // Exponential backoff: double the delay for next attempt
+                        emit_log(&app_handle_net, "error", format!("Reconnection failed: {}", e));
                         retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
-                        continue; // Retry loop
+                        continue; 
                     }
                 }
             }
 
-            // Check buffer usage for health monitoring
-            let occupied = cons.len();
-            let capacity = cons.capacity();
-            let usage = occupied as f32 / capacity as f32;
-
-            if usage > 0.9 {
-                dropped_packets += 1;
-                if dropped_packets % 100 == 0 {
-                    emit_log(
+            // 4. Sending Logic
+            if let Some(ref mut s) = current_stream {
+                // Check if we should disconnect due to long silence
+                if is_silent && is_deep_sleep {
+                     emit_log(
                         &app_handle_net,
-                        "warning",
-                        format!(
-                            "High buffer usage: {:.1}%. Dropping packets.",
-                            usage * 100.0
-                        ),
-                    );
+                        "info",
+                        format!("Disconnecting due to silence timeout ({}s)", silence_timeout_secs),
+                     );
+                     // Close stream
+                     close_tcp_stream(s.try_clone().unwrap_or_else(|_| 
+                        unsafe { std::mem::zeroed() }
+                     ), "silence timeout", &app_handle_net);
+                     current_stream = None;
+                     continue;
                 }
-            }
 
-            // Emit health event occasionally
-            if sequence % 100 == 0 {
-                let _ = app_handle_net.emit(
-                    "health-event",
-                    HealthEvent {
-                        buffer_usage: usage,
-                        network_latency: 0,
-                        dropped_packets,
-                    },
+                // If just silent (but not deep sleep), skip sending to save bandwidth
+                if is_silent {
+                    continue; 
+                }
+
+                // Pacer Logic
+                if !pacer_initialized {
+                    pacer_start_time = Instant::now();
+                    pacer_frames_sent = 0;
+                    pacer_initialized = true;
+                }
+
+                let chunk_frames = count as u64 / 2;
+                let expected_elapsed = Duration::from_micros(
+                    ((pacer_frames_sent + chunk_frames) * 1_000_000) / sample_rate as u64
                 );
-            }
+                let target_time = pacer_start_time + expected_elapsed;
+                let now = Instant::now();
 
-            // Precision Pacing Logic
-            // We want to send chunks at intervals matching the audio duration.
-            
-            // Calculate duration of one chunk in microseconds
-            // chunk_size is samples (i16), stereo = 2 samples/frame.
-            let chunk_frames = temp_buffer.len() as u64 / 2;
-            let packet_duration = Duration::from_micros((chunk_frames * 1_000_000) / sample_rate as u64);
-
-            // Only proceed if we have a connection
-            if current_stream.is_some() {
-                // Check if buffer has enough data for a full chunk
-                // We enforce full chunks to maintain consistent network packet sizes
-                if cons.len() >= temp_buffer.len() {
-                    
-                    // Initialize or Reset Pacer if needed
-                    if !pacer_initialized {
-                        pacer_start_time = Instant::now();
-                        pacer_frames_sent = 0;
-                        pacer_initialized = true;
-                        
-                        emit_log(&app_handle_net, "debug", "Pacer initialized".to_string());
-                    }
-
-                    // 1. Wait for Schedule (Backpressure enforcement)
-                    // Calculate when the current amount of sent audio SHOULD have finished playing
-                    // Target Time = Start + (Frames Sent * Duration Per Frame)
-                    let expected_elapsed = Duration::from_micros(
-                        ((pacer_frames_sent + chunk_frames) * 1_000_000) / sample_rate as u64
-                    );
-                    let target_time = pacer_start_time + expected_elapsed;
-                    let now = Instant::now();
-
-                    if target_time > now {
-                        let wait_time = target_time - now;
-                        // Sleep strategy based on duration
-                        if wait_time > Duration::from_millis(4) {
-                            thread::sleep(wait_time);
-                        } else if wait_time > Duration::from_micros(500) {
-                            thread::sleep(wait_time);
-                        } else {
-                            // Busy-wait / Yield for high precision < 500us
-                            thread::yield_now();
-                        }
+                if target_time > now {
+                    let wait_time = target_time - now;
+                    if wait_time > Duration::from_millis(4) {
+                        thread::sleep(wait_time);
+                    } else if wait_time > Duration::from_micros(500) {
+                        thread::sleep(wait_time);
                     } else {
-                        // We are behind schedule.
-                        // Drift Correction: If we are WAY behind (> Ring Buffer Duration), reset.
-                        // This handles cases where we paused for a long time.
-                        if now.duration_since(target_time) > Duration::from_millis(ring_buffer_duration_ms as u64) {
-                             emit_log(
-                                &app_handle_net,
-                                "debug",
-                                format!("Pacer reset: Lag > {}ms (Buffer Underrun/Resume)", ring_buffer_duration_ms)
-                             );
-                             pacer_start_time = Instant::now();
-                             pacer_frames_sent = 0;
-                             // Don't sleep, just send immediately
-                        }
-                    }
-
-                    // 2. Read & Send one chunk
-                    let count = cons.pop_slice(&mut temp_buffer);
-                    if count > 0 {
-                        let start_write = Instant::now();
-                        
-                        let data_len = (count * 2) as u32;
-                        // Manual payload construction to ensure Little Endian
-                        let mut payload = Vec::with_capacity(data_len as usize);
-                        for i in 0..count {
-                            payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
-                        }
-
-                        if let Some(ref mut s) = current_stream {
-                            if let Err(e) = s.write_all(&payload) {
-                                emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                                consecutive_errors += 1;
-                                if let Some(stream) = current_stream.take() {
-                                    close_tcp_stream(stream, "write error", &app_handle_net);
-                                }
-                                pacer_initialized = false; // Reset pacer
-                            } else {
-                                consecutive_errors = 0;
-                                // Only advance pacer if write succeeded
-                                pacer_frames_sent += (count / 2) as u64;
-                                
-                                // Update Stats
-                                let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
-                                sequence = sequence.wrapping_add(1);
-                                
-                                // Jitter Calculation
-                                let now = Instant::now();
-                                if let Some(last_time) = last_write_time {
-                                     let delta_ms = now.duration_since(last_time).as_micros() as f32 / 1000.0;
-                                     let expected_ms = packet_duration.as_micros() as f32 / 1000.0;
-                                     let diff = (delta_ms - expected_ms).abs();
-                                     jitter_avg = 0.9 * jitter_avg + 0.1 * diff;
-                                }
-                                last_write_time = Some(now);
-
-                                let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0;
-                                latency_samples.push(write_duration);
-                                if latency_samples.len() > 100 { latency_samples.remove(0); }
-                            }
-                        }
+                        thread::yield_now();
                     }
                 } else {
-                    // Buffer underflow (not enough data for full chunk)
-                    // Wait a bit to let buffer fill (reduce CPU usage)
-                    thread::sleep(Duration::from_millis(1));
-                    
-                    // Note: We do NOT increment pacer_frames_sent here.
-                    // Effectively, time passes (target_time fixed, now increases), so we fall behind.
-                    // When data arrives, we will catch up.
+                    if now.duration_since(target_time) > Duration::from_millis(ring_buffer_duration_ms as u64) {
+                         pacer_start_time = Instant::now();
+                         pacer_frames_sent = 0;
+                    }
                 }
-            } else {
-                // Not connected
-                thread::sleep(Duration::from_millis(50));
-                pacer_initialized = false;
+
+                // Send
+                let data_len = (count * 2) as u32;
+                let mut payload = Vec::with_capacity(data_len as usize);
+                for i in 0..count {
+                    payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
+                }
+
+                if let Err(e) = s.write_all(&payload) {
+                    emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                    current_stream = None; 
+                    pacer_initialized = false;
+                } else {
+                    pacer_frames_sent += chunk_frames;
+                    let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                    sequence = sequence.wrapping_add(1);
+                    last_write_time = Some(Instant::now());
+                }
             }
 
             // Emit stats every second regardless of audio activity

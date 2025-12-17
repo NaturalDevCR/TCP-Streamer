@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.5.6-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -64,11 +64,13 @@
 
 ### Core Functionality
 
+- ✅ **Connection Reliability** - 5s Write Timeout & Graceful Shutdown (v1.6.0)
+- ✅ **Smart Deep Sleep** - Auto-disconnect on prolonged silence to prevent "zombies" (v1.6.0)
 - ✅ **Precision Audio Pacing** - Token Bucket algorithm for mathematically perfect transmission timing (v1.5.9+)
 - ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
 - ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter
-- ✅ **Silence Detection** - Smart bandwidth optimization with visual feedback
+- ✅ **Silence Detection** - RMS-based "Stop Sending" bandwidth saver (v1.6.0)
 - ✅ **Auto-Reconnect** - Resilient connection management
 - ✅ **Multi-Profile Support** - Save and switch between configurations
 - ✅ **System Tray Integration** - Runs in background, accessible from tray
@@ -536,6 +538,7 @@ Your support helps maintain and improve this project. Thank you! 🙏
 - Inspired by multi-room audio systems like [Snapcast](https://github.com/badaix/snapcast)
 
 ## Notice
+
 For anyone concerned, this project was vibe-coded (with some personal tweaks) using Gemini 3 Pro and Sonnet 4.5, I did this, just because I needed something specific to send audio from computers to a Snapcast server, it started simple, but it beceame more complex as I was realizing there are many things to optimize and many scenarios... so, while this is a work in progress, so far it's working well.
 
 ---
