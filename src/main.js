@@ -38,6 +38,8 @@ let tabBtns, tabPanes;
 let loopbackMode = false;
 let loopbackModeInput;
 let networkPresetSelect, adaptiveBufferCheck, minBufferInput, maxBufferInput;
+let driftCorrectionSlider, driftCorrectionInput, autoSyncCheck, driftStatus;
+let driftCorrectionPpm = 0;
 
 const MAX_LOGS = 100;
 
@@ -361,6 +363,19 @@ async function loadSettings() {
     if (settings.network_preset)
       networkPresetSelect.value = settings.network_preset;
 
+    if (settings.drift_correction_ppm !== undefined)
+      driftCorrectionPpm = settings.drift_correction_ppm;
+    else driftCorrectionPpm = 0;
+
+    if (driftCorrectionSlider) driftCorrectionSlider.value = driftCorrectionPpm;
+    if (driftCorrectionInput) driftCorrectionInput.value = driftCorrectionPpm;
+
+    if (settings.auto_sync !== undefined && autoSyncCheck) {
+        autoSyncCheck.checked = settings.auto_sync;
+        // Trigger visual state update
+        updateDriftUIState(settings.auto_sync);
+    }
+
     // EQ and Gain removed
 
     // Set profile dropdown
@@ -404,7 +419,11 @@ async function saveSettings() {
       adaptive_buffer: adaptiveBufferCheck.checked,
       min_buffer: parseInt(minBufferInput.value),
       max_buffer: parseInt(maxBufferInput.value),
+      min_buffer: parseInt(minBufferInput.value),
+      max_buffer: parseInt(maxBufferInput.value),
       network_preset: networkPresetSelect.value,
+      drift_correction_ppm: parseInt(driftCorrectionInput.value),
+      auto_sync: autoSyncCheck ? autoSyncCheck.checked : false,
     };
 
     // Get existing profiles
@@ -607,8 +626,10 @@ async function toggleStream() {
         disableSilenceDetection: disableSilenceDetection,
         isLoopback: !!isLoopback, // Force boolean to prevent undefined
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
+        enableAdaptiveBuffer: adaptiveBufferCheck.checked,
         minBufferMs: parseInt(minBufferInput.value),
         maxBufferMs: parseInt(maxBufferInput.value),
+        driftCorrectionPpm: parseInt(driftCorrectionInput.value),
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
@@ -764,7 +785,74 @@ async function init() {
   networkPresetSelect = document.getElementById("network-preset");
   adaptiveBufferCheck = document.getElementById("adaptive-buffer-check");
   minBufferInput = document.getElementById("min-buffer");
+  minBufferInput = document.getElementById("min-buffer");
   maxBufferInput = document.getElementById("max-buffer");
+  driftCorrectionSlider = document.getElementById("drift-correction-slider");
+  driftCorrectionInput = document.getElementById("drift-correction-input");
+  autoSyncCheck = document.getElementById("auto-sync-check");
+  driftStatus = document.getElementById("drift-status");
+
+  // Sync Slider and Input (Real-time update)
+  if (driftCorrectionSlider && driftCorrectionInput) {
+    const updatePpm = async (val) => {
+        driftCorrectionPpm = parseInt(val);
+        // Invoke backend command for real-time update
+        try {
+            await invoke("set_drift_correction", { ppm: driftCorrectionPpm });
+        } catch (e) {
+            console.error("Failed to set drift correction", e);
+        }
+    };
+
+    driftCorrectionSlider.addEventListener("input", (e) => {
+      driftCorrectionInput.value = e.target.value;
+      updatePpm(e.target.value);
+    });
+    driftCorrectionInput.addEventListener("input", (e) => {
+      driftCorrectionSlider.value = e.target.value;
+      updatePpm(e.target.value);
+    });
+  }
+
+  // Auto Sync Toggle
+  if (autoSyncCheck) {
+      autoSyncCheck.addEventListener("change", async (e) => {
+          const enabled = e.target.checked;
+          const ip = ipInput.value || "127.0.0.1"; // Fallback
+          updateDriftUIState(enabled);
+          try {
+              await invoke("set_auto_sync", { enabled, ip });
+              showNotification(enabled ? "Auto Sync Enabled" : "Auto Sync Disabled", "info");
+          } catch(err) {
+              console.error("Failed to set auto sync", err);
+              showNotification("Failed to toggle Auto Sync", "error");
+          }
+      });
+  }
+  
+  // Listen for calculated drift events
+  listen("drift-event", (event) => {
+      const { ppm, latency_us } = event.payload;
+      if (driftStatus) {
+          driftStatus.textContent = `${ppm} ppm`;
+          // Color code
+          if (Math.abs(ppm) > 100) driftStatus.style.color = "#ef4444"; // Red
+          else if (Math.abs(ppm) > 50) driftStatus.style.color = "#f59e0b"; // Orange
+          else driftStatus.style.color = "#10b981"; // Green
+      }
+      
+      // If Auto Sync is enabled, update the slider visually to show what's happening
+      if (autoSyncCheck && autoSyncCheck.checked) {
+          if (driftCorrectionSlider) driftCorrectionSlider.value = ppm;
+          if (driftCorrectionInput) driftCorrectionInput.value = ppm;
+      }
+  });
+
+  function updateDriftUIState(autoEnabled) {
+      if (driftCorrectionSlider) driftCorrectionSlider.disabled = autoEnabled;
+      if (driftCorrectionInput) driftCorrectionInput.disabled = autoEnabled;
+      if (driftStatus) driftStatus.style.opacity = autoEnabled ? "1" : "0.5";
+  }
 
   // Tabs
   tabBtns = document.querySelectorAll(".tab-btn");

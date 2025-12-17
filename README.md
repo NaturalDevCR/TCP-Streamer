@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.1-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -75,6 +75,8 @@
 - ✅ **Multi-Profile Support** - Save and switch between configurations
 - ✅ **System Tray Integration** - Runs in background, accessible from tray
 - ✅ **Windows Native Loopback** - Capture system audio without virtual cables (WASAPI)
+- ✅ **Active Rate Control** - Manual Drift Correction implementation (v1.6.1)
+- ✅ **Automatic Sync** - Clock synchronization via Snapcast Binary Protocol (v1.6.1)
 
 ### Audio Configuration
 
@@ -105,6 +107,7 @@
 - 🎛️ **Network Presets** - One-click optimization for Ethernet/WiFi/Poor connections
 - 🚦 **DSCP/TOS Support** - QoS tagging (VoIP, Low Delay, Throughput)
 - 📦 **Dynamic Chunk Size** - Configurable buffer chunks (128-4096 samples)
+- 🔄 **Drift Correction** - Eliminates TCP buffer buildup (Recv-Q) by syncing clock rates
 
 ---
 

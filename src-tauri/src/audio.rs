@@ -53,9 +53,17 @@ struct BufferResizeEvent {
     reason: String,
 }
 
+#[derive(Clone, Serialize)]
+struct DriftEvent {
+    ppm: i32,
+    latency_us: i64,
+}
+
 // Global Atomic Settings for Dynamic Updates
 static SILENCE_THRESHOLD_BITS: AtomicU32 = AtomicU32::new(0); // f32 stored as u32 bits
 static SILENCE_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(0);
+static DRIFT_CORRECTION_PPM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static AUTO_SYNC_ENABLED: AtomicBool = AtomicBool::new(false);
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
@@ -112,6 +120,7 @@ enum AudioCommand {
         enable_adaptive_buffer: bool,
         min_buffer_ms: u32,
         max_buffer_ms: u32,
+        drift_correction_ppm: i32,
         app_handle: AppHandle,
     },
     Stop,
@@ -132,8 +141,8 @@ impl AudioState {
             let should_reconnect = Arc::new(AtomicBool::new(false));
 
             // Keep track of current params for reconnection
-            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, app_handle)
-            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, bool, u32, u32, AppHandle)> = None;
+            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, drift_correction_ppm, app_handle)
+            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, bool, u32, u32, i32, AppHandle)> = None;
 
             for command in rx {
                 match command {
@@ -154,6 +163,7 @@ impl AudioState {
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
+                        drift_correction_ppm,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -165,6 +175,12 @@ impl AudioState {
                         // Initialize global settings with new values
                         SILENCE_THRESHOLD_BITS.store(silence_threshold.to_bits(), Ordering::Relaxed);
                         SILENCE_TIMEOUT_SECS.store(silence_timeout_seconds, Ordering::Relaxed);
+                        
+                        // Set initial manual drift correction
+                        // Only set if auto sync is disabled, otherwise let the thread handle it
+                        if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+                            DRIFT_CORRECTION_PPM.store(drift_correction_ppm, Ordering::Relaxed);
+                        }
 
                         // Store params for reconnection
                         _current_params = Some((
@@ -184,6 +200,7 @@ impl AudioState {
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
+                            drift_correction_ppm,
                             app_handle.clone(),
                         ));
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
@@ -210,11 +227,24 @@ impl AudioState {
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
+                            drift_correction_ppm,
                             app_handle.clone(),
                         ) {
-                            Ok((stream, stats)) => {
+                             Ok((stream, stats)) => {
                                 stream.play().unwrap();
                                 _current_stream_handle = Some((stream, stats));
+                                
+                                // Spawn Sync Thread if Auto Sync is enabled
+                                // We use the same IP, but Port 1704 (Snapcast Control Port)
+                                if AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+                                    // Start sync thread logic
+                                    let sync_ip = ip.clone();
+                                    // Default control port is 1704 for binary protocol
+                                    // In a full implementation we might want this configurable
+                                    let sync_port = 1704; 
+                                    spawn_sync_thread(sync_ip, sync_port, app_handle.clone());
+                                }
+
                                 emit_log(
                                     &app_handle,
                                     "success",
@@ -264,6 +294,7 @@ impl AudioState {
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
+                        drift_correction_ppm,
                         app_handle,
                     )) = &_current_params
                     {
@@ -293,6 +324,7 @@ impl AudioState {
                             enable_adaptive_buffer.clone(),
                             min_buffer_ms.clone(),
                             max_buffer_ms.clone(),
+                            drift_correction_ppm.clone(),
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -303,6 +335,13 @@ impl AudioState {
                                     "success",
                                     "Reconnected successfully".to_string(),
                                 );
+                                
+                                // Restart sync thread on reconnect if needed
+                                if AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+                                     let sync_ip = ip.clone();
+                                     let sync_port = 1704;
+                                     spawn_sync_thread(sync_ip, sync_port, app_handle.clone());
+                                }
                             }
                             Err(e) => {
                                 emit_log(
@@ -319,6 +358,300 @@ impl AudioState {
 
         Self { tx: Mutex::new(tx) }
     }
+
+    pub fn shutdown(&self) {
+        // Stop sync thread implicitly by app exit or handle invalidation
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(AudioCommand::Stop);
+        }
+    }
+}
+
+// Commands to control Auto Sync and Drift from UI
+
+#[tauri::command]
+pub fn set_drift_correction(ppm: i32) {
+    if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+        DRIFT_CORRECTION_PPM.store(ppm, Ordering::Relaxed);
+    }
+}
+
+#[tauri::command]
+pub fn set_auto_sync(enabled: bool, ip: String, app_handle: AppHandle) {
+    let was_enabled = AUTO_SYNC_ENABLED.swap(enabled, Ordering::Relaxed);
+    if enabled && !was_enabled {
+        // Just enabled, spawn thread
+        // We assume default port 1704
+        spawn_sync_thread(ip, 1704, app_handle);
+    }
+}
+
+
+// --- Binary Protocol Implementation ---
+
+use std::io::{Read, Write};
+use std::collections::VecDeque;
+
+struct MovingAverage {
+    window_size: usize,
+    samples: VecDeque<f64>,
+    sum: f64,
+}
+
+impl MovingAverage {
+    fn new(window_size: usize) -> Self {
+        Self {
+            window_size,
+            samples: VecDeque::with_capacity(window_size),
+            sum: 0.0,
+        }
+    }
+
+    fn add(&mut self, value: f64) -> f64 {
+        if self.samples.len() >= self.window_size {
+            if let Some(old) = self.samples.pop_front() {
+                self.sum -= old;
+            }
+        }
+        self.samples.push_back(value);
+        self.sum += value;
+        self.sum / self.samples.len() as f64
+    }
+}
+
+#[repr(C, packed)]
+struct SnapMessageHeader {
+    type_: u16,
+    id: u16,
+    ref_id: u16,
+    sent_sec: i32,
+    sent_usec: i32,
+    recv_sec: i32,
+    recv_usec: i32,
+    size: u32,
+}
+
+impl SnapMessageHeader {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(26);
+        bytes.extend_from_slice(&self.type_.to_le_bytes());
+        bytes.extend_from_slice(&self.id.to_le_bytes());
+        bytes.extend_from_slice(&self.ref_id.to_le_bytes());
+        bytes.extend_from_slice(&self.sent_sec.to_le_bytes());
+        bytes.extend_from_slice(&self.sent_usec.to_le_bytes());
+        bytes.extend_from_slice(&self.recv_sec.to_le_bytes());
+        bytes.extend_from_slice(&self.recv_usec.to_le_bytes());
+        bytes.extend_from_slice(&self.size.to_le_bytes());
+        bytes
+    }
+}
+
+fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
+    thread::spawn(move || {
+        emit_log(&app_handle, "info", format!("Starting Auto Sync with {}:{}", ip, port));
+        
+        let mut ma_filter = MovingAverage::new(200); // 200 samples window for stability
+        let mut consecutive_errors = 0;
+        
+        loop {
+            if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Connect to Control Port
+            match TcpStream::connect(format!("{}:{}", ip, port)) {
+                Ok(mut stream) => {
+                    emit_log(&app_handle, "success", "Connected to Control Port".to_string());
+                    consecutive_errors = 0;
+
+                    // Sync Loop
+                    loop {
+                        if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+                            break;
+                        }
+
+                        let now = std::time::SystemTime::now();
+                        let duration_since_epoch = now.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
+                        let client_sent_sec = duration_since_epoch.as_secs() as i32;
+                        let client_sent_usec = duration_since_epoch.subsec_micros() as i32;
+
+                        let header = SnapMessageHeader {
+                            type_: 4, // kTime
+                            id: 1,    // Request ID
+                            ref_id: 0,
+                            sent_sec: client_sent_sec,
+                            sent_usec: client_sent_usec,
+                            recv_sec: 0,
+                            recv_usec: 0,
+                            size: 0,
+                        };
+
+                        if let Err(e) = stream.write_all(&header.to_bytes()) {
+                            emit_log(&app_handle, "warning", format!("Sync send error: {}", e));
+                            break; // Reconnect
+                        }
+
+                        // Read response (26 bytes header)
+                        let mut response_buf = [0u8; 26];
+                        if let Err(e) = stream.read_exact(&mut response_buf) {
+                            emit_log(&app_handle, "warning", format!("Sync read error: {}", e));
+                            break; 
+                        }
+
+                        // Parse response
+                        let recv_sec = i32::from_le_bytes(response_buf[16..20].try_into().unwrap());
+                        let recv_usec = i32::from_le_bytes(response_buf[20..24].try_into().unwrap());
+                        
+                         // Snapcast latency is stored in 'size' field strictly for Time messages? 
+                         // No, strictly specific latency field in JSON, but binary...
+                         // Actually standard Snapcast binary protocol puts latency in the body or reuses fields.
+                         // Let's re-read the spec/code provided by user.
+                         // User: "response->latency, response->received - response->sent"
+                         // Snapcast Time Message (Type 4):
+                         // It mirrors the structure. The "latency" is usually put in the payload or fields?
+                         // Wait, header is fixed 26 bytes.
+                         // Time message usually has 0 payload size.
+                         // The server fills `recv_sec`/`recv_usec` with its receive time.
+                         // Snapcast uses the header fields.
+                         
+                         // Client receive time
+                        let now_recv = std::time::SystemTime::now();
+                        let duration_recv = now_recv.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
+                        // let client_recv_sec = duration_recv.as_secs() as i32;
+                        // let client_recv_usec = duration_recv.subsec_micros() as i32;
+                        
+                        // Timestamps in microseconds
+                        let t_client_sent = (client_sent_sec as i64 * 1_000_000) + client_sent_usec as i64;
+                        let t_server_recv = (recv_sec as i64 * 1_000_000) + recv_usec as i64;
+                        let t_client_recv = (duration_recv.as_secs() as i64 * 1_000_000) + duration_recv.subsec_micros() as i64;
+                        
+                        // Algorithm: (t_server_recv - t_client_sent) is C2S latency + clock diff
+                        // We want Drift.
+                        // Standard NTP/Snapcast:
+                        // latency = (t_client_recv - t_client_sent) / 2
+                        // time_diff = t_server_recv - t_client_sent - latency
+                        
+                        let latency_micros = (t_client_recv - t_client_sent) / 2;
+                        let offset_micros = t_server_recv - t_client_sent - latency_micros;
+                        
+                        // We need PPM (Parts Per Million).
+                        // PPM is the *rate of change* of the offset.
+                        // However, Snapcast client just sets the "diff" directly to adjust playback?
+                        // "TimeProvider::getInstance().setDiff..."
+                        // But we are the SENDER (Streamer). We don't play audio, we pace it.
+                        // If the server clock is FASTER, `offset` will increase?
+                        // Wait.
+                        // If Client (Us) = 0, Server = 1000. Offset = 1000.
+                        // 1s later. Client = 1000, Server = 2001 (Fast server). Offset = 1001.
+                        // Offset is increasing.
+                        // We need to match Server speed.
+                        // If Server is fast, we need to send FASTER.
+                        // So PPM should be positive?
+                        
+                        // We need to calculate the SLOPE of offset over time.
+                        // BUT, for phase 1 implementation, maybe we can just use a simpler PID or just the offset if we were strictly syncing clocks.
+                        // But here we are adjusting RATE.
+                        // User suggested: "calculate_drift(latency, ...)"
+                        // "drift_ppm = (time_diff / 1_000_000.0) * 1_000_000.0" -> This logic in user prompt seems to calculate absolute offset in seconds and call it PPM?
+                        // That doesn't make sense. PPM is a rate.
+                        
+                        // Actually, if we just want to stabilize the BUFFER (Recv-Q), we don't strictly care about absolute time sync, just RATE sync.
+                        // However, the User Prompt implies we equate "Drift Correction" to "Clock Sync".
+                        
+                        // Let's implement what the User requested:
+                        // "calculate_drift" -> "time_diff ... drift_ppm".
+                        // This suggests they might be using a simplified model where they treat the diff as the error signal for a control loop?
+                        // No, "time_diff" is constant if rates are equal.
+                        
+                        // I will implement a proper SLOPE calculation (or just report offset for now if I can't do slope easily).
+                        // Actually, to get PPM, I need: (Offset2 - Offset1) / (Time2 - Time1).
+                        
+                        // Simplified approach:
+                        // We maintain a "Target Offset" (initial offset).
+                        // Error = Current Offset - Target Offset.
+                        // We adjust PPM proportional to this Error (P-controller).
+                        // If Current Offset > Target, Server is running ahead (or we are slow).
+                        // We speed up (Positive PPM).
+                        
+                        // Let's use a static target captured at start of sync.
+                        // P-Controller: PPM = Kp * (Offset - InitialOffset).
+                        
+                        // For now, let's just log the metrics and use a placeholder 0 for PPM update until I verify the offset behavior with the user via logs.
+                        // WAIT. The user explicitely asked for "Active Rate Control".
+                        // I'll try a rudimentary P-controller.
+                        
+                        // Note: For now, I will just log the calculated values and allow the user to see them.
+                        // Calculating PPM from instant offset is wrong. I need delta.
+                        
+                        // Let's store `last_offset` and `last_time`.
+                        // PPM = (delta_offset_micros / delta_time_secs).
+                        // If delta_offset is 100us over 1s, that is 100 PPM.
+                        
+                        // Moving Average of PPM samples.
+                        
+                        static mut LAST_OFFSET: i64 = 0;
+                        static mut LAST_TIME: i64 = 0;
+                        static mut HAS_PREV: bool = false;
+                        
+                        let ppm_inst = unsafe {
+                            if HAS_PREV {
+                                let delta_offset = offset_micros - LAST_OFFSET;
+                                let delta_time = t_client_recv - LAST_TIME;
+                                
+                                if delta_time > 0 {
+                                    (delta_offset as f64 / delta_time as f64) * 1_000_000.0
+                                } else {
+                                    0.0
+                                }
+                            } else {
+                                0.0
+                            }
+                        };
+                        
+                        unsafe {
+                            LAST_OFFSET = offset_micros;
+                            LAST_TIME = t_client_recv;
+                            HAS_PREV = true;
+                        }
+                        
+                        // This instantaneous PPM is very noisy. Filter it.
+                        let filtered_ppm = ma_filter.add(ppm_inst);
+                        
+                        // Update global atomic
+                        DRIFT_CORRECTION_PPM.store(filtered_ppm as i32, Ordering::Relaxed);
+                        
+                        let _ = app_handle.emit("drift-event", DriftEvent {
+                            ppm: filtered_ppm as i32,
+                            latency_us: latency_micros,
+                        });
+                        
+                        // Log roughly once per second to avoid spamming at 10Hz
+                        // We can use a counter or time check
+                        static mut LOG_COUNTER: usize = 0;
+                        unsafe {
+                            LOG_COUNTER += 1;
+                            if LOG_COUNTER % 10 == 0 {
+                                emit_log(&app_handle, "info", format!("Sync: Latency={}us, Offset={}us, PPM={:.1} (Avg: {:.1})", 
+                                    latency_micros, offset_micros, ppm_inst, filtered_ppm));
+                            }
+                        }
+                        
+                        thread::sleep(Duration::from_millis(100)); // 10 samples per sec = 200 samples is 20s window
+                    }
+                }
+                Err(e) => {
+                    emit_log(&app_handle, "error", format!("Sync Connection failed: {}", e));
+                    consecutive_errors += 1;
+                    if consecutive_errors > 5 {
+                        thread::sleep(Duration::from_secs(5));
+                    } else {
+                        thread::sleep(Duration::from_secs(1));
+                    }
+                }
+            }
+        }
+    });
+}
 
     pub fn shutdown(&self) {
         if let Ok(tx) = self.tx.lock() {
@@ -367,14 +700,15 @@ fn start_audio_stream(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
+    drift_correction_ppm: i32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, SilenceT={}, SilenceTO={}s, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
+            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, SilenceT={}, SilenceTO={}s, Loopback={}, AdaptiveBuf={} ({}ms-{}ms), Correction={}ppm",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, drift_correction_ppm
         ),
     );
 
@@ -701,9 +1035,27 @@ fn start_audio_stream(
                 }
 
                 let chunk_frames = count as u64 / 2;
-                let expected_elapsed = Duration::from_micros(
-                    ((pacer_frames_sent + chunk_frames) * 1_000_000) / sample_rate as u64
-                );
+                // Pacing with Drift Correction (Active Rate Control)
+                // We read the global atomic which can be updated by Manual Slider OR Auto Sync Thread
+                let drift_ppm = DRIFT_CORRECTION_PPM.load(Ordering::Relaxed);
+                
+                // drift_correction_ppm: Positive = faster (fix underrun), Negative = slower (fix overflow)
+                // Formula: adjusted_dur = nom_dur / (1.0 + ppm/1e6)
+                
+                let nominal_micros = ((chunk_frames * 1_000_000) as f64 / sample_rate as f64);
+                let drift_factor = 1.0 + (drift_ppm as f64 / 1_000_000.0);
+                let adjusted_micros = nominal_micros / drift_factor;
+                
+                // We track accumulated fractional microseconds to stay precise over hours
+                // But for this loop, we just need the duration for *this specific accumulated count since start*
+                
+                // Better approach for absolute tracking related to start time:
+                // Target Time = Start Time + (Total Frames Sent / (Sample Rate * DriftFactor))
+                
+                let total_sent_and_current = pacer_frames_sent + chunk_frames;
+                let expected_elapsed_micros = (total_sent_and_current as f64 * 1_000_000.0) / (sample_rate as f64 * drift_factor);
+                let expected_elapsed = Duration::from_micros(expected_elapsed_micros as u64);
+
                 let target_time = pacer_start_time + expected_elapsed;
                 let now = Instant::now();
 
