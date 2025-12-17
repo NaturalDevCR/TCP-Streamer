@@ -64,6 +64,7 @@
 
 ### Core Functionality
 
+- ✅ **Precision Audio Pacing** - Token Bucket algorithm for mathematically perfect transmission timing (v1.5.9+)
 - ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
 - ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter
@@ -98,6 +99,7 @@
 ### Advanced Network Optimization
 
 - ⚡ **Thread Priority** - High priority thread option for reduced jitter
+- ⏱️ **Precision Pacer** - Drift-aware Token Bucket algorithm to eliminate micro-bursts
 - 🎛️ **Network Presets** - One-click optimization for Ethernet/WiFi/Poor connections
 - 🚦 **DSCP/TOS Support** - QoS tagging (VoIP, Low Delay, Throughput)
 - 📦 **Dynamic Chunk Size** - Configurable buffer chunks (128-4096 samples)
@@ -363,8 +365,9 @@ Input Device → cpal → Producer → Ring Buffer → Consumer (Thread) → TCP
 
 1. **Capture**: cpal reads audio from device and pushes to **Ring Buffer** (Producer)
 2. **Process**: Calculate RMS to detect silence before pushing
-3. **Transmit**: Dedicated **Network Thread** (Consumer) reads from buffer and sends via TCP
-4. **Monitor**: Network thread calculates stats (bitrate, uptime) and emits events to UI
+3. **Pacing**: **Precision Pacer** waits for the exact mathematically calculated time for the next chunk
+4. **Transmit**: Dedicated **Network Thread** (Consumer) sends data via TCP without bursting
+5. **Monitor**: Network thread calculates stats (bitrate, uptime) and emits events to UI
 
 ---
 

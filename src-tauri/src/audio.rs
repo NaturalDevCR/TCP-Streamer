@@ -538,6 +538,11 @@ fn start_audio_stream(
         let mut last_heartbeat = Instant::now();
         const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
+        // Pacer State variables for Precision Timing (Phase 1)
+        let mut pacer_start_time = Instant::now();
+        let mut pacer_frames_sent: u64 = 0;
+        let mut pacer_initialized = false;
+
         while is_running_clone.load(Ordering::Relaxed) {
             // Periodic heartbeat to confirm network thread is alive
             if last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
@@ -699,88 +704,123 @@ fn start_audio_stream(
                 );
             }
 
-            // Batch Processing: Drain up to 10 chunks from the buffer before yielding
-            // This helps the network thread catch up if audio accumulates
-            let mut processed_count = 0;
-            const MAX_BATCH_SIZE: i32 = 10;
+            // Precision Pacing Logic
+            // We want to send chunks at intervals matching the audio duration.
             
-            loop {
-                if processed_count >= MAX_BATCH_SIZE {
-                    break;
-                }
+            // Calculate duration of one chunk in microseconds
+            // chunk_size is samples (i16), stereo = 2 samples/frame.
+            let chunk_frames = temp_buffer.len() as u64 / 2;
+            let packet_duration = Duration::from_micros((chunk_frames * 1_000_000) / sample_rate as u64);
 
-                // Read from Ring Buffer
-                let count = cons.pop_slice(&mut temp_buffer);
-
-                if count > 0 {
-                    let start_write = Instant::now();
-
-                    // Prepare Payload (Raw PCM)
-                    let data_len = (count * 2) as u32;
-                    let mut payload = Vec::with_capacity(data_len as usize);
-                    for i in 0..count {
-                        payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
+            // Only proceed if we have a connection
+            if current_stream.is_some() {
+                // Check if buffer has enough data for a full chunk
+                // We enforce full chunks to maintain consistent network packet sizes
+                if cons.len() >= temp_buffer.len() {
+                    
+                    // Initialize or Reset Pacer if needed
+                    if !pacer_initialized {
+                        pacer_start_time = Instant::now();
+                        pacer_frames_sent = 0;
+                        pacer_initialized = true;
+                        
+                        emit_log(&app_handle_net, "debug", "Pacer initialized".to_string());
                     }
 
-                    // Send Payload
-                    if let Some(ref mut s) = current_stream {
-                        if let Err(e) = s.write_all(&payload) {
-                            emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                            consecutive_errors += 1;
-                            // Close connection gracefully before dropping
-                            if let Some(stream) = current_stream.take() {
-                                close_tcp_stream(stream, "write error", &app_handle_net);
-                            }
-                            break; // Stop batch processing on error
+                    // 1. Wait for Schedule (Backpressure enforcement)
+                    // Calculate when the current amount of sent audio SHOULD have finished playing
+                    // Target Time = Start + (Frames Sent * Duration Per Frame)
+                    let expected_elapsed = Duration::from_micros(
+                        ((pacer_frames_sent + chunk_frames) * 1_000_000) / sample_rate as u64
+                    );
+                    let target_time = pacer_start_time + expected_elapsed;
+                    let now = Instant::now();
+
+                    if target_time > now {
+                        let wait_time = target_time - now;
+                        // Sleep strategy based on duration
+                        if wait_time > Duration::from_millis(4) {
+                            thread::sleep(wait_time);
+                        } else if wait_time > Duration::from_micros(500) {
+                            thread::sleep(wait_time);
                         } else {
-                            consecutive_errors = 0; // Reset on successful write
+                            // Busy-wait / Yield for high precision < 500us
+                            thread::yield_now();
+                        }
+                    } else {
+                        // We are behind schedule.
+                        // Drift Correction: If we are WAY behind (> Ring Buffer Duration), reset.
+                        // This handles cases where we paused for a long time.
+                        if now.duration_since(target_time) > Duration::from_millis(ring_buffer_duration_ms as u64) {
+                             emit_log(
+                                &app_handle_net,
+                                "debug",
+                                format!("Pacer reset: Lag > {}ms (Buffer Underrun/Resume)", ring_buffer_duration_ms)
+                             );
+                             pacer_start_time = Instant::now();
+                             pacer_frames_sent = 0;
+                             // Don't sleep, just send immediately
                         }
                     }
 
-                    // Track jitter based on Inter-Write Interval
-                    let now = Instant::now();
-                    
-                    if let Some(last_time) = last_write_time {
-                        let delta_ms = now.duration_since(last_time).as_micros() as f32 / 1000.0;
-                        let frames = count as f32 / 2.0;
-                        let expected_duration_ms = (frames / sample_rate as f32) * 1000.0;
-                        let diff = (delta_ms - expected_duration_ms).abs();
-                        jitter_avg = 0.9 * jitter_avg + 0.1 * diff;
-                    }
-                    last_write_time = Some(now);
+                    // 2. Read & Send one chunk
+                    let count = cons.pop_slice(&mut temp_buffer);
+                    if count > 0 {
+                        let start_write = Instant::now();
+                        
+                        let data_len = (count * 2) as u32;
+                        // Manual payload construction to ensure Little Endian
+                        let mut payload = Vec::with_capacity(data_len as usize);
+                        for i in 0..count {
+                            payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
+                        }
 
-                    // Track latency (still useful to see write duration spikes)
-                    let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0;
-                    latency_samples.push(write_duration);
-                    if latency_samples.len() > 100 {
-                        latency_samples.remove(0);
-                    }
+                        if let Some(ref mut s) = current_stream {
+                            if let Err(e) = s.write_all(&payload) {
+                                emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                                consecutive_errors += 1;
+                                if let Some(stream) = current_stream.take() {
+                                    close_tcp_stream(stream, "write error", &app_handle_net);
+                                }
+                                pacer_initialized = false; // Reset pacer
+                            } else {
+                                consecutive_errors = 0;
+                                // Only advance pacer if write succeeded
+                                pacer_frames_sent += (count / 2) as u64;
+                                
+                                // Update Stats
+                                let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                                sequence = sequence.wrapping_add(1);
+                                
+                                // Jitter Calculation
+                                let now = Instant::now();
+                                if let Some(last_time) = last_write_time {
+                                     let delta_ms = now.duration_since(last_time).as_micros() as f32 / 1000.0;
+                                     let expected_ms = packet_duration.as_micros() as f32 / 1000.0;
+                                     let diff = (delta_ms - expected_ms).abs();
+                                     jitter_avg = 0.9 * jitter_avg + 0.1 * diff;
+                                }
+                                last_write_time = Some(now);
 
-                    // Alert if server is responding slowly (>200ms indicates network or server issues)
-                    if write_duration > 200.0 {
-                        emit_log(
-                            &app_handle_net,
-                            "warning",
-                            format!("⚠️ Server slow response: {:.1}ms (network congestion or server overload)", write_duration)
-                        );
+                                let write_duration = start_write.elapsed().as_micros() as f32 / 1000.0;
+                                latency_samples.push(write_duration);
+                                if latency_samples.len() > 100 { latency_samples.remove(0); }
+                            }
+                        }
                     }
-
-                    // Update stats  
-                    let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
-                    sequence = sequence.wrapping_add(1);
-                    
-                    processed_count += 1;
                 } else {
-                    break; // Buffer empty
+                    // Buffer underflow (not enough data for full chunk)
+                    // Wait a bit to let buffer fill (reduce CPU usage)
+                    thread::sleep(Duration::from_millis(1));
+                    
+                    // Note: We do NOT increment pacer_frames_sent here.
+                    // Effectively, time passes (target_time fixed, now increases), so we fall behind.
+                    // When data arrives, we will catch up.
                 }
-            }
-
-            if processed_count > 0 {
-                // Yield CPU time after processing a batch
-                thread::yield_now();
             } else {
-                // Buffer empty, sleep briefly to avoid busy loop
-                thread::sleep(Duration::from_millis(1));
+                // Not connected
+                thread::sleep(Duration::from_millis(50));
+                pacer_initialized = false;
             }
 
             // Emit stats every second regardless of audio activity
