@@ -509,15 +509,15 @@ fn start_audio_stream(
         let mut sequence: u32 = 0;
         // Dynamic chunk size
         let mut temp_buffer = vec![0i16; chunk_size as usize];
-        let mut dropped_packets: u64 = 0;
+        let _dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
         
         // Quality tracking variables
         let mut latency_samples: Vec<f32> = Vec::with_capacity(100); //  Track last 100
         let mut jitter_avg: f32 = 0.0; // EWMA of jitter
-        let mut last_write_time: Option<Instant> = None;
-        let mut consecutive_errors: u64 = 0;
+        let mut _last_write_time: Option<Instant> = None;
+        let consecutive_errors: u64 = 0;
         let mut last_quality_emit = Instant::now();
         
         // Adaptive buffer tracking with network-aware ranges
@@ -804,7 +804,7 @@ fn start_audio_stream(
                     pacer_frames_sent += chunk_frames;
                     let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                     sequence = sequence.wrapping_add(1);
-                    last_write_time = Some(Instant::now());
+                    _last_write_time = Some(Instant::now());
                 }
             }
 
@@ -1307,8 +1307,6 @@ pub async fn start_stream(
     silence_timeout_seconds: u64,
     is_loopback: bool,
     enable_adaptive_buffer: bool,
-    min_buffer_ms: u32,
-    max_buffer_ms: u32,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
     enable_spin_strategy: bool,
