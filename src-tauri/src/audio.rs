@@ -23,13 +23,7 @@ struct LogEvent {
     message: String,
 }
 
-// Health Event
-#[derive(Clone, Serialize)]
-struct HealthEvent {
-    buffer_usage: f32,    // 0.0 to 1.0
-    network_latency: u64, // ms (estimated based on write time)
-    dropped_packets: u64,
-}
+
 
 #[derive(Clone, Serialize)]
 struct QualityEvent {
