@@ -23,13 +23,7 @@ struct LogEvent {
     message: String,
 }
 
-// Health Event
-#[derive(Clone, Serialize)]
-struct HealthEvent {
-    buffer_usage: f32,    // 0.0 to 1.0
-    network_latency: u64, // ms (estimated based on write time)
-    dropped_packets: u64,
-}
+
 
 #[derive(Clone, Serialize)]
 struct QualityEvent {
@@ -453,6 +447,7 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
         
         let mut ma_filter = MovingAverage::new(200); // 200 samples window for stability
         let mut consecutive_errors = 0;
+        let mut log_counter: usize = 0;
         
         loop {
             if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
@@ -465,139 +460,63 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                     emit_log(&app_handle, "success", "Connected to Control Port".to_string());
                     consecutive_errors = 0;
 
-                    // Sync Loop
-                    loop {
-                        if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-                            break;
-                        }
+                        // Use local variables instead of static mut (unsafe/not thread safe globally)
+                        let mut last_offset: i64 = 0;
+                        let mut last_time: i64 = 0;
+                        let mut has_prev: bool = false;
 
-                        let now = std::time::SystemTime::now();
-                        let duration_since_epoch = now.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
-                        let client_sent_sec = duration_since_epoch.as_secs() as i32;
-                        let client_sent_usec = duration_since_epoch.subsec_micros() as i32;
+                        loop {
+                            if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
+                                break;
+                            }
 
-                        let header = SnapMessageHeader {
-                            type_: 4, // kTime
-                            id: 1,    // Request ID
-                            ref_id: 0,
-                            sent_sec: client_sent_sec,
-                            sent_usec: client_sent_usec,
-                            recv_sec: 0,
-                            recv_usec: 0,
-                            size: 0,
-                        };
+                            let now = std::time::SystemTime::now();
+                            let duration_since_epoch = now.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
+                            let client_sent_sec = duration_since_epoch.as_secs() as i32;
+                            let client_sent_usec = duration_since_epoch.subsec_micros() as i32;
 
-                        if let Err(e) = stream.write_all(&header.to_bytes()) {
-                            emit_log(&app_handle, "warning", format!("Sync send error: {}", e));
-                            break; // Reconnect
-                        }
+                            let header = SnapMessageHeader {
+                                type_: 4, // kTime
+                                id: 1,    // Request ID
+                                ref_id: 0,
+                                sent_sec: client_sent_sec,
+                                sent_usec: client_sent_usec,
+                                recv_sec: 0,
+                                recv_usec: 0,
+                                size: 0,
+                            };
 
-                        // Read response (26 bytes header)
-                        let mut response_buf = [0u8; 26];
-                        if let Err(e) = stream.read_exact(&mut response_buf) {
-                            emit_log(&app_handle, "warning", format!("Sync read error: {}", e));
-                            break; 
-                        }
+                            if let Err(e) = stream.write_all(&header.to_bytes()) {
+                                emit_log(&app_handle, "warning", format!("Sync send error: {}", e));
+                                break; // Reconnect
+                            }
 
-                        // Parse response
-                        let recv_sec = i32::from_le_bytes(response_buf[16..20].try_into().unwrap());
-                        let recv_usec = i32::from_le_bytes(response_buf[20..24].try_into().unwrap());
-                        
-                         // Snapcast latency is stored in 'size' field strictly for Time messages? 
-                         // No, strictly specific latency field in JSON, but binary...
-                         // Actually standard Snapcast binary protocol puts latency in the body or reuses fields.
-                         // Let's re-read the spec/code provided by user.
-                         // User: "response->latency, response->received - response->sent"
-                         // Snapcast Time Message (Type 4):
-                         // It mirrors the structure. The "latency" is usually put in the payload or fields?
-                         // Wait, header is fixed 26 bytes.
-                         // Time message usually has 0 payload size.
-                         // The server fills `recv_sec`/`recv_usec` with its receive time.
-                         // Snapcast uses the header fields.
-                         
-                         // Client receive time
-                        let now_recv = std::time::SystemTime::now();
-                        let duration_recv = now_recv.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
-                        // let client_recv_sec = duration_recv.as_secs() as i32;
-                        // let client_recv_usec = duration_recv.subsec_micros() as i32;
-                        
-                        // Timestamps in microseconds
-                        let t_client_sent = (client_sent_sec as i64 * 1_000_000) + client_sent_usec as i64;
-                        let t_server_recv = (recv_sec as i64 * 1_000_000) + recv_usec as i64;
-                        let t_client_recv = (duration_recv.as_secs() as i64 * 1_000_000) + duration_recv.subsec_micros() as i64;
-                        
-                        // Algorithm: (t_server_recv - t_client_sent) is C2S latency + clock diff
-                        // We want Drift.
-                        // Standard NTP/Snapcast:
-                        // latency = (t_client_recv - t_client_sent) / 2
-                        // time_diff = t_server_recv - t_client_sent - latency
-                        
-                        let latency_micros = (t_client_recv - t_client_sent) / 2;
-                        let offset_micros = t_server_recv - t_client_sent - latency_micros;
-                        
-                        // We need PPM (Parts Per Million).
-                        // PPM is the *rate of change* of the offset.
-                        // However, Snapcast client just sets the "diff" directly to adjust playback?
-                        // "TimeProvider::getInstance().setDiff..."
-                        // But we are the SENDER (Streamer). We don't play audio, we pace it.
-                        // If the server clock is FASTER, `offset` will increase?
-                        // Wait.
-                        // If Client (Us) = 0, Server = 1000. Offset = 1000.
-                        // 1s later. Client = 1000, Server = 2001 (Fast server). Offset = 1001.
-                        // Offset is increasing.
-                        // We need to match Server speed.
-                        // If Server is fast, we need to send FASTER.
-                        // So PPM should be positive?
-                        
-                        // We need to calculate the SLOPE of offset over time.
-                        // BUT, for phase 1 implementation, maybe we can just use a simpler PID or just the offset if we were strictly syncing clocks.
-                        // But here we are adjusting RATE.
-                        // User suggested: "calculate_drift(latency, ...)"
-                        // "drift_ppm = (time_diff / 1_000_000.0) * 1_000_000.0" -> This logic in user prompt seems to calculate absolute offset in seconds and call it PPM?
-                        // That doesn't make sense. PPM is a rate.
-                        
-                        // Actually, if we just want to stabilize the BUFFER (Recv-Q), we don't strictly care about absolute time sync, just RATE sync.
-                        // However, the User Prompt implies we equate "Drift Correction" to "Clock Sync".
-                        
-                        // Let's implement what the User requested:
-                        // "calculate_drift" -> "time_diff ... drift_ppm".
-                        // This suggests they might be using a simplified model where they treat the diff as the error signal for a control loop?
-                        // No, "time_diff" is constant if rates are equal.
-                        
-                        // I will implement a proper SLOPE calculation (or just report offset for now if I can't do slope easily).
-                        // Actually, to get PPM, I need: (Offset2 - Offset1) / (Time2 - Time1).
-                        
-                        // Simplified approach:
-                        // We maintain a "Target Offset" (initial offset).
-                        // Error = Current Offset - Target Offset.
-                        // We adjust PPM proportional to this Error (P-controller).
-                        // If Current Offset > Target, Server is running ahead (or we are slow).
-                        // We speed up (Positive PPM).
-                        
-                        // Let's use a static target captured at start of sync.
-                        // P-Controller: PPM = Kp * (Offset - InitialOffset).
-                        
-                        // For now, let's just log the metrics and use a placeholder 0 for PPM update until I verify the offset behavior with the user via logs.
-                        // WAIT. The user explicitely asked for "Active Rate Control".
-                        // I'll try a rudimentary P-controller.
-                        
-                        // Note: For now, I will just log the calculated values and allow the user to see them.
-                        // Calculating PPM from instant offset is wrong. I need delta.
-                        
-                        // Let's store `last_offset` and `last_time`.
-                        // PPM = (delta_offset_micros / delta_time_secs).
-                        // If delta_offset is 100us over 1s, that is 100 PPM.
-                        
-                        // Moving Average of PPM samples.
-                        
-                        static mut LAST_OFFSET: i64 = 0;
-                        static mut LAST_TIME: i64 = 0;
-                        static mut HAS_PREV: bool = false;
-                        
-                        let ppm_inst = unsafe {
-                            if HAS_PREV {
-                                let delta_offset = offset_micros - LAST_OFFSET;
-                                let delta_time = t_client_recv - LAST_TIME;
+                            // Read response (26 bytes header)
+                            let mut response_buf = [0u8; 26];
+                            if let Err(e) = stream.read_exact(&mut response_buf) {
+                                emit_log(&app_handle, "warning", format!("Sync read error: {}", e));
+                                break; 
+                            }
+
+                            // Parse response
+                            let recv_sec = i32::from_le_bytes(response_buf[16..20].try_into().unwrap());
+                            let recv_usec = i32::from_le_bytes(response_buf[20..24].try_into().unwrap());
+                            
+                            // Client receive time
+                            let now_recv = std::time::SystemTime::now();
+                            let duration_recv = now_recv.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
+
+                            // Timestamps in microseconds
+                            let t_client_sent = (client_sent_sec as i64 * 1_000_000) + client_sent_usec as i64;
+                            let t_server_recv = (recv_sec as i64 * 1_000_000) + recv_usec as i64;
+                            let t_client_recv = (duration_recv.as_secs() as i64 * 1_000_000) + duration_recv.subsec_micros() as i64;
+                            
+                            let latency_micros = (t_client_recv - t_client_sent) / 2;
+                            let offset_micros = t_server_recv - t_client_sent - latency_micros;
+                            
+                            let ppm_inst = if has_prev {
+                                let delta_offset = offset_micros - last_offset;
+                                let delta_time = t_client_recv - last_time;
                                 
                                 if delta_time > 0 {
                                     (delta_offset as f64 / delta_time as f64) * 1_000_000.0
@@ -606,14 +525,11 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                                 }
                             } else {
                                 0.0
-                            }
-                        };
-                        
-                        unsafe {
-                            LAST_OFFSET = offset_micros;
-                            LAST_TIME = t_client_recv;
-                            HAS_PREV = true;
-                        }
+                            };
+                            
+                            last_offset = offset_micros;
+                            last_time = t_client_recv;
+                            has_prev = true;
                         
                         // This instantaneous PPM is very noisy. Filter it.
                         let filtered_ppm = ma_filter.add(ppm_inst);
@@ -626,18 +542,16 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                             latency_us: latency_micros,
                         });
                         
-                        // Log roughly once per second to avoid spamming at 10Hz
-                        // We can use a counter or time check
-                        static mut LOG_COUNTER: usize = 0;
-                        unsafe {
-                            LOG_COUNTER += 1;
-                            if LOG_COUNTER % 10 == 0 {
+                            // Log roughly once per second to avoid spamming at 10Hz
+                            log_counter += 1;
+                            let log_now = log_counter % 10 == 0;
+                            
+                            if log_now {
                                 emit_log(&app_handle, "info", format!("Sync: Latency={}us, Offset={}us, PPM={:.1} (Avg: {:.1})", 
                                     latency_micros, offset_micros, ppm_inst, filtered_ppm));
                             }
-                        }
                         
-                        thread::sleep(Duration::from_millis(100)); // 10 samples per sec = 200 samples is 20s window
+                        thread::sleep(Duration::from_millis(100)); // 10 samples per sec = 200 samples is 20s window (Correct comment)
                     }
                 }
                 Err(e) => {
@@ -679,6 +593,56 @@ fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
     // stream drops here, releasing the socket
 }
 
+/// Helper function to find audio device by name
+fn find_cpal_device(device_name: &str, is_loopback: bool, app_handle: &AppHandle) -> Result<cpal::Device, String> {
+    let host = cpal::default_host();
+    
+    if is_loopback {
+         // Loopback mode: Search in OUTPUT devices
+        // Remove "[Loopback] " prefix if present for matching
+        let clean_name = device_name.replace("[Loopback] ", "");
+        let mut found_device = None;
+        
+        let available_devices = host.output_devices().map_err(|e| e.to_string())?;
+        let mut device_list_log = Vec::new();
+
+        for dev in available_devices {
+            if let Ok(name) = dev.name() {
+                device_list_log.push(name.clone());
+                // Try exact match or match without whitespace
+                if name == clean_name || name.trim() == clean_name.trim() {
+                    found_device = Some(dev);
+                    break;
+                }
+            }
+        }
+        
+        if found_device.is_none() {
+             emit_log(
+                app_handle,
+                "error",
+                format!("Loopback device '{}' not found. Available outputs: {:?}", clean_name, device_list_log),
+            );
+        }
+
+        found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))
+    } else {
+         // Standard mode: Search in INPUT devices
+        let mut found_device = None;
+        if let Ok(devices) = host.input_devices() {
+            for dev in devices {
+                if let Ok(name) = dev.name() {
+                    if name == device_name {
+                        found_device = Some(dev);
+                        break;
+                    }
+                }
+            }
+        }
+        found_device.ok_or_else(|| format!("Input device not found: {}", device_name))
+    }
+}
+
 fn start_audio_stream(
     device_name: String,
 
@@ -708,53 +672,7 @@ fn start_audio_stream(
         ),
     );
 
-    let host = cpal::default_host();
-    
-    // Device selection logic
-    let device = if is_loopback {
-        // Loopback mode: Search in OUTPUT devices
-        // Remove "[Loopback] " prefix if present for matching
-        let clean_name = device_name.replace("[Loopback] ", "");
-        let mut found_device = None;
-        
-        let available_devices = host.output_devices().map_err(|e| e.to_string())?;
-        let mut device_list_log = Vec::new();
-
-        for dev in available_devices {
-            if let Ok(name) = dev.name() {
-                device_list_log.push(name.clone());
-                // Try exact match or match without whitespace
-                if name == clean_name || name.trim() == clean_name.trim() {
-                    found_device = Some(dev);
-                    break;
-                }
-            }
-        }
-        
-        if found_device.is_none() {
-             emit_log(
-                &app_handle,
-                "error",
-                format!("Loopback device '{}' not found. Available outputs: {:?}", clean_name, device_list_log),
-            );
-        }
-
-        found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))?
-    } else {
-        // Standard mode: Search in INPUT devices
-        let mut found_device = None;
-        if let Ok(devices) = host.input_devices() {
-            for dev in devices {
-                if let Ok(name) = dev.name() {
-                    if name == device_name {
-                        found_device = Some(dev);
-                        break;
-                    }
-                }
-            }
-        }
-        found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
-    };
+    let device = find_cpal_device(&device_name, is_loopback, &app_handle)?;
 
     let config = cpal::StreamConfig {
         channels: 2,
@@ -832,14 +750,16 @@ fn start_audio_stream(
         let mut sequence: u32 = 0;
         // Dynamic chunk size
         let mut temp_buffer = vec![0i16; chunk_size as usize];
-        let mut dropped_packets: u64 = 0;
+        // Pre-allocate payload buffer to prevent allocation in loop
+        let mut payload: Vec<u8> = Vec::with_capacity((chunk_size * 2) as usize);
+        let _dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
         
         // Quality tracking variables
-        let mut latency_samples: Vec<f32> = Vec::with_capacity(100); //  Track last 100
-        let mut jitter_avg: f32 = 0.0; // EWMA of jitter
-        let mut last_write_time: Option<Instant> = None;
+        let mut avg_latency_ms: f32 = 0.0; // EWMA of write latency
+        let mut jitter_ms: f32 = 0.0;      // EWMA of jitter
+        let mut previous_write_dur: f32 = 0.0;
         let mut consecutive_errors: u64 = 0;
         let mut last_quality_emit = Instant::now();
         
@@ -989,6 +909,7 @@ fn start_audio_stream(
                         retry_delay = Duration::from_secs(1);
                         current_stream = Some(s);
                         emit_log(&app_handle_net, "success", "Connected successfully!".to_string());
+                        consecutive_errors = 0; // Fix: Reset errors
                         // Important: logic falls through to Sending block
                         // We reset pacer on new connection
                          pacer_initialized = false;
@@ -996,6 +917,7 @@ fn start_audio_stream(
                     Err(e) => {
                         emit_log(&app_handle_net, "error", format!("Reconnection failed: {}", e));
                         retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
+                        consecutive_errors += 1; // Fix: Track errors
                         continue; 
                     }
                 }
@@ -1003,18 +925,18 @@ fn start_audio_stream(
 
             // 4. Sending Logic
             if let Some(ref mut s) = current_stream {
-                // Check if we should disconnect due to long silence
+                // If we are deep sleeping (long silence), ignore this packet and stay disconnected
                 if is_silent && is_deep_sleep {
                      emit_log(
                         &app_handle_net,
                         "info",
                         format!("Disconnecting due to silence timeout ({}s)", silence_timeout_secs),
                      );
-                     // Close stream
-                     close_tcp_stream(s.try_clone().unwrap_or_else(|_| 
-                        unsafe { std::mem::zeroed() }
-                     ), "silence timeout", &app_handle_net);
-                     current_stream = None;
+                     // Close stream safely
+                     if let Some(s) = current_stream.take() {
+                         close_tcp_stream(s, "silence timeout", &app_handle_net);
+                     }
+                     // current_stream is already None because of take()
                      continue;
                 }
 
@@ -1038,9 +960,9 @@ fn start_audio_stream(
                 // drift_correction_ppm: Positive = faster (fix underrun), Negative = slower (fix overflow)
                 // Formula: adjusted_dur = nom_dur / (1.0 + ppm/1e6)
                 
-                let nominal_micros = ((chunk_frames * 1_000_000) as f64 / sample_rate as f64);
+                let nominal_micros = (chunk_frames * 1_000_000) as f64 / sample_rate as f64;
                 let drift_factor = 1.0 + (drift_ppm as f64 / 1_000_000.0);
-                let adjusted_micros = nominal_micros / drift_factor;
+                let _adjusted_micros = nominal_micros / drift_factor;
                 
                 // We track accumulated fractional microseconds to stay precise over hours
                 // But for this loop, we just need the duration for *this specific accumulated count since start*
@@ -1072,21 +994,47 @@ fn start_audio_stream(
                 }
 
                 // Send
-                let data_len = (count * 2) as u32;
-                let mut payload = Vec::with_capacity(data_len as usize);
+                // Reuse payload vector to avoid allocation
+                payload.clear();
                 for i in 0..count {
                     payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
                 }
 
-                if let Err(e) = s.write_all(&payload) {
-                    emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                    current_stream = None; 
-                    pacer_initialized = false;
-                } else {
-                    pacer_frames_sent += chunk_frames;
-                    let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
-                    sequence = sequence.wrapping_add(1);
-                    last_write_time = Some(Instant::now());
+                let write_start = Instant::now();
+                match s.write_all(&payload) {
+                    Err(e) => {
+                        emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                        current_stream = None; 
+                        pacer_initialized = false;
+                    }
+                    Ok(_) => {
+                        let write_dur_ms = write_start.elapsed().as_micros() as f32 / 1000.0;
+                        
+                        // Update Latency EWMA (alpha = 0.1)
+                        if avg_latency_ms == 0.0 {
+                            avg_latency_ms = write_dur_ms;
+                        } else {
+                            avg_latency_ms = 0.1 * write_dur_ms + 0.9 * avg_latency_ms;
+                        }
+                        
+                        // Update Jitter EWMA
+                        // Jitter = |Current_Delta - Prev_Delta| (RFC approach simplified)
+                        // Or just |Current_Lat - Prev_Lat|? 
+                        // RFC 3550: J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
+                        // Here "D" is difference in packet spacing vs arrival.
+                        // Since we are sender, "Write Time Variation" is a good proxy for "Congestion Jitter"
+                        let delta = (write_dur_ms - previous_write_dur).abs();
+                        if jitter_ms == 0.0 {
+                            jitter_ms = delta;
+                        } else {
+                            jitter_ms = 0.1 * delta + 0.9 * jitter_ms;
+                        }
+                        previous_write_dur = write_dur_ms;
+
+                        pacer_frames_sent += chunk_frames;
+                        let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                        sequence = sequence.wrapping_add(1);
+                    }
                 }
             }
 
@@ -1112,15 +1060,7 @@ fn start_audio_stream(
                 last_stats_emit = Instant::now();
             }
             
-            // Emit quality metrics every 2 seconds
             if last_quality_emit.elapsed() >= Duration::from_secs(2) {
-                // Calculate average latency
-                let avg_latency = if !latency_samples.is_empty() {
-                    latency_samples.iter().sum::<f32>() / latency_samples.len() as f32
-                } else {
-                    0.0
-                };
-                
                 // Get buffer health from the most recent buffer usage check
                 let occupied = cons.len();
                 let capacity = cons.capacity();
@@ -1129,7 +1069,7 @@ fn start_audio_stream(
                 // Calculate quality score (0-100)
                 // Jitter penalty: 0-50 points (lower is better)
                 // Target jitter < 5ms = 0 penalty, >20ms = max penalty
-                let jitter_penalty = ((jitter_avg / 20.0).min(1.0) * 50.0) as u8;
+                let jitter_penalty = ((jitter_ms / 20.0).min(1.0) * 50.0) as u8;
                 
                 // Buffer penalty: 0-30 points (lower usage = better)
                 // Usage > 80% = max penalty, < 50% = no penalty
@@ -1150,8 +1090,8 @@ fn start_audio_stream(
                     "quality-event",
                     QualityEvent {
                         score,
-                        jitter: jitter_avg,
-                        avg_latency,
+                        jitter: jitter_ms,
+                        avg_latency: avg_latency_ms,
                         buffer_health,
                         error_count: consecutive_errors,
                     },
@@ -1162,16 +1102,16 @@ fn start_audio_stream(
             // Adaptive buffer sizing - check periodically
             if enable_adaptive_buffer && last_buffer_check.elapsed() >= Duration::from_secs(BUFFER_CHECK_INTERVAL_SECS) {
                 // Determine target buffer size based on jitter (using network-aware ranges)
-                let target_buffer_ms = if jitter_avg < 5.0 {
+                let target_buffer_ms = if jitter_ms < 5.0 {
                     // Low jitter - can use smaller buffer
                     adaptive_min_ms
-                } else if jitter_avg > 15.0 {
+                } else if jitter_ms > 15.0 {
                     // High jitter - need larger buffer
                     adaptive_max_ms
                 } else {
                     // Medium jitter scale linearly between min and max
                     // jitter 5-15ms maps to min-max buffer
-                    let jitter_ratio = (jitter_avg - 5.0) / 10.0; // 0.0 to 1.0
+                    let jitter_ratio = (jitter_ms - 5.0) / 10.0; // 0.0 to 1.0
                     let buffer_range = adaptive_max_ms - adaptive_min_ms;
                     adaptive_min_ms + (buffer_range as f32 * jitter_ratio) as u32
                 };
@@ -1181,9 +1121,9 @@ fn start_audio_stream(
                 
                 if size_diff_pct > 10.0 {
                     let reason = if target_buffer_ms > current_buffer_ms {
-                        format!("Increased due to high jitter ({:.1}ms)", jitter_avg)
+                        format!("Increased due to high jitter ({:.1}ms)", jitter_ms)
                     } else {
-                        format!("Decreased due to low jitter ({:.1}ms)", jitter_avg)
+                        format!("Decreased due to low jitter ({:.1}ms)", jitter_ms)
                     };
                     
                     emit_log(
@@ -1191,7 +1131,7 @@ fn start_audio_stream(
                         "info",
                         format!(
                             "Adaptive buffer: {}ms → {}ms (jitter: {:.1}ms, range: {}-{}ms). {}",
-                            current_buffer_ms, target_buffer_ms, jitter_avg,
+                            current_buffer_ms, target_buffer_ms, jitter_ms,
                             adaptive_min_ms, adaptive_max_ms, reason
                         ),
                     );

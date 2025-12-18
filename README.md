@@ -69,7 +69,7 @@
 - ✅ **Precision Audio Pacing** - Token Bucket algorithm for mathematically perfect transmission timing (v1.5.9+)
 - ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
-- ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter
+- ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on **real-time Jitter/Latency** (v1.6.3)
 - ✅ **Silence Detection** - RMS-based "Stop Sending" bandwidth saver (v1.6.0)
 - ✅ **Auto-Reconnect** - Resilient connection management
 - ✅ **Multi-Profile Support** - Save and switch between configurations
@@ -94,8 +94,8 @@
 ### User Experience
 
 - 🎨 **Modern UI** - Clean, icon-based tabbed interface
-- � **Real-time Statistics** - Monitor bitrate, uptime, data sent
-- �📶 **Network Quality Metrics** - Real-time health score (Excellent/Good/Fair/Poor)
+- 📊 **Real-time Statistics** - Monitor bitrate, uptime, data sent
+- 📈 **Network Quality Metrics** - Real-time health score with **Jitter & Latency** tracking (v1.6.3)
 - 📉 **Jitter Monitoring** - Live tracking of network stability
 - 📝 **Activity Logs** - Track connection events, buffer resizes, and errors
 - 🌙 **Minimize to Tray** - Never quits, always accessible
