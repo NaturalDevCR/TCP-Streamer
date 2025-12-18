@@ -546,6 +546,27 @@ fn start_audio_stream(
         let mut pacer_frames_sent: u64 = 0;
         let mut pacer_initialized = false;
 
+        // --- PREFILL GATE: Wait for buffer to fill before starting transmission ---
+        // This prevents "cold start" stuttering by ensuring we have a cushion of data (1000ms).
+        // Works for Windows, Linux, and macOS equally.
+        let prefill_samples = sample_rate as usize * 1; // 1 second (1000ms) of audio
+        emit_log(
+            &app_handle_net,
+            "info",
+            format!("Buffering... waiting for {} samples (1000ms)", prefill_samples),
+        );
+        
+        while cons.len() < prefill_samples && is_running_clone.load(Ordering::Relaxed) {
+             thread::sleep(Duration::from_millis(10));
+        }
+        
+        emit_log(
+            &app_handle_net,
+            "success",
+            "Buffer prefilled! Starting transmission.".to_string(),
+        );
+        // --------------------------------------------------------------------------
+
         // Initialize Silence Detection
         let mut last_audio_activity = Instant::now();
 
@@ -1086,18 +1107,22 @@ fn start_audio_stream(
             let current_rms = (sum_squares / data.len() as f32).sqrt();
 
             // 1. Visual Smoothing
-            if current_rms > self.smoothed_rms {
-                self.smoothed_rms = 0.5 * current_rms + 0.5 * self.smoothed_rms;
+            // UI expects 0-32768 scale (legacy compatibility), but F32 is 0.0-1.0
+            // We scale it up for the UI and logic.
+            let scaled_rms = current_rms * 32768.0;
+
+            if scaled_rms > self.smoothed_rms {
+                self.smoothed_rms = 0.5 * scaled_rms + 0.5 * self.smoothed_rms;
             } else {
-                self.smoothed_rms = 0.05 * current_rms + 0.95 * self.smoothed_rms;
+                self.smoothed_rms = 0.05 * scaled_rms + 0.95 * self.smoothed_rms;
             }
 
             // 2. Signal Average
-            if current_rms > silence_threshold {
+            if scaled_rms > silence_threshold {
                 if self.signal_average == 0.0 {
-                    self.signal_average = current_rms;
+                    self.signal_average = scaled_rms;
                 } else {
-                    self.signal_average = 0.01 * current_rms + 0.99 * self.signal_average;
+                    self.signal_average = 0.01 * scaled_rms + 0.99 * self.signal_average;
                 }
             }
             
@@ -1116,12 +1141,14 @@ fn start_audio_stream(
             }
 
             // Processing Logic
-            if current_rms > silence_threshold {
+            // Processing Logic
+            // Comparison is done against the SCALED RMS because silence_threshold comes from UI (0-10000)
+            if scaled_rms > silence_threshold {
                 // Audio detected
                 if let Some(start) = self.silence_start {
                     let duration = start.elapsed();
                     if duration.as_secs() > 1 {
-                        emit_log(&self.app_handle, "info", format!("Audio resumed ({:.1}) after {:.1}s", current_rms, duration.as_secs_f32()));
+                        emit_log(&self.app_handle, "info", format!("Audio resumed ({:.1}) after {:.1}s", scaled_rms, duration.as_secs_f32()));
                     }
                     self.silence_start = None;
                     self.transmission_stopped = false;
