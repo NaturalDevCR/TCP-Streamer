@@ -427,11 +427,7 @@ fn start_audio_stream(
         found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
     };
 
-    let config = cpal::StreamConfig {
-        channels: 2,
-        sample_rate: cpal::SampleRate(sample_rate),
-        buffer_size: cpal::BufferSize::Fixed(buffer_size),
-    };
+
 
     // 1. Setup Ring Buffer with Smart Sizing
     // Adjust ring buffer duration based on device type for network-aware buffering
@@ -460,8 +456,8 @@ fn start_audio_stream(
         ),
     );
     
-    let rb = HeapRb::<i16>::new(ring_buffer_size);
-    let (mut prod, mut cons) = rb.split();
+    let rb = HeapRb::<f32>::new(ring_buffer_size);
+    let (prod, mut cons) = rb.split();
 
     // Shared stats
     let bytes_sent = Arc::new(AtomicU64::new(0));
@@ -502,7 +498,7 @@ fn start_audio_stream(
         let server_addr = format!("{}:{}", ip_clone, port);
         let mut sequence: u32 = 0;
         // Dynamic chunk size
-        let mut temp_buffer = vec![0i16; chunk_size as usize];
+        let mut temp_buffer = vec![0.0f32; chunk_size as usize];
         let _dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
@@ -588,8 +584,8 @@ fn start_audio_stream(
             
             let mut sum_squares = 0.0;
             for sample in &temp_buffer[0..count] {
-                let norm = *sample as f32 / 32768.0;
-                sum_squares += norm * norm;
+                // Already normalized f32
+                sum_squares += sample * sample;
             }
             let rms = (sum_squares / count as f32).sqrt();
             let is_silent = rms < silence_threshold;
@@ -762,7 +758,10 @@ fn start_audio_stream(
                 let data_len = (count * 2) as u32;
                 let mut payload = Vec::with_capacity(data_len as usize);
                 for i in 0..count {
-                    payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
+                    // CONVERT F32 -> I16 (Network Edge)
+                    let sample = temp_buffer[i].clamp(-1.0, 1.0);
+                    let sample_i16 = (sample * 32767.0) as i16;
+                    payload.extend_from_slice(&sample_i16.to_le_bytes());
                 }
 
                 // Jitter Calculation (Deviation from schedule)
@@ -962,14 +961,6 @@ fn start_audio_stream(
     };
 
 
-    // RMS Silence Detection State
-    let mut silence_start: Option<Instant> = None;
-    let mut transmission_stopped = false;
-    let app_handle_audio = app_handle.clone();
-    
-    // Smoothing state for UI indicator
-    let mut smoothed_rms: f32 = 0.0;
-    let mut signal_average: f32 = 0.0; // Average volume ONLY when audio is present
 
     // Define the data callback (closure)
     // We need to clone the necessary variables to move them into the closure
@@ -991,202 +982,238 @@ fn start_audio_stream(
     // Configure WASAPI buffer: use Default for loopback (more compatible)
     // Fixed buffer size often fails with loopback, so we use Default and rely on
     // the larger ring buffer for stability
-    let stream_config = if is_loopback {
-        emit_log(
-            &app_handle,
-            "debug",
-            "WASAPI loopback: Using Default buffer size for compatibility".to_string(),
-        );
-        cpal::StreamConfig {
+    // 4. Setup Ring Buffer (Existing code ends around here)
+    
+    // 5. Determine Stream Config (Dynamic Format)
+    let (stream_config, selected_format) = {
+        // Detect supported formats
+        let supported_configs: Vec<_> = device.supported_input_configs().map_err(|e| e.to_string())?.collect();
+        let mut best_config_range = None;
+
+        // Priority: F32 > I16 > U16 (F32 is preferred for quality and is native on PipeWire/Linux)
+        for format in [cpal::SampleFormat::F32, cpal::SampleFormat::I16, cpal::SampleFormat::U16] {
+            for range in &supported_configs {
+                if range.sample_format() == format && range.channels() == 2 {
+                    if range.min_sample_rate().0 <= sample_rate && range.max_sample_rate().0 >= sample_rate {
+                        best_config_range = Some(range.clone());
+                        break;
+                    }
+                }
+            }
+            if best_config_range.is_some() { break; }
+        }
+
+        // Fallback or Loopback-specific logic
+        if best_config_range.is_none() {
+             for range in &supported_configs {
+                // Relaxed check: just matching rate and channels
+                if range.channels() == 2 && range.min_sample_rate().0 <= sample_rate && range.max_sample_rate().0 >= sample_rate {
+                    best_config_range = Some(range.clone());
+                    emit_log(&app_handle, "warning", format!("Fallback format: {:?}", range.sample_format()));
+                    break;
+                }
+            }
+        }
+
+        let config_range = best_config_range.ok_or_else(|| 
+            format!("No supported config found for 2 channels at {}Hz", sample_rate)
+        )?;
+
+        let selected_format = config_range.sample_format();
+        emit_log(&app_handle, "info", format!("Detected Input Format: {:?}", selected_format));
+
+        // Use Default buffer for Loopback (compatibility) or Fixed for standard
+        let buffer_size_setting = if is_loopback {
+            cpal::BufferSize::Default
+        } else {
+             cpal::BufferSize::Fixed(buffer_size)
+        };
+
+        (cpal::StreamConfig {
             channels: 2,
             sample_rate: cpal::SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default,
-        }
-    } else {
-        emit_log(
-            &app_handle,
-            "debug",
-            format!("Standard input: Using Fixed buffer size ({})", buffer_size),
-        );
-        config
+            buffer_size: buffer_size_setting,
+        }, selected_format)
     };
 
-    let audio_stream = device
-        .build_input_stream(
-            &stream_config,
-            move |data: &[i16], _: &_| {
-                // Read dynamic settings
-                let silence_threshold = f32::from_bits(SILENCE_THRESHOLD_BITS.load(Ordering::Relaxed));
-                let silence_timeout_seconds = SILENCE_TIMEOUT_SECS.load(Ordering::Relaxed);
+    // Shared producer (mutex wrapped for multiple closures - uncontended in practice)
+    let prod = Arc::new(Mutex::new(prod));
 
-                // Calculate RMS for silence detection
-                let mut sum_squares = 0.0;
-                for &sample in data {
-                    sum_squares += (sample as f32) * (sample as f32);
-                }
-                let current_rms = (sum_squares / data.len() as f32).sqrt();
-                
-                // 1. Visual Smoothing (Attack/Decay) for the Bar
-                if current_rms > smoothed_rms {
-                    smoothed_rms = 0.5 * current_rms + 0.5 * smoothed_rms;
+
+
+    // 4. Define Audio Processing Function (Local Helper)
+    // This avoids code duplication across F32/I16/U16 arms.
+    // It takes a slice of NORMALIZED I16 samples.
+    
+    // State captured by closures. Ideally we'd put this in a struct, 
+    // but for simplicity we'll just instantiate the state variables inside each closure 
+    // effectively duplicating the "state machine" per stream, which is fine because only one stream runs.
+    // WAIT: `process_audio_i16` needs access to `prod` and `app_handle`.
+    // It also needs mut access to `smoothed_rms`, `signal_average`, `silence_start`, etc.
+    // A clean way is to define a struct `AudioProcessor` that holds this state and has a `process` method.
+
+    struct AudioProcessor {
+        prod: Arc<Mutex<ringbuf::Producer<f32, Arc<ringbuf::HeapRb<f32>>>>>,
+        app_handle: AppHandle,
+        smoothed_rms: f32,
+        signal_average: f32,
+        silence_start: Option<Instant>,
+        transmission_stopped: bool,
+    }
+
+    impl AudioProcessor {
+        fn new(prod: Arc<Mutex<ringbuf::Producer<f32, Arc<ringbuf::HeapRb<f32>>>>>, app_handle: AppHandle) -> Self {
+            Self {
+                prod,
+                app_handle,
+                smoothed_rms: 0.0,
+                signal_average: 0.0,
+                silence_start: None,
+                transmission_stopped: false,
+            }
+        }
+
+        fn process(&mut self, data: &[f32]) {
+             // Read dynamic settings (Global Atomics)
+            let silence_threshold = f32::from_bits(SILENCE_THRESHOLD_BITS.load(Ordering::Relaxed));
+            let silence_timeout_seconds = SILENCE_TIMEOUT_SECS.load(Ordering::Relaxed);
+
+            // RMS Calculation on F32 data (Already Normalized)
+            let mut sum_squares = 0.0;
+            for &sample in data {
+                 sum_squares += sample * sample;
+            }
+            let current_rms = (sum_squares / data.len() as f32).sqrt();
+
+            // 1. Visual Smoothing
+            if current_rms > self.smoothed_rms {
+                self.smoothed_rms = 0.5 * current_rms + 0.5 * self.smoothed_rms;
+            } else {
+                self.smoothed_rms = 0.05 * current_rms + 0.95 * self.smoothed_rms;
+            }
+
+            // 2. Signal Average
+            if current_rms > silence_threshold {
+                if self.signal_average == 0.0 {
+                    self.signal_average = current_rms;
                 } else {
-                    smoothed_rms = 0.05 * current_rms + 0.95 * smoothed_rms;
+                    self.signal_average = 0.01 * current_rms + 0.99 * self.signal_average;
                 }
+            }
+            
+            // Emit UI Event (throttled)
+            // We use a static Atomic for global throttling across the app (simplest solution)
+            static LAST_VOLUME_EMIT: AtomicU64 = AtomicU64::new(0);
+            let now_millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+             if now_millis - LAST_VOLUME_EMIT.load(Ordering::Relaxed) > 100 {
+                #[derive(serde::Serialize, Clone)]
+                struct VolumePayload { current: f32, average: f32 }
+                let _ = self.app_handle.emit("volume-level", VolumePayload { 
+                    current: self.smoothed_rms, 
+                    average: self.signal_average 
+                });
+                LAST_VOLUME_EMIT.store(now_millis, Ordering::Relaxed);
+            }
 
-                // 2. Signal Average (Only update when above threshold)
-                // This helps the user see the "average volume of the music" ignoring silence
-                if current_rms > silence_threshold {
-                    if signal_average == 0.0 {
-                        signal_average = current_rms;
-                    } else {
-                        // Very slow moving average for stability
-                        signal_average = 0.01 * current_rms + 0.99 * signal_average;
+            // Processing Logic
+            if current_rms > silence_threshold {
+                // Audio detected
+                if let Some(start) = self.silence_start {
+                    let duration = start.elapsed();
+                    if duration.as_secs() > 1 {
+                        emit_log(&self.app_handle, "info", format!("Audio resumed ({:.1}) after {:.1}s", current_rms, duration.as_secs_f32()));
                     }
+                    self.silence_start = None;
+                    self.transmission_stopped = false;
                 }
                 
-                // Emit volume levels for UI (every 100ms)
-                static LAST_VOLUME_EMIT: AtomicU64 = AtomicU64::new(0);
-                let now_millis = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64;
-                let last_emit = LAST_VOLUME_EMIT.load(Ordering::Relaxed);
-                
-                if now_millis - last_emit > 100 {
-                    // Emit JSON payload with both metrics
-                    // We construct a simple JSON string manually to avoid complex struct definitions here
-                    // or just emit a tuple/struct if defined. Let's use a simple format string for now
-                    // or better, emit a struct if we can. 
-                    // Actually, emit() takes a Serialize type. Let's use a tuple or map.
-                    // Or simply emit a custom struct. Let's define a quick struct or use serde_json::json! if available.
-                    // Since we don't want to add deps inside the closure easily, let's just emit a tuple (current, average)
-                    // But the frontend expects a single value currently. We will update frontend.
-                    
-                    #[derive(serde::Serialize, Clone)]
-                    struct VolumePayload {
-                        current: f32,
-                        average: f32,
-                    }
-                    
-                    let _ = app_handle_audio.emit("volume-level", VolumePayload { 
-                        current: smoothed_rms, 
-                        average: signal_average 
-                    });
-                    
-                    LAST_VOLUME_EMIT.store(now_millis, Ordering::Relaxed);
+                // Write to Ring Buffer
+                if let Ok(mut guard) = self.prod.lock() {
+                     let pushed = guard.push_slice(data);
+                     if pushed < data.len() {
+                         static LAST_OVERFLOW: AtomicU64 = AtomicU64::new(0);
+                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+                         if now - LAST_OVERFLOW.load(Ordering::Relaxed) > 5000 {
+                             emit_log(&self.app_handle, "warning", format!("Buffer overflow: Dropped {} samples", data.len() - pushed));
+                             LAST_OVERFLOW.store(now, Ordering::Relaxed);
+                         }
+                     }
                 }
+            } else {
+                 // Silence
+                 if self.silence_start.is_none() {
+                     self.silence_start = Some(Instant::now());
+                     // Low-level debug log removed to reduce noise
+                 }
+                 
+                 let silence_duration = self.silence_start.as_ref().unwrap().elapsed();
+                 if silence_timeout_seconds == 0 || silence_duration.as_secs() < silence_timeout_seconds {
+                     // Keep transmitting silence (to maintain connection/timing)
+                      if let Ok(mut guard) = self.prod.lock() {
+                         let _ = guard.push_slice(data);
+                      }
+                 } else {
+                     if !self.transmission_stopped {
+                         emit_log(&self.app_handle, "warning", format!("Silence timeout ({}s). Stopping transmission.", silence_timeout_seconds));
+                         self.transmission_stopped = true;
+                     }
+                 }
+            }
+        }
+    }
 
-                // Use raw RMS for actual threshold logic to be precise
-                if current_rms > silence_threshold {
-                    // Audio detected
-                    if let Some(start) = silence_start {
-                        let duration = start.elapsed();
-                        if duration.as_secs() > 1 {
-                            emit_log(
-                                &app_handle_audio,
-                                "info",
-                                format!(
-                                    "Audio resumed (RMS: {:.1}) after {:.1}s silence [Threshold: {:.1}]",
-                                    current_rms, duration.as_secs_f32(), silence_threshold
-                                ),
-                            );
-                        }
-                        silence_start = None;
-                        transmission_stopped = false;
+    // 5. Build Stream based on Format
+    let audio_stream = match selected_format {
+        cpal::SampleFormat::F32 => {
+            let mut processor = AudioProcessor::new(prod.clone(), app_handle.clone());
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _: &_| {
+                     // F32 -> F32 (Passthrough)
+                     processor.process(data);
+                },
+                err_fn,
+                None
+            )
+        },
+        cpal::SampleFormat::I16 => {
+            let mut processor = AudioProcessor::new(prod.clone(), app_handle.clone());
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[i16], _: &_| {
+                    // I16 -> F32 (Normalize)
+                    let mut converted = Vec::with_capacity(data.len());
+                    for &sample in data {
+                        let s_f32 = sample as f32 / 32768.0;
+                        converted.push(s_f32);
                     }
-                    // Always push actual audio data
-                    let pushed = prod.push_slice(data);
-                    if pushed < data.len() {
-                        // Buffer overflow - log this as it indicates network can't keep up
-                        static LAST_OVERFLOW_LOG: AtomicU64 = AtomicU64::new(0);
-                        let now_millis = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as u64;
-                        let last_log = LAST_OVERFLOW_LOG.load(Ordering::Relaxed);
-                        
-                        // Log overflow every 5 seconds to avoid spam
-                        if now_millis - last_log > 5000 {
-                            emit_log(
-                                &app_handle_audio,
-                                "warning",
-                                format!(
-                                    "Buffer overflow: Dropped {} samples. Network/CPU too slow! Consider increasing ring buffer or improving network.",
-                                    data.len() - pushed
-                                ),
-                            );
-                            LAST_OVERFLOW_LOG.store(now_millis, Ordering::Relaxed);
-                        }
+                    processor.process(&converted);
+                },
+                err_fn,
+                None
+            )
+        },
+        cpal::SampleFormat::U16 => {
+            let mut processor = AudioProcessor::new(prod.clone(), app_handle.clone());
+             device.build_input_stream(
+                &stream_config,
+                move |data: &[u16], _: &_| {
+                    // U16 -> F32 (Normalize)
+                    let mut converted = Vec::with_capacity(data.len());
+                    for &sample in data {
+                        // u16 is 0..65535. center is 32768.
+                        // (s - 32768) / 32768.0
+                        let s_f32 = (sample as f32 - 32768.0) / 32768.0;
+                        converted.push(s_f32);
                     }
-                } else {
-                    // Silence detected
-                    if silence_start.is_none() {
-                        silence_start = Some(Instant::now());
-                        emit_log(
-                            &app_handle_audio, 
-                            "debug", 
-                            format!(
-                                "Silence detected (RMS: {:.2} < Threshold: {:.2})",
-                                current_rms, silence_threshold
-                            )
-                        );
-                    } else {
-                        // Log RMS occasionally even during silence to debug
-                        let silence_duration = silence_start.as_ref().unwrap().elapsed();
-                        if silence_duration.as_millis() % 5000 < 50 { // Log roughly every 5s
-                             // Debug log removed to reduce noise
-                        }
-                    }
-                    
-                    let silence_duration = silence_start.as_ref().unwrap().elapsed();
-                    
-                    if silence_timeout_seconds == 0 || silence_duration.as_secs() < silence_timeout_seconds {
-                        // Within grace period or timeout disabled - keep transmitting
-                        let pushed = prod.push_slice(data);
-                        if pushed < data.len() {
-                            // Buffer overflow during silence - log this
-                            static LAST_SILENCE_OVERFLOW_LOG: AtomicU64 = AtomicU64::new(0);
-                            let now_millis = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis() as u64;
-                            let last_log = LAST_SILENCE_OVERFLOW_LOG.load(Ordering::Relaxed);
-                            
-                            // Log overflow every 5 seconds
-                            if now_millis - last_log > 5000 {
-                                emit_log(
-                                    &app_handle_audio,
-                                    "warning",
-                                    format!(
-                                        "Buffer overflow during silence: Dropped {} samples. Network/CPU too slow!",
-                                        data.len() - pushed
-                                    ),
-                                );
-                                LAST_SILENCE_OVERFLOW_LOG.store(now_millis, Ordering::Relaxed);
-                            }
-                        }
-                    } else {
-                        // Timeout exceeded - stop transmission to save bandwidth
-                        if !transmission_stopped {
-                            // Use WARNING level so user clearly sees why streaming stopped
-                            emit_log(
-                                &app_handle_audio,
-                                "warning",
-                                format!(
-                                    "⚠️ TRANSMISSION STOPPED: Silence timeout exceeded ({}s). Audio below threshold {:.1}. Disable silence detection or increase timeout if this is unexpected.",
-                                    silence_timeout_seconds, silence_threshold
-                                )
-                            );
-                            transmission_stopped = true;
-                        }
-                        // Don't push anything - saves bandwidth
-                    }
-                }
-            },
-            err_fn,
-            None,
-        )
-        .map_err(|e| e.to_string())?;
+                    processor.process(&converted);
+                },
+                err_fn,
+                None
+            )
+        },
+         _ => return Err(format!("Unsupported sample format: {:?}", selected_format)),
+    }.map_err(|e| e.to_string())?;
 
     Ok((
         audio_stream,

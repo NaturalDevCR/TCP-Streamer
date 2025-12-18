@@ -747,6 +747,17 @@
           <div class="settings-card">
             <h3>🎯 Audio Configuration</h3>
               <div class="doc-section">
+                <h4>Audio Engine v1.8 (F32 Native)</h4>
+                <p>
+                  <strong>New in v1.8.0</strong>: The audio core now processes everything in 
+                  high-precision 32-bit Floating Point (F32).
+                </p>
+                <ul>
+                  <li><strong>Crystal Clear</strong>: Prevents internal clipping and digital noise.</li>
+                  <li><strong>Linux Fix</strong>: Fully solves "loud static" on PipeWire/PulseAudio.</li>
+                  <li><strong>Input</strong>: Supports F32, I16, and U16 formats automatically.</li>
+                </ul>
+
                 <h4>High Precision Pacing (v1.7.0)</h4>
                 <p>
                   Eliminates network jitter caused by OS scheduling. Uses a
@@ -760,7 +771,7 @@
                   </li>
                   <li>
                     <strong>Note</strong>: Uses slightly more CPU (active waiting
-                    for < 1.5ms per chunk).
+                    for &lt; 1.5ms per chunk).
                   </li>
                 </ul>
               </div>

@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -68,7 +68,7 @@
 - ✅ **Smart Deep Sleep** - Auto-disconnect on prolonged silence to prevent "zombies" (v1.6.0)
 - ✅ **Precision Audio Pacing** - Token Bucket algorithm for mathematically perfect transmission timing
 - ✅ **Hybrid Spin-Wait Strategy** - Sub-millisecond timing precision via spin-loop (v1.7.0)
-- ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
+- ✅ **Robust Audio Engine (v1.8.0)** - Native F32 internal architecture; eliminates clipping and Linux noise issues
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
 - ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter
 - ✅ **Silence Detection** - RMS-based "Stop Sending" bandwidth saver (v1.6.0)
