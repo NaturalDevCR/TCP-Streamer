@@ -229,7 +229,7 @@ function updateQualityDisplay(quality) {
   if (indicator) indicator.style.color = color;
   if (value)
     value.innerHTML = `<span class="quality-indicator" style="color: ${color}">●</span> ${text} (${quality.score})`;
-  if (jitter) jitter.textContent = quality.jitter.toFixed(1) + " ms";
+  if (jitter) jitter.textContent = quality.jitter.toFixed(2) + " ms";
 
   // Show warning BOTH as toast AND log if quality drops
   if (quality.score < 50 && !window.qualityWarningShown) {
@@ -677,7 +677,7 @@ async function init() {
     // For now, I'll update the HTML to 1.1.0 manually in the release step,
     // or better, let's add a simple command to get version.
     // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
-    document.getElementById("app-version").textContent = "1.5.8";
+    document.getElementById("app-version").textContent = "1.6.5";
   } catch (e) {
     console.warn("Failed to set version", e);
   }

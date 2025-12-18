@@ -57,7 +57,9 @@ struct DriftEvent {
 static SILENCE_THRESHOLD_BITS: AtomicU32 = AtomicU32::new(0); // f32 stored as u32 bits
 static SILENCE_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(0);
 static DRIFT_CORRECTION_PPM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
 static AUTO_SYNC_ENABLED: AtomicBool = AtomicBool::new(false);
+static NET_JITTER_US: AtomicU64 = AtomicU64::new(0);
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
@@ -449,6 +451,11 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
         let mut consecutive_errors = 0;
         let mut log_counter: usize = 0;
         
+        // Jitter calculation state (RFC 3550)
+        let mut prev_transit: i64 = 0;
+        let mut jitter_val: f64 = 0.0;
+        let mut first_packet = true;
+        
         loop {
             if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
                 break;
@@ -519,8 +526,27 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                             // Sanity check: Offset > 5 seconds (5,000,000 us) is invalid for sync
                             if offset_micros.abs() > 5_000_000 {
                                 emit_log(&app_handle, "warning", format!("Sync: Offset too large ({}us), discarding sample", offset_micros));
+
                                 has_prev = false; // Reset filter state
                             } else {
+                                // Calculate Jitter (RFC 3550) using One-Way Delay variation
+                                // D(i,j) = (Rj - Sj) - (Ri - Si)
+                                // Transit = t_server_recv - t_client_sent
+                                let transit = t_server_recv - t_client_sent;
+                                
+                                if !first_packet {
+                                    let d = transit - prev_transit;
+                                    let d_abs = d.abs() as f64;
+                                    // J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
+                                    jitter_val = jitter_val + (d_abs - jitter_val) / 16.0;
+                                    
+                                    // Store for main thread
+                                    NET_JITTER_US.store(jitter_val as u64, Ordering::Relaxed);
+                                } else {
+                                    first_packet = false;
+                                }
+                                prev_transit = transit;
+
                                 let ppm_inst = if has_prev {
                                     let delta_offset = offset_micros - last_offset;
                                     let delta_time = t_client_recv - last_time;
@@ -775,6 +801,7 @@ fn start_audio_stream(
         // Quality tracking variables
         let mut avg_latency_ms: f32 = 0.0; // EWMA of write latency
         let mut jitter_ms: f32 = 0.0;      // EWMA of jitter
+        let mut scheduler_jitter_ms: f32 = 0.0; // Pacer sleep variance
         let mut previous_write_dur: f32 = 0.0;
         let mut consecutive_errors: u64 = 0;
         let mut last_quality_emit = Instant::now();
@@ -995,12 +1022,26 @@ fn start_audio_stream(
 
                 if target_time > now {
                     let wait_time = target_time - now;
+                    let sleep_start = Instant::now();
                     if wait_time > Duration::from_millis(4) {
                         thread::sleep(wait_time);
                     } else if wait_time > Duration::from_micros(500) {
                         thread::sleep(wait_time);
                     } else {
                         thread::yield_now();
+                    }
+                    // Calculate Scheduler Jitter
+                    let actual_sleep = sleep_start.elapsed();
+                    let sleep_diff = if actual_sleep > wait_time {
+                        actual_sleep - wait_time
+                    } else {
+                        wait_time - actual_sleep
+                    };
+                    let sj_ms = sleep_diff.as_secs_f32() * 1000.0;
+                    if scheduler_jitter_ms == 0.0 {
+                        scheduler_jitter_ms = sj_ms;
+                    } else {
+                        scheduler_jitter_ms = 0.1 * sj_ms + 0.9 * scheduler_jitter_ms;
                     }
                 } else {
                     if now.duration_since(target_time) > Duration::from_millis(ring_buffer_duration_ms as u64) {
@@ -1033,17 +1074,24 @@ fn start_audio_stream(
                             avg_latency_ms = 0.1 * write_dur_ms + 0.9 * avg_latency_ms;
                         }
                         
-                        // Update Jitter EWMA
-                        // Jitter = |Current_Delta - Prev_Delta| (RFC approach simplified)
-                        // Or just |Current_Lat - Prev_Lat|? 
-                        // RFC 3550: J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
-                        // Here "D" is difference in packet spacing vs arrival.
-                        // Since we are sender, "Write Time Variation" is a good proxy for "Congestion Jitter"
-                        let delta = (write_dur_ms - previous_write_dur).abs();
-                        if jitter_ms == 0.0 {
-                            jitter_ms = delta;
+                        // Update Jitter Strategy
+                        // 1. Try to get Network Jitter from Sync Thread
+                        let net_jitter_us = NET_JITTER_US.load(Ordering::Relaxed);
+                        
+                        if net_jitter_us > 0 {
+                            jitter_ms = net_jitter_us as f32 / 1000.0;
                         } else {
-                            jitter_ms = 0.1 * delta + 0.9 * jitter_ms;
+                            // 2. Fallback: Use Scheduler Jitter + Write Variance
+                            // This ensures we show non-zero values even if Sync is off
+                            // Combining sleep variance (system load) and write variance (buffer block)
+                            let write_delta = (write_dur_ms - previous_write_dur).abs();
+                            let combined_local_jitter = scheduler_jitter_ms + write_delta;
+                            
+                            if jitter_ms == 0.0 {
+                                jitter_ms = combined_local_jitter;
+                            } else {
+                                jitter_ms = 0.1 * combined_local_jitter + 0.9 * jitter_ms;
+                            }
                         }
                         previous_write_dur = write_dur_ms;
 
