@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "tcp-streamer",
-  "version": "1.6.5",
-  "identifier": "com.jdavidoa91.tcp-streamer",
+  "version": "1.6.6",
+  "identifier": "com.naturaldev.tcpstreamer",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",

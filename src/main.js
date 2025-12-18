@@ -38,7 +38,7 @@ let tabBtns, tabPanes;
 let loopbackMode = false;
 let loopbackModeInput;
 let networkPresetSelect, adaptiveBufferCheck, minBufferInput, maxBufferInput;
-let driftCorrectionSlider, driftCorrectionInput, autoSyncCheck, driftStatus;
+let driftCorrectionSlider, driftCorrectionInput, autoSyncCheck, driftStatus, snapcastModeCheck, snapcastSettingsContainer;
 let driftCorrectionPpm = 0;
 
 const MAX_LOGS = 100;
@@ -376,6 +376,13 @@ async function loadSettings() {
         updateDriftUIState(settings.auto_sync);
     }
 
+    if (settings.snapcast_mode !== undefined && snapcastModeCheck) {
+        snapcastModeCheck.checked = settings.snapcast_mode;
+        if (snapcastSettingsContainer) {
+            snapcastSettingsContainer.style.display = settings.snapcast_mode ? "block" : "none";
+        }
+    }
+
     // EQ and Gain removed
 
     // Set profile dropdown
@@ -424,6 +431,7 @@ async function saveSettings() {
       network_preset: networkPresetSelect.value,
       drift_correction_ppm: parseInt(driftCorrectionInput.value),
       auto_sync: autoSyncCheck ? autoSyncCheck.checked : false,
+      snapcast_mode: snapcastModeCheck ? snapcastModeCheck.checked : false,
     };
 
     // Get existing profiles
@@ -677,7 +685,7 @@ async function init() {
     // For now, I'll update the HTML to 1.1.0 manually in the release step,
     // or better, let's add a simple command to get version.
     // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
-    document.getElementById("app-version").textContent = "1.6.5";
+    document.getElementById("app-version").textContent = "1.6.6";
   } catch (e) {
     console.warn("Failed to set version", e);
   }
@@ -791,6 +799,30 @@ async function init() {
   driftCorrectionInput = document.getElementById("drift-correction-input");
   autoSyncCheck = document.getElementById("auto-sync-check");
   driftStatus = document.getElementById("drift-status");
+  snapcastModeCheck = document.getElementById("snapcast-mode-check");
+  snapcastSettingsContainer = document.getElementById("snapcast-settings-container");
+
+  // Snapcast Mode Toggle Logic
+  if (snapcastModeCheck && snapcastSettingsContainer) {
+    snapcastModeCheck.addEventListener("change", (e) => {
+        const enabled = e.target.checked;
+        snapcastSettingsContainer.style.display = enabled ? "block" : "none";
+        saveSettings();
+        
+        // If disabled, we should probably disable Auto Sync to be safe
+        if (!enabled && autoSyncCheck && autoSyncCheck.checked) {
+            autoSyncCheck.checked = false;
+            // Update backend
+             invoke("set_auto_sync", {
+                enabled: false,
+                ip: ipInput.value,
+                appHandle: null // Backend handles handle
+            }).catch(console.error);
+            updateDriftUIState(false);
+            showNotification("Snapcast features disabled", "info");
+        }
+    });
+  }
 
   // Sync Slider and Input (Real-time update)
   if (driftCorrectionSlider && driftCorrectionInput) {

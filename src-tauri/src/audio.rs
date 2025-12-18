@@ -498,30 +498,66 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                                 break; // Reconnect
                             }
 
-                            // Read response (26 bytes header)
+                            // Read response header (26 bytes)
                             let mut response_buf = [0u8; 26];
                             if let Err(e) = stream.read_exact(&mut response_buf) {
                                 emit_log(&app_handle, "warning", format!("Sync read error: {}", e));
                                 break; 
                             }
 
-                            // Parse response
-                            // recv_sec is at offset 14 (4 bytes)
-                            // recv_usec is at offset 18 (4 bytes)
+                            // Validar Tipo de Mensaje (Offset 0-2)
+                            let msg_type = u16::from_le_bytes(response_buf[0..2].try_into().unwrap());
+                            if msg_type != 4 { // kTime
+                                emit_log(&app_handle, "warning", format!("Received non-Time message: {}", msg_type));
+                                continue;
+                            }
+
+                            // Debug Log Raw Header
+                            // trace!("Raw header: {:?}", &response_buf);
+
+                            // Read Payload if present (Size is at offset 22)
+                            let size = u32::from_le_bytes(response_buf[22..26].try_into().unwrap());
+                            let mut latency_sec: i32 = 0;
+                            let mut latency_usec: i32 = 0;
+                            
+                            if size > 0 {
+                                let mut payload_buf = vec![0u8; size as usize];
+                                if let Err(e) = stream.read_exact(&mut payload_buf) {
+                                    emit_log(&app_handle, "warning", format!("Sync payload read error: {}", e));
+                                    break;
+                                }
+                                
+                                // Parse latency from payload (first 8 bytes)
+                                if size >= 8 {
+                                    latency_sec = i32::from_le_bytes(payload_buf[0..4].try_into().unwrap());
+                                    latency_usec = i32::from_le_bytes(payload_buf[4..8].try_into().unwrap());
+                                }
+                            }
+
+                            // Parse Header Fields
+                            // sent (6-13), received (14-21)
                             let recv_sec = i32::from_le_bytes(response_buf[14..18].try_into().unwrap());
                             let recv_usec = i32::from_le_bytes(response_buf[18..22].try_into().unwrap());
+                            let server_latency = (latency_sec as i64 * 1_000_000) + latency_usec as i64;
+
+                            // Debug Parsed Values
+                            // trace!("Parsed: recv={}.{}, latency={}us", recv_sec, recv_usec, server_latency);
                             
                             // Client receive time
                             let now_recv = std::time::SystemTime::now();
                             let duration_recv = now_recv.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
 
-                            // Timestamps in microseconds
+                            // Calculate timestamps
                             let t_client_sent = (client_sent_sec as i64 * 1_000_000) + client_sent_usec as i64;
                             let t_server_recv = (recv_sec as i64 * 1_000_000) + recv_usec as i64;
                             let t_client_recv = (duration_recv.as_secs() as i64 * 1_000_000) + duration_recv.subsec_micros() as i64;
-                            
+
+                            // Calculate network latency (RTT/2) for stats
                             let latency_micros = (t_client_recv - t_client_sent) / 2;
-                            let offset_micros = t_server_recv - t_client_sent - latency_micros;
+
+                            // Calculate Offset using Snapcast algorithm
+                            // offset = t_server_recv - t_client_sent - (server_latency / 2)
+                            let offset_micros = t_server_recv - t_client_sent - (server_latency / 2);
                             
                             // Sanity check: Offset > 5 seconds (5,000,000 us) is invalid for sync
                             if offset_micros.abs() > 5_000_000 {

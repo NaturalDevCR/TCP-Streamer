@@ -665,66 +665,80 @@
           </div>
 
           <div class="settings-card">
-            <h3>Active Rate Control</h3>
-            <div class="control-group">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                  <label class="checkbox-container">
-                    <input type="checkbox" id="auto-sync-check" />
-                    <span class="checkmark"></span>
-                    Automatic Synchronization
-                  </label>
-                  <span id="drift-status" style="font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--accent-color);">
-                    0 ppm
-                  </span>
-              </div>
-              
-              <label
-                for="drift-correction"
-                style="margin-bottom: 8px; display: block"
-                >Manual Correction (PPM)</label
-              >
-              <div style="display: flex; align-items: center; gap: 10px">
-                <input
-                  type="range"
-                  id="drift-correction-slider"
-                  min="-2000"
-                  max="2000"
-                  step="10"
-                  value="0"
-                  style="flex: 1"
-                />
-                <input
-                  type="number"
-                  id="drift-correction-input"
-                  min="-2000"
-                  max="2000"
-                  step="10"
-                  value="0"
+            <h3>Snapcast Integration</h3>
+            <div class="control-group" style="margin-bottom: 15px;">
+                <label class="checkbox-container">
+                  <input type="checkbox" id="snapcast-mode-check" />
+                  <span class="checkmark"></span>
+                  Enable Snapcast Features
+                </label>
+                <small style="display: block; margin-top: 6px; margin-left: 28px; color: rgba(255, 255, 255, 0.5);">
+                  Enables Active Rate Control and synchronization tools specific to Snapcast clients
+                </small>
+            </div>
+
+            <div id="snapcast-settings-container" style="display: none; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 15px;">
+              <h4 style="margin: 0 0 15px 0; font-size: 0.9erm; color: var(--accent-color);">Active Rate Control</h4>
+              <div class="control-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <label class="checkbox-container">
+                      <input type="checkbox" id="auto-sync-check" />
+                      <span class="checkmark"></span>
+                      Automatic Synchronization
+                    </label>
+                    <span id="drift-status" style="font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--accent-color);">
+                      0 ppm
+                    </span>
+                </div>
+                
+                <label
+                  for="drift-correction"
+                  style="margin-bottom: 8px; display: block"
+                  >Manual Correction (PPM)</label
+                >
+                <div style="display: flex; align-items: center; gap: 10px">
+                  <input
+                    type="range"
+                    id="drift-correction-slider"
+                    min="-2000"
+                    max="2000"
+                    step="10"
+                    value="0"
+                    style="flex: 1"
+                  />
+                  <input
+                    type="number"
+                    id="drift-correction-input"
+                    min="-2000"
+                    max="2000"
+                    step="10"
+                    value="0"
+                    style="
+                      width: 70px;
+                      padding: 8px;
+                      background: rgba(0, 0, 0, 0.2);
+                      border: 1px solid rgba(255, 255, 255, 0.1);
+                      border-radius: 6px;
+                      color: white;
+                      text-align: center;
+                    "
+                  />
+                </div>
+                <small
                   style="
-                    width: 70px;
-                    padding: 8px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 6px;
-                    color: white;
-                    text-align: center;
+                    display: block;
+                    margin-top: 8px;
+                    color: rgba(255, 255, 255, 0.5);
+                    line-height: 1.4;
                   "
-                />
+                >
+                  Fine-tune playback speed to fix clock drift.<br />
+                  <span style="color: #ef4444">Negative</span> (-): Fixes latency
+                  accumulation (Recv-Q growth).<br />
+                  <span style="color: #10b981">Positive</span> (+): Fixes audio
+                  dropouts/underruns.
+                </small>
               </div>
-              <small
-                style="
-                  display: block;
-                  margin-top: 8px;
-                  color: rgba(255, 255, 255, 0.5);
-                  line-height: 1.4;
-                "
-              >
-                Fine-tune playback speed to fix clock drift.<br />
-                <span style="color: #ef4444">Negative</span> (-): Fixes latency
-                accumulation (Recv-Q growth).<br />
-                <span style="color: #10b981">Positive</span> (+): Fixes audio
-                dropouts/underruns.
-              </small>
             </div>
           </div>
 
