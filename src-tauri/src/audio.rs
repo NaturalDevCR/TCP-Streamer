@@ -210,6 +210,8 @@ impl AudioState {
                             "info",
                             format!("Starting stream to {}:{}", ip, port),
                         );
+                        
+                        let sync_ip = ip.clone(); // Clone before move
 
                         match start_audio_stream(
                             device_name,
@@ -238,7 +240,6 @@ impl AudioState {
                                 // We use the same IP, but Port 1704 (Snapcast Control Port)
                                 if AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
                                     // Start sync thread logic
-                                    let sync_ip = ip.clone();
                                     // Default control port is 1704 for binary protocol
                                     // In a full implementation we might want this configurable
                                     let sync_port = 1704; 
@@ -389,7 +390,7 @@ pub fn set_auto_sync(enabled: bool, ip: String, app_handle: AppHandle) {
 
 // --- Binary Protocol Implementation ---
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::collections::VecDeque;
 
 struct MovingAverage {
@@ -653,12 +654,7 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
     });
 }
 
-    pub fn shutdown(&self) {
-        if let Ok(tx) = self.tx.lock() {
-            let _ = tx.send(AudioCommand::Stop);
-        }
-    }
-}
+
 
 /// Gracefully close a TCP stream, ensuring FIN is sent to prevent zombie connections
 fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
@@ -1595,6 +1591,7 @@ pub async fn start_stream(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
+    drift_correction_ppm: i32,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -1615,11 +1612,11 @@ pub async fn start_stream(
         enable_adaptive_buffer,
         min_buffer_ms,
         max_buffer_ms,
+        drift_correction_ppm,
         app_handle,
-    })
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    }).map_err(|e| e.to_string())
 }
+
 
 #[tauri::command]
 pub fn update_silence_settings(threshold: f32, timeout: u64) {
