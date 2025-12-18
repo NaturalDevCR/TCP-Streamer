@@ -23,7 +23,13 @@ struct LogEvent {
     message: String,
 }
 
-
+// Health Event
+#[derive(Clone, Serialize)]
+struct HealthEvent {
+    buffer_usage: f32,    // 0.0 to 1.0
+    network_latency: u64, // ms (estimated based on write time)
+    dropped_packets: u64,
+}
 
 #[derive(Clone, Serialize)]
 struct QualityEvent {
@@ -47,19 +53,9 @@ struct BufferResizeEvent {
     reason: String,
 }
 
-#[derive(Clone, Serialize)]
-struct DriftEvent {
-    ppm: i32,
-    latency_us: i64,
-}
-
 // Global Atomic Settings for Dynamic Updates
 static SILENCE_THRESHOLD_BITS: AtomicU32 = AtomicU32::new(0); // f32 stored as u32 bits
 static SILENCE_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(0);
-static DRIFT_CORRECTION_PPM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-
-static AUTO_SYNC_ENABLED: AtomicBool = AtomicBool::new(false);
-static NET_JITTER_US: AtomicU64 = AtomicU64::new(0);
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
@@ -116,7 +112,7 @@ enum AudioCommand {
         enable_adaptive_buffer: bool,
         min_buffer_ms: u32,
         max_buffer_ms: u32,
-        drift_correction_ppm: i32,
+        enable_spin_strategy: bool,
         app_handle: AppHandle,
     },
     Stop,
@@ -137,8 +133,8 @@ impl AudioState {
             let should_reconnect = Arc::new(AtomicBool::new(false));
 
             // Keep track of current params for reconnection
-            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, drift_correction_ppm, app_handle)
-            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, bool, u32, u32, i32, AppHandle)> = None;
+            // (device_name, ip, port, sample_rate, buffer_size, ring_buffer_duration_ms, auto_reconnect, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, enable_spin_strategy, app_handle)
+            let mut _current_params: Option<(String, String, u16, u32, u32, u32, bool, bool, String, u32, f32, u64, bool, bool, u32, u32, bool, AppHandle)> = None;
 
             for command in rx {
                 match command {
@@ -159,7 +155,7 @@ impl AudioState {
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
-                        drift_correction_ppm,
+                        enable_spin_strategy,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -171,12 +167,6 @@ impl AudioState {
                         // Initialize global settings with new values
                         SILENCE_THRESHOLD_BITS.store(silence_threshold.to_bits(), Ordering::Relaxed);
                         SILENCE_TIMEOUT_SECS.store(silence_timeout_seconds, Ordering::Relaxed);
-                        
-                        // Set initial manual drift correction
-                        // Only set if auto sync is disabled, otherwise let the thread handle it
-                        if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-                            DRIFT_CORRECTION_PPM.store(drift_correction_ppm, Ordering::Relaxed);
-                        }
 
                         // Store params for reconnection
                         _current_params = Some((
@@ -196,7 +186,7 @@ impl AudioState {
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
-                            drift_correction_ppm,
+                            enable_spin_strategy,
                             app_handle.clone(),
                         ));
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
@@ -206,8 +196,6 @@ impl AudioState {
                             "info",
                             format!("Starting stream to {}:{}", ip, port),
                         );
-                        
-                        let sync_ip = ip.clone(); // Clone before move
 
                         match start_audio_stream(
                             device_name,
@@ -225,23 +213,12 @@ impl AudioState {
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
-                            drift_correction_ppm,
+                            enable_spin_strategy,
                             app_handle.clone(),
                         ) {
-                             Ok((stream, stats)) => {
+                            Ok((stream, stats)) => {
                                 stream.play().unwrap();
                                 _current_stream_handle = Some((stream, stats));
-                                
-                                // Spawn Sync Thread if Auto Sync is enabled
-                                // We use the same IP, but Port 1704 (Snapcast Control Port)
-                                if AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-                                    // Start sync thread logic
-                                    // Default control port is 1704 for binary protocol
-                                    // In a full implementation we might want this configurable
-                                    let sync_port = 1704; 
-                                    spawn_sync_thread(sync_ip, sync_port, app_handle.clone());
-                                }
-
                                 emit_log(
                                     &app_handle,
                                     "success",
@@ -291,7 +268,7 @@ impl AudioState {
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
-                        drift_correction_ppm,
+                        enable_spin_strategy,
                         app_handle,
                     )) = &_current_params
                     {
@@ -321,7 +298,7 @@ impl AudioState {
                             enable_adaptive_buffer.clone(),
                             min_buffer_ms.clone(),
                             max_buffer_ms.clone(),
-                            drift_correction_ppm.clone(),
+                            enable_spin_strategy.clone(),
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -332,13 +309,6 @@ impl AudioState {
                                     "success",
                                     "Reconnected successfully".to_string(),
                                 );
-                                
-                                // Restart sync thread on reconnect if needed
-                                if AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-                                     let sync_ip = ip.clone();
-                                     let sync_port = 1704;
-                                     spawn_sync_thread(sync_ip, sync_port, app_handle.clone());
-                                }
                             }
                             Err(e) => {
                                 emit_log(
@@ -357,296 +327,11 @@ impl AudioState {
     }
 
     pub fn shutdown(&self) {
-        // Stop sync thread implicitly by app exit or handle invalidation
         if let Ok(tx) = self.tx.lock() {
             let _ = tx.send(AudioCommand::Stop);
         }
     }
 }
-
-// Commands to control Auto Sync and Drift from UI
-
-#[tauri::command]
-pub fn set_drift_correction(ppm: i32) {
-    if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-        DRIFT_CORRECTION_PPM.store(ppm, Ordering::Relaxed);
-    }
-}
-
-#[tauri::command]
-pub fn set_auto_sync(enabled: bool, ip: String, app_handle: AppHandle) {
-    let was_enabled = AUTO_SYNC_ENABLED.swap(enabled, Ordering::Relaxed);
-    if enabled && !was_enabled {
-        // Just enabled, spawn thread
-        // We assume default port 1704
-        spawn_sync_thread(ip, 1704, app_handle);
-    }
-}
-
-
-// --- Binary Protocol Implementation ---
-
-use std::io::Read;
-use std::collections::VecDeque;
-
-struct MovingAverage {
-    window_size: usize,
-    samples: VecDeque<f64>,
-    sum: f64,
-}
-
-impl MovingAverage {
-    fn new(window_size: usize) -> Self {
-        Self {
-            window_size,
-            samples: VecDeque::with_capacity(window_size),
-            sum: 0.0,
-        }
-    }
-
-    fn add(&mut self, value: f64) -> f64 {
-        if self.samples.len() >= self.window_size {
-            if let Some(old) = self.samples.pop_front() {
-                self.sum -= old;
-            }
-        }
-        self.samples.push_back(value);
-        self.sum += value;
-        self.sum / self.samples.len() as f64
-    }
-}
-
-#[repr(C, packed)]
-struct SnapMessageHeader {
-    type_: u16,
-    id: u16,
-    ref_id: u16,
-    sent_sec: i32,
-    sent_usec: i32,
-    recv_sec: i32,
-    recv_usec: i32,
-    size: u32,
-}
-
-impl SnapMessageHeader {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(26);
-        bytes.extend_from_slice(&self.type_.to_le_bytes());
-        bytes.extend_from_slice(&self.id.to_le_bytes());
-        bytes.extend_from_slice(&self.ref_id.to_le_bytes());
-        bytes.extend_from_slice(&self.sent_sec.to_le_bytes());
-        bytes.extend_from_slice(&self.sent_usec.to_le_bytes());
-        bytes.extend_from_slice(&self.recv_sec.to_le_bytes());
-        bytes.extend_from_slice(&self.recv_usec.to_le_bytes());
-        bytes.extend_from_slice(&self.size.to_le_bytes());
-        bytes
-    }
-}
-
-fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
-    thread::spawn(move || {
-        emit_log(&app_handle, "info", format!("Starting Auto Sync with {}:{}", ip, port));
-        
-        let mut ma_filter = MovingAverage::new(200); // 200 samples window for stability
-        let mut consecutive_errors = 0;
-        let mut log_counter: usize = 0;
-        
-        // Jitter calculation state (RFC 3550)
-        let mut prev_transit: i64 = 0;
-        let mut jitter_val: f64 = 0.0;
-        let mut first_packet = true;
-        
-        loop {
-            if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-                break;
-            }
-
-            // Connect to Control Port
-            match TcpStream::connect(format!("{}:{}", ip, port)) {
-                Ok(mut stream) => {
-                    emit_log(&app_handle, "success", "Connected to Control Port".to_string());
-                    consecutive_errors = 0;
-
-                        // Use local variables instead of static mut (unsafe/not thread safe globally)
-                        let mut last_offset: i64 = 0;
-                        let mut last_time: i64 = 0;
-                        let mut has_prev: bool = false;
-
-                        loop {
-                            if !AUTO_SYNC_ENABLED.load(Ordering::Relaxed) {
-                                break;
-                            }
-
-                            let now = std::time::SystemTime::now();
-                            let duration_since_epoch = now.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
-                            let client_sent_sec = duration_since_epoch.as_secs() as i32;
-                            let client_sent_usec = duration_since_epoch.subsec_micros() as i32;
-
-                            let header = SnapMessageHeader {
-                                type_: 4, // kTime
-                                id: 1,    // Request ID
-                                ref_id: 0,
-                                sent_sec: client_sent_sec,
-                                sent_usec: client_sent_usec,
-                                recv_sec: 0,
-                                recv_usec: 0,
-                                size: 0,
-                            };
-
-                            if let Err(e) = stream.write_all(&header.to_bytes()) {
-                                emit_log(&app_handle, "warning", format!("Sync send error: {}", e));
-                                break; // Reconnect
-                            }
-
-                            // Read response header (26 bytes)
-                            let mut response_buf = [0u8; 26];
-                            if let Err(e) = stream.read_exact(&mut response_buf) {
-                                emit_log(&app_handle, "warning", format!("Sync read error: {}", e));
-                                break; 
-                            }
-
-                            // Validar Tipo de Mensaje (Offset 0-2)
-                            let msg_type = u16::from_le_bytes(response_buf[0..2].try_into().unwrap());
-                            if msg_type != 4 { // kTime
-                                emit_log(&app_handle, "warning", format!("Received non-Time message: {}", msg_type));
-                                continue;
-                            }
-
-                            // Debug Log Raw Header
-                            // trace!("Raw header: {:?}", &response_buf);
-
-                            // Read Payload if present (Size is at offset 22)
-                            let size = u32::from_le_bytes(response_buf[22..26].try_into().unwrap());
-                            let mut latency_sec: i32 = 0;
-                            let mut latency_usec: i32 = 0;
-                            
-                            if size > 0 {
-                                let mut payload_buf = vec![0u8; size as usize];
-                                if let Err(e) = stream.read_exact(&mut payload_buf) {
-                                    emit_log(&app_handle, "warning", format!("Sync payload read error: {}", e));
-                                    break;
-                                }
-                                
-                                // Parse latency from payload (first 8 bytes)
-                                if size >= 8 {
-                                    latency_sec = i32::from_le_bytes(payload_buf[0..4].try_into().unwrap());
-                                    latency_usec = i32::from_le_bytes(payload_buf[4..8].try_into().unwrap());
-                                }
-                            }
-
-                            // Parse Header Fields
-                            // sent (6-13), received (14-21)
-                            let recv_sec = i32::from_le_bytes(response_buf[14..18].try_into().unwrap());
-                            let recv_usec = i32::from_le_bytes(response_buf[18..22].try_into().unwrap());
-                            let server_latency = (latency_sec as i64 * 1_000_000) + latency_usec as i64;
-
-                            // Debug Parsed Values
-                            // trace!("Parsed: recv={}.{}, latency={}us", recv_sec, recv_usec, server_latency);
-                            
-                            // Client receive time
-                            let now_recv = std::time::SystemTime::now();
-                            let duration_recv = now_recv.duration_since(std::time::UNIX_EPOCH).unwrap_or(Duration::ZERO);
-
-                            // Calculate timestamps
-                            let t_client_sent = (client_sent_sec as i64 * 1_000_000) + client_sent_usec as i64;
-                            let t_server_recv = (recv_sec as i64 * 1_000_000) + recv_usec as i64;
-                            let t_client_recv = (duration_recv.as_secs() as i64 * 1_000_000) + duration_recv.subsec_micros() as i64;
-
-                            // Calculate network latency (RTT/2) for stats
-                            let latency_micros = (t_client_recv - t_client_sent) / 2;
-
-                            // Calculate Offset using Snapcast algorithm
-                            // offset = t_server_recv - t_client_sent - (server_latency / 2)
-                            let offset_micros = t_server_recv - t_client_sent - (server_latency / 2);
-                            
-                            // Sanity check: Offset > 5 seconds (5,000,000 us) is invalid for sync
-                            if offset_micros.abs() > 5_000_000 {
-                                emit_log(&app_handle, "warning", format!("Sync: Offset too large ({}us), discarding sample", offset_micros));
-
-                                has_prev = false; // Reset filter state
-                            } else {
-                                // Calculate Jitter (RFC 3550) using One-Way Delay variation
-                                // D(i,j) = (Rj - Sj) - (Ri - Si)
-                                // Transit = t_server_recv - t_client_sent
-                                let transit = t_server_recv - t_client_sent;
-                                
-                                if !first_packet {
-                                    let d = transit - prev_transit;
-                                    let d_abs = d.abs() as f64;
-                                    // J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
-                                    jitter_val = jitter_val + (d_abs - jitter_val) / 16.0;
-                                    
-                                    // Store for main thread
-                                    NET_JITTER_US.store(jitter_val as u64, Ordering::Relaxed);
-                                } else {
-                                    first_packet = false;
-                                }
-                                prev_transit = transit;
-
-                                let ppm_inst = if has_prev {
-                                    let delta_offset = offset_micros - last_offset;
-                                    let delta_time = t_client_recv - last_time;
-                                    
-                                    if delta_time > 0 {
-                                        (delta_offset as f64 / delta_time as f64) * 1_000_000.0
-                                    } else {
-                                        0.0
-                                    }
-                                } else {
-                                    0.0
-                                };
-                                
-                                last_offset = offset_micros;
-                                last_time = t_client_recv;
-                                has_prev = true;
-                            
-                                // Clamp instantaneous PPM to avoid explosions (-500 to 500 sanity check before filter)
-                                let clamped_inst = ppm_inst.clamp(-500.0, 500.0);
-
-                                // This instantaneous PPM is very noisy. Filter it.
-                                let filtered_ppm = ma_filter.add(clamped_inst);
-                                
-                                // Hard Clamp final PPM (-200 to 200) for safety
-                                let safe_ppm = filtered_ppm.clamp(-200.0, 200.0);
-                                
-                                // Update global atomic
-                                DRIFT_CORRECTION_PPM.store(safe_ppm as i32, Ordering::Relaxed);
-                                
-                                let _ = app_handle.emit("drift-event", DriftEvent {
-                                    ppm: safe_ppm as i32,
-                                    latency_us: latency_micros,
-                                });
-
-                                // Log roughly once per 5 seconds to avoid spamming
-                                log_counter += 1;
-                                let log_now = log_counter % 50 == 0; // 50 * 100ms = 5s
-                                
-                                if log_now {
-                                    emit_log(&app_handle, "sync", format!("Sync: Latency={}us, Offset={}us, PPM={:.1} (Avg: {:.1})", 
-                                        latency_micros, offset_micros, ppm_inst, filtered_ppm));
-                                }
-                            }
-                        
-
-                        
-                        thread::sleep(Duration::from_millis(100)); // 10 samples per sec = 200 samples is 20s window (Correct comment)
-                    }
-                }
-                Err(e) => {
-                    emit_log(&app_handle, "error", format!("Sync Connection failed: {}", e));
-                    consecutive_errors += 1;
-                    if consecutive_errors > 5 {
-                        thread::sleep(Duration::from_secs(5));
-                    } else {
-                        thread::sleep(Duration::from_secs(1));
-                    }
-                }
-            }
-        }
-    });
-}
-
-
 
 /// Gracefully close a TCP stream, ensuring FIN is sent to prevent zombie connections
 fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
@@ -671,12 +356,40 @@ fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
     // stream drops here, releasing the socket
 }
 
-/// Helper function to find audio device by name
-fn find_cpal_device(device_name: &str, is_loopback: bool, app_handle: &AppHandle) -> Result<cpal::Device, String> {
+fn start_audio_stream(
+    device_name: String,
+
+    ip: String,
+    port: u16,
+    sample_rate: u32,
+    buffer_size: u32,
+    ring_buffer_duration_ms: u32,
+    high_priority: bool,
+    dscp_strategy: String,
+    chunk_size: u32,
+    silence_threshold: f32,
+    silence_timeout_seconds: u64,
+    is_loopback: bool,
+    enable_adaptive_buffer: bool,
+    min_buffer_ms: u32,
+    max_buffer_ms: u32,
+    enable_spin_strategy: bool,
+    app_handle: AppHandle,
+) -> Result<(cpal::Stream, StreamStats), String> {
+    emit_log(
+        &app_handle,
+        "debug",
+        format!(
+            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, SilenceT={}, SilenceTO={}s, Loopback={}, AdaptiveBuf={} ({}ms-{}ms), SpinStrategy={}",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, enable_spin_strategy
+        ),
+    );
+
     let host = cpal::default_host();
     
-    if is_loopback {
-         // Loopback mode: Search in OUTPUT devices
+    // Device selection logic
+    let device = if is_loopback {
+        // Loopback mode: Search in OUTPUT devices
         // Remove "[Loopback] " prefix if present for matching
         let clean_name = device_name.replace("[Loopback] ", "");
         let mut found_device = None;
@@ -697,15 +410,15 @@ fn find_cpal_device(device_name: &str, is_loopback: bool, app_handle: &AppHandle
         
         if found_device.is_none() {
              emit_log(
-                app_handle,
+                &app_handle,
                 "error",
                 format!("Loopback device '{}' not found. Available outputs: {:?}", clean_name, device_list_log),
             );
         }
 
-        found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))
+        found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))?
     } else {
-         // Standard mode: Search in INPUT devices
+        // Standard mode: Search in INPUT devices
         let mut found_device = None;
         if let Ok(devices) = host.input_devices() {
             for dev in devices {
@@ -717,40 +430,8 @@ fn find_cpal_device(device_name: &str, is_loopback: bool, app_handle: &AppHandle
                 }
             }
         }
-        found_device.ok_or_else(|| format!("Input device not found: {}", device_name))
-    }
-}
-
-fn start_audio_stream(
-    device_name: String,
-
-    ip: String,
-    port: u16,
-    sample_rate: u32,
-    buffer_size: u32,
-    ring_buffer_duration_ms: u32,
-    high_priority: bool,
-    dscp_strategy: String,
-    chunk_size: u32,
-    silence_threshold: f32,
-    silence_timeout_seconds: u64,
-    is_loopback: bool,
-    enable_adaptive_buffer: bool,
-    min_buffer_ms: u32,
-    max_buffer_ms: u32,
-    drift_correction_ppm: i32,
-    app_handle: AppHandle,
-) -> Result<(cpal::Stream, StreamStats), String> {
-    emit_log(
-        &app_handle,
-        "debug",
-        format!(
-            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, SilenceT={}, SilenceTO={}s, Loopback={}, AdaptiveBuf={} ({}ms-{}ms), Correction={}ppm",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, drift_correction_ppm
-        ),
-    );
-
-    let device = find_cpal_device(&device_name, is_loopback, &app_handle)?;
+        found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
+    };
 
     let config = cpal::StreamConfig {
         channels: 2,
@@ -828,17 +509,14 @@ fn start_audio_stream(
         let mut sequence: u32 = 0;
         // Dynamic chunk size
         let mut temp_buffer = vec![0i16; chunk_size as usize];
-        // Pre-allocate payload buffer to prevent allocation in loop
-        let mut payload: Vec<u8> = Vec::with_capacity((chunk_size * 2) as usize);
-        let _dropped_packets: u64 = 0;
+        let mut dropped_packets: u64 = 0;
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
         
         // Quality tracking variables
-        let mut avg_latency_ms: f32 = 0.0; // EWMA of write latency
-        let mut jitter_ms: f32 = 0.0;      // EWMA of jitter
-        let mut scheduler_jitter_ms: f32 = 0.0; // Pacer sleep variance
-        let mut previous_write_dur: f32 = 0.0;
+        let mut latency_samples: Vec<f32> = Vec::with_capacity(100); //  Track last 100
+        let mut jitter_avg: f32 = 0.0; // EWMA of jitter
+        let mut last_write_time: Option<Instant> = None;
         let mut consecutive_errors: u64 = 0;
         let mut last_quality_emit = Instant::now();
         
@@ -988,7 +666,6 @@ fn start_audio_stream(
                         retry_delay = Duration::from_secs(1);
                         current_stream = Some(s);
                         emit_log(&app_handle_net, "success", "Connected successfully!".to_string());
-                        consecutive_errors = 0; // Fix: Reset errors
                         // Important: logic falls through to Sending block
                         // We reset pacer on new connection
                          pacer_initialized = false;
@@ -996,7 +673,6 @@ fn start_audio_stream(
                     Err(e) => {
                         emit_log(&app_handle_net, "error", format!("Reconnection failed: {}", e));
                         retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
-                        consecutive_errors += 1; // Fix: Track errors
                         continue; 
                     }
                 }
@@ -1004,18 +680,18 @@ fn start_audio_stream(
 
             // 4. Sending Logic
             if let Some(ref mut s) = current_stream {
-                // If we are deep sleeping (long silence), ignore this packet and stay disconnected
+                // Check if we should disconnect due to long silence
                 if is_silent && is_deep_sleep {
                      emit_log(
                         &app_handle_net,
                         "info",
                         format!("Disconnecting due to silence timeout ({}s)", silence_timeout_secs),
                      );
-                     // Close stream safely
-                     if let Some(s) = current_stream.take() {
-                         close_tcp_stream(s, "silence timeout", &app_handle_net);
-                     }
-                     // current_stream is already None because of take()
+                     // Close stream
+                     close_tcp_stream(s.try_clone().unwrap_or_else(|_| 
+                        unsafe { std::mem::zeroed() }
+                     ), "silence timeout", &app_handle_net);
+                     current_stream = None;
                      continue;
                 }
 
@@ -1032,54 +708,56 @@ fn start_audio_stream(
                 }
 
                 let chunk_frames = count as u64 / 2;
-                // Pacing with Drift Correction (Active Rate Control)
-                // We read the global atomic which can be updated by Manual Slider OR Auto Sync Thread
-                let drift_ppm = DRIFT_CORRECTION_PPM.load(Ordering::Relaxed);
-                
-                // drift_correction_ppm: Positive = faster (fix underrun), Negative = slower (fix overflow)
-                // Formula: adjusted_dur = nom_dur / (1.0 + ppm/1e6)
-                
-                let nominal_micros = (chunk_frames * 1_000_000) as f64 / sample_rate as f64;
-                let drift_factor = 1.0 + (drift_ppm as f64 / 1_000_000.0);
-                let _adjusted_micros = nominal_micros / drift_factor;
-                
-                // We track accumulated fractional microseconds to stay precise over hours
-                // But for this loop, we just need the duration for *this specific accumulated count since start*
-                
-                // Better approach for absolute tracking related to start time:
-                // Target Time = Start Time + (Total Frames Sent / (Sample Rate * DriftFactor))
-                
-                let total_sent_and_current = pacer_frames_sent + chunk_frames;
-                let expected_elapsed_micros = (total_sent_and_current as f64 * 1_000_000.0) / (sample_rate as f64 * drift_factor);
-                let expected_elapsed = Duration::from_micros(expected_elapsed_micros as u64);
-
+                let expected_elapsed = Duration::from_micros(
+                    ((pacer_frames_sent + chunk_frames) * 1_000_000) / sample_rate as u64
+                );
                 let target_time = pacer_start_time + expected_elapsed;
                 let now = Instant::now();
 
                 if target_time > now {
                     let wait_time = target_time - now;
-                    let sleep_start = Instant::now();
-                    if wait_time > Duration::from_millis(4) {
-                        thread::sleep(wait_time);
-                    } else if wait_time > Duration::from_micros(500) {
-                        thread::sleep(wait_time);
+                    
+                    if enable_spin_strategy {
+                        // Hybrid Precision Pacing (Sleep + Spin)
+                        // Strategy: Sleep for most of the time to save CPU, but wake up EARLY (1.5ms)
+                        // and spin-wait for the final approach to hit the target with microsecond precision.
+                        // This creates a consistent timing floor regardless of OS scheduler granularity.
+                        // Works on Windows/Linux/macOS effectively countering OS jitter.
+
+                        if wait_time > Duration::from_millis(3) {
+                            // Sleep leaves ~1.5ms margin for spin-loop to handle jitter
+                            thread::sleep(wait_time.saturating_sub(Duration::from_micros(1500)));
+                        }
+                        
+                        // Hot-loop for the final microseconds
+                        let spin_start = Instant::now();
+                        while Instant::now() < target_time {
+                            std::hint::spin_loop();
+                        }
+                        
+                        // CPU Monitoring - Log if we spin too long (>2ms is concerning for CPU usage)
+                         if spin_start.elapsed() > Duration::from_millis(2) {
+                             // Only log occasionally to avoid spamming
+                             static LAST_SPIN_WARN: AtomicU64 = AtomicU64::new(0);
+                             let now_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                             if now_epoch - LAST_SPIN_WARN.load(Ordering::Relaxed) > 5 {
+                                 emit_log(&app_handle_net, "warning", format!("High CPU spin wait: {:.2}ms", spin_start.elapsed().as_secs_f32() * 1000.0));
+                                 LAST_SPIN_WARN.store(now_epoch, Ordering::Relaxed);
+                             }
+                        }
                     } else {
-                        thread::yield_now();
-                    }
-                    // Calculate Scheduler Jitter
-                    let actual_sleep = sleep_start.elapsed();
-                    let sleep_diff = if actual_sleep > wait_time {
-                        actual_sleep - wait_time
-                    } else {
-                        wait_time - actual_sleep
-                    };
-                    let sj_ms = sleep_diff.as_secs_f32() * 1000.0;
-                    if scheduler_jitter_ms == 0.0 {
-                        scheduler_jitter_ms = sj_ms;
-                    } else {
-                        scheduler_jitter_ms = 0.1 * sj_ms + 0.9 * scheduler_jitter_ms;
+                        // Standard Energy-Efficient Pacing (Sleep/Yield)
+                        // Less precise (1-15ms jitter) but very low CPU usage.
+                        if wait_time > Duration::from_millis(4) {
+                            thread::sleep(wait_time);
+                        } else if wait_time > Duration::from_micros(500) {
+                            thread::sleep(wait_time);
+                        } else {
+                            thread::yield_now();
+                        }
                     }
                 } else {
+                    // Drift correction
                     if now.duration_since(target_time) > Duration::from_millis(ring_buffer_duration_ms as u64) {
                          pacer_start_time = Instant::now();
                          pacer_frames_sent = 0;
@@ -1087,54 +765,46 @@ fn start_audio_stream(
                 }
 
                 // Send
-                // Reuse payload vector to avoid allocation
-                payload.clear();
+                let data_len = (count * 2) as u32;
+                let mut payload = Vec::with_capacity(data_len as usize);
                 for i in 0..count {
                     payload.extend_from_slice(&temp_buffer[i].to_le_bytes());
                 }
 
-                let write_start = Instant::now();
-                match s.write_all(&payload) {
-                    Err(e) => {
-                        emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                        current_stream = None; 
-                        pacer_initialized = false;
-                    }
-                    Ok(_) => {
-                        let write_dur_ms = write_start.elapsed().as_micros() as f32 / 1000.0;
-                        
-                        // Update Latency EWMA (alpha = 0.1)
-                        if avg_latency_ms == 0.0 {
-                            avg_latency_ms = write_dur_ms;
-                        } else {
-                            avg_latency_ms = 0.1 * write_dur_ms + 0.9 * avg_latency_ms;
-                        }
-                        
-                        // Update Jitter Strategy
-                        // 1. Try to get Network Jitter from Sync Thread
-                        let net_jitter_us = NET_JITTER_US.load(Ordering::Relaxed);
-                        
-                        if net_jitter_us > 0 {
-                            jitter_ms = net_jitter_us as f32 / 1000.0;
-                        } else {
-                            // 2. Fallback: Use Scheduler Jitter + Write Variance
-                            // This ensures we show non-zero values even if Sync is off
-                            // Combining sleep variance (system load) and write variance (buffer block)
-                            let write_delta = (write_dur_ms - previous_write_dur).abs();
-                            let combined_local_jitter = scheduler_jitter_ms + write_delta;
-                            
-                            if jitter_ms == 0.0 {
-                                jitter_ms = combined_local_jitter;
-                            } else {
-                                jitter_ms = 0.1 * combined_local_jitter + 0.9 * jitter_ms;
-                            }
-                        }
-                        previous_write_dur = write_dur_ms;
+                // Jitter Calculation (Deviation from schedule)
+                // We use the actual time right before sending vs the target scheduled time
+                let send_time = Instant::now();
+                let deviation_ms = if send_time > target_time {
+                    send_time.duration_since(target_time).as_secs_f32() * 1000.0
+                } else {
+                    0.0
+                };
+                
+                // Exponential Weighted Moving Average (EWMA) for Jitter
+                // Alpha 0.1 gives 10-sample smoothing
+                if jitter_avg == 0.0 {
+                    jitter_avg = deviation_ms;
+                } else {
+                    jitter_avg = 0.9 * jitter_avg + 0.1 * deviation_ms;
+                }
 
-                        pacer_frames_sent += chunk_frames;
-                        let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
-                        sequence = sequence.wrapping_add(1);
+                let write_start = Instant::now();
+                if let Err(e) = s.write_all(&payload) {
+                    emit_log(&app_handle_net, "error", format!("Write error: {}", e));
+                    current_stream = None; 
+                    pacer_initialized = false;
+                } else {
+                    // Update Latency (Network Write Time)
+                    let write_duration_ms = write_start.elapsed().as_secs_f32() * 1000.0;
+                    if latency_samples.len() >= 100 {
+                        latency_samples.remove(0);
                     }
+                    latency_samples.push(write_duration_ms);
+                    
+                    pacer_frames_sent += chunk_frames;
+                    let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                    sequence = sequence.wrapping_add(1);
+                    last_write_time = Some(Instant::now());
                 }
             }
 
@@ -1160,7 +830,15 @@ fn start_audio_stream(
                 last_stats_emit = Instant::now();
             }
             
+            // Emit quality metrics every 2 seconds
             if last_quality_emit.elapsed() >= Duration::from_secs(2) {
+                // Calculate average latency
+                let avg_latency = if !latency_samples.is_empty() {
+                    latency_samples.iter().sum::<f32>() / latency_samples.len() as f32
+                } else {
+                    0.0
+                };
+                
                 // Get buffer health from the most recent buffer usage check
                 let occupied = cons.len();
                 let capacity = cons.capacity();
@@ -1169,7 +847,7 @@ fn start_audio_stream(
                 // Calculate quality score (0-100)
                 // Jitter penalty: 0-50 points (lower is better)
                 // Target jitter < 5ms = 0 penalty, >20ms = max penalty
-                let jitter_penalty = ((jitter_ms / 20.0).min(1.0) * 50.0) as u8;
+                let jitter_penalty = ((jitter_avg / 20.0).min(1.0) * 50.0) as u8;
                 
                 // Buffer penalty: 0-30 points (lower usage = better)
                 // Usage > 80% = max penalty, < 50% = no penalty
@@ -1190,8 +868,8 @@ fn start_audio_stream(
                     "quality-event",
                     QualityEvent {
                         score,
-                        jitter: jitter_ms,
-                        avg_latency: avg_latency_ms,
+                        jitter: jitter_avg,
+                        avg_latency,
                         buffer_health,
                         error_count: consecutive_errors,
                     },
@@ -1202,16 +880,16 @@ fn start_audio_stream(
             // Adaptive buffer sizing - check periodically
             if enable_adaptive_buffer && last_buffer_check.elapsed() >= Duration::from_secs(BUFFER_CHECK_INTERVAL_SECS) {
                 // Determine target buffer size based on jitter (using network-aware ranges)
-                let target_buffer_ms = if jitter_ms < 5.0 {
+                let target_buffer_ms = if jitter_avg < 5.0 {
                     // Low jitter - can use smaller buffer
                     adaptive_min_ms
-                } else if jitter_ms > 15.0 {
+                } else if jitter_avg > 15.0 {
                     // High jitter - need larger buffer
                     adaptive_max_ms
                 } else {
                     // Medium jitter scale linearly between min and max
                     // jitter 5-15ms maps to min-max buffer
-                    let jitter_ratio = (jitter_ms - 5.0) / 10.0; // 0.0 to 1.0
+                    let jitter_ratio = (jitter_avg - 5.0) / 10.0; // 0.0 to 1.0
                     let buffer_range = adaptive_max_ms - adaptive_min_ms;
                     adaptive_min_ms + (buffer_range as f32 * jitter_ratio) as u32
                 };
@@ -1221,9 +899,9 @@ fn start_audio_stream(
                 
                 if size_diff_pct > 10.0 {
                     let reason = if target_buffer_ms > current_buffer_ms {
-                        format!("Increased due to high jitter ({:.1}ms)", jitter_ms)
+                        format!("Increased due to high jitter ({:.1}ms)", jitter_avg)
                     } else {
-                        format!("Decreased due to low jitter ({:.1}ms)", jitter_ms)
+                        format!("Decreased due to low jitter ({:.1}ms)", jitter_avg)
                     };
                     
                     emit_log(
@@ -1231,7 +909,7 @@ fn start_audio_stream(
                         "info",
                         format!(
                             "Adaptive buffer: {}ms → {}ms (jitter: {:.1}ms, range: {}-{}ms). {}",
-                            current_buffer_ms, target_buffer_ms, jitter_ms,
+                            current_buffer_ms, target_buffer_ms, jitter_avg,
                             adaptive_min_ms, adaptive_max_ms, reason
                         ),
                     );
@@ -1631,7 +1309,9 @@ pub async fn start_stream(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
-    drift_correction_ppm: i32,
+    min_buffer_ms: u32,
+    max_buffer_ms: u32,
+    enable_spin_strategy: bool,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -1652,11 +1332,12 @@ pub async fn start_stream(
         enable_adaptive_buffer,
         min_buffer_ms,
         max_buffer_ms,
-        drift_correction_ppm,
+        enable_spin_strategy,
         app_handle,
-    }).map_err(|e| e.to_string())
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
-
 
 #[tauri::command]
 pub fn update_silence_settings(threshold: f32, timeout: u64) {

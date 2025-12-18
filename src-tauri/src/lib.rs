@@ -82,9 +82,7 @@ pub fn run() {
             audio::start_stream,
             audio::stop_stream,
             audio::update_silence_settings,
-            audio::get_os_type,
-            audio::set_drift_correction,
-            audio::set_auto_sync
+            audio::get_os_type
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri application")

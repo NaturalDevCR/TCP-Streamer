@@ -21,7 +21,7 @@ let deviceSelect,
   toggleBtn,
   statusBadge,
   statusText;
-let priorityCheck, dscpSelect, chunkSizeSelect;
+let priorityCheck, dscpSelect, chunkSizeSelect, spinStrategyCheck;
 let silenceThreshold = 0;
 let silenceTimeoutSeconds = 0; // Default to 0 (disabled) to prevent confusion
 let disableSilenceDetection = false; // Complete bypass of silence detection
@@ -38,8 +38,6 @@ let tabBtns, tabPanes;
 let loopbackMode = false;
 let loopbackModeInput;
 let networkPresetSelect, adaptiveBufferCheck, minBufferInput, maxBufferInput;
-let driftCorrectionSlider, driftCorrectionInput, autoSyncCheck, driftStatus, snapcastModeCheck, snapcastSettingsContainer;
-let driftCorrectionPpm = 0;
 
 const MAX_LOGS = 100;
 
@@ -229,7 +227,7 @@ function updateQualityDisplay(quality) {
   if (indicator) indicator.style.color = color;
   if (value)
     value.innerHTML = `<span class="quality-indicator" style="color: ${color}">●</span> ${text} (${quality.score})`;
-  if (jitter) jitter.textContent = quality.jitter.toFixed(2) + " ms";
+  if (jitter) jitter.textContent = quality.jitter.toFixed(1) + " ms";
 
   // Show warning BOTH as toast AND log if quality drops
   if (quality.score < 50 && !window.qualityWarningShown) {
@@ -339,9 +337,14 @@ async function loadSettings() {
     if (settings.silence_timeout !== undefined)
       silenceTimeoutSeconds = settings.silence_timeout;
     else silenceTimeoutSeconds = 0; // Default value (disabled)
+    
     if (settings.disable_silence_detection !== undefined)
       disableSilenceDetection = settings.disable_silence_detection;
     else disableSilenceDetection = false; // Default value (enabled)
+    
+    if (settings.enable_spin_strategy !== undefined)
+      spinStrategyCheck.checked = settings.enable_spin_strategy;
+    else spinStrategyCheck.checked = false; // Default off
 
     // Sync UI with loaded values
     const silenceThresholdInput = document.getElementById("silence-threshold");
@@ -362,26 +365,6 @@ async function loadSettings() {
     if (settings.max_buffer) maxBufferInput.value = settings.max_buffer;
     if (settings.network_preset)
       networkPresetSelect.value = settings.network_preset;
-
-    if (settings.drift_correction_ppm !== undefined)
-      driftCorrectionPpm = settings.drift_correction_ppm;
-    else driftCorrectionPpm = 0;
-
-    if (driftCorrectionSlider) driftCorrectionSlider.value = driftCorrectionPpm;
-    if (driftCorrectionInput) driftCorrectionInput.value = driftCorrectionPpm;
-
-    if (settings.auto_sync !== undefined && autoSyncCheck) {
-        autoSyncCheck.checked = settings.auto_sync;
-        // Trigger visual state update
-        updateDriftUIState(settings.auto_sync);
-    }
-
-    if (settings.snapcast_mode !== undefined && snapcastModeCheck) {
-        snapcastModeCheck.checked = settings.snapcast_mode;
-        if (snapcastSettingsContainer) {
-            snapcastSettingsContainer.style.display = settings.snapcast_mode ? "block" : "none";
-        }
-    }
 
     // EQ and Gain removed
 
@@ -429,9 +412,7 @@ async function saveSettings() {
       min_buffer: parseInt(minBufferInput.value),
       max_buffer: parseInt(maxBufferInput.value),
       network_preset: networkPresetSelect.value,
-      drift_correction_ppm: parseInt(driftCorrectionInput.value),
-      auto_sync: autoSyncCheck ? autoSyncCheck.checked : false,
-      snapcast_mode: snapcastModeCheck ? snapcastModeCheck.checked : false,
+      enable_spin_strategy: spinStrategyCheck.checked,
     };
 
     // Get existing profiles
@@ -600,6 +581,7 @@ async function toggleStream() {
     const highPriority = priorityCheck.checked;
     const dscpStrategy = dscpSelect.value;
     const chunkSize = parseInt(chunkSizeSelect.value);
+    const enableSpinStrategy = spinStrategyCheck.checked;
 
     if (!device) {
       updateStatus(false, "Select a device");
@@ -634,10 +616,11 @@ async function toggleStream() {
         disableSilenceDetection: disableSilenceDetection,
         isLoopback: !!isLoopback, // Force boolean to prevent undefined
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
+        minBufferMs: parseInt(minBufferInput.value),
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
         minBufferMs: parseInt(minBufferInput.value),
         maxBufferMs: parseInt(maxBufferInput.value),
-        driftCorrectionPpm: parseInt(driftCorrectionInput.value),
+        enableSpinStrategy: enableSpinStrategy,
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
@@ -685,7 +668,7 @@ async function init() {
     // For now, I'll update the HTML to 1.1.0 manually in the release step,
     // or better, let's add a simple command to get version.
     // Actually, let's just set it in the HTML for now as "1.1.0" since I'm bumping it.
-    document.getElementById("app-version").textContent = "1.6.6";
+    document.getElementById("app-version").textContent = "1.7.0";
   } catch (e) {
     console.warn("Failed to set version", e);
   }
@@ -756,6 +739,7 @@ async function init() {
   autostreamCheck = document.getElementById("autostream-check");
   autoReconnectCheck = document.getElementById("autoreconnect-check");
   priorityCheck = document.getElementById("priority-check");
+  spinStrategyCheck = document.getElementById("spin-strategy-check");
   dscpSelect = document.getElementById("dscp-select");
   chunkSizeSelect = document.getElementById("chunk-size-select");
   const silenceThresholdInput = document.getElementById("silence-threshold");
@@ -793,98 +777,7 @@ async function init() {
   networkPresetSelect = document.getElementById("network-preset");
   adaptiveBufferCheck = document.getElementById("adaptive-buffer-check");
   minBufferInput = document.getElementById("min-buffer");
-  minBufferInput = document.getElementById("min-buffer");
   maxBufferInput = document.getElementById("max-buffer");
-  driftCorrectionSlider = document.getElementById("drift-correction-slider");
-  driftCorrectionInput = document.getElementById("drift-correction-input");
-  autoSyncCheck = document.getElementById("auto-sync-check");
-  driftStatus = document.getElementById("drift-status");
-  snapcastModeCheck = document.getElementById("snapcast-mode-check");
-  snapcastSettingsContainer = document.getElementById("snapcast-settings-container");
-
-  // Snapcast Mode Toggle Logic
-  if (snapcastModeCheck && snapcastSettingsContainer) {
-    snapcastModeCheck.addEventListener("change", (e) => {
-        const enabled = e.target.checked;
-        snapcastSettingsContainer.style.display = enabled ? "block" : "none";
-        saveSettings();
-        
-        // If disabled, we should probably disable Auto Sync to be safe
-        if (!enabled && autoSyncCheck && autoSyncCheck.checked) {
-            autoSyncCheck.checked = false;
-            // Update backend
-             invoke("set_auto_sync", {
-                enabled: false,
-                ip: ipInput.value,
-                appHandle: null // Backend handles handle
-            }).catch(console.error);
-            updateDriftUIState(false);
-            showNotification("Snapcast features disabled", "info");
-        }
-    });
-  }
-
-  // Sync Slider and Input (Real-time update)
-  if (driftCorrectionSlider && driftCorrectionInput) {
-    const updatePpm = async (val) => {
-        driftCorrectionPpm = parseInt(val);
-        // Invoke backend command for real-time update
-        try {
-            await invoke("set_drift_correction", { ppm: driftCorrectionPpm });
-        } catch (e) {
-            console.error("Failed to set drift correction", e);
-        }
-    };
-
-    driftCorrectionSlider.addEventListener("input", (e) => {
-      driftCorrectionInput.value = e.target.value;
-      updatePpm(e.target.value);
-    });
-    driftCorrectionInput.addEventListener("input", (e) => {
-      driftCorrectionSlider.value = e.target.value;
-      updatePpm(e.target.value);
-    });
-  }
-
-  // Auto Sync Toggle
-  if (autoSyncCheck) {
-      autoSyncCheck.addEventListener("change", async (e) => {
-          const enabled = e.target.checked;
-          const ip = ipInput.value || "127.0.0.1"; // Fallback
-          updateDriftUIState(enabled);
-          try {
-              await invoke("set_auto_sync", { enabled, ip });
-              showNotification(enabled ? "Auto Sync Enabled" : "Auto Sync Disabled", "info");
-          } catch(err) {
-              console.error("Failed to set auto sync", err);
-              showNotification("Failed to toggle Auto Sync", "error");
-          }
-      });
-  }
-  
-  // Listen for calculated drift events
-  listen("drift-event", (event) => {
-      const { ppm, latency_us } = event.payload;
-      if (driftStatus) {
-          driftStatus.textContent = `${ppm} ppm`;
-          // Color code
-          if (Math.abs(ppm) > 100) driftStatus.style.color = "#ef4444"; // Red
-          else if (Math.abs(ppm) > 50) driftStatus.style.color = "#f59e0b"; // Orange
-          else driftStatus.style.color = "#10b981"; // Green
-      }
-      
-      // If Auto Sync is enabled, update the slider visually to show what's happening
-      if (autoSyncCheck && autoSyncCheck.checked) {
-          if (driftCorrectionSlider) driftCorrectionSlider.value = ppm;
-          if (driftCorrectionInput) driftCorrectionInput.value = ppm;
-      }
-  });
-
-  function updateDriftUIState(autoEnabled) {
-      if (driftCorrectionSlider) driftCorrectionSlider.disabled = autoEnabled;
-      if (driftCorrectionInput) driftCorrectionInput.disabled = autoEnabled;
-      if (driftStatus) driftStatus.style.opacity = autoEnabled ? "1" : "0.5";
-  }
 
   // Tabs
   tabBtns = document.querySelectorAll(".tab-btn");

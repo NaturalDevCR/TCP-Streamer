@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.6.6-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -66,18 +66,16 @@
 
 - ✅ **Connection Reliability** - 5s Write Timeout & Graceful Shutdown (v1.6.0)
 - ✅ **Smart Deep Sleep** - Auto-disconnect on prolonged silence to prevent "zombies" (v1.6.0)
-- ✅ **Precision Audio Pacing** - Token Bucket algorithm for mathematically perfect transmission timing (v1.5.9+)
+- ✅ **Precision Audio Pacing** - Token Bucket algorithm for mathematically perfect transmission timing
+- ✅ **Hybrid Spin-Wait Strategy** - Sub-millisecond timing precision via spin-loop (v1.7.0)
 - ✅ **Robust Audio Engine** - Threaded architecture with Ring Buffer to prevent dropouts
 - ✅ **Real-time Audio Streaming** - Low-latency PCM audio over TCP
-- ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on **real-time Jitter/Latency** (v1.6.3)
+- ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter
 - ✅ **Silence Detection** - RMS-based "Stop Sending" bandwidth saver (v1.6.0)
 - ✅ **Auto-Reconnect** - Resilient connection management
 - ✅ **Multi-Profile Support** - Save and switch between configurations
 - ✅ **System Tray Integration** - Runs in background, accessible from tray
 - ✅ **Windows Native Loopback** - Capture system audio without virtual cables (WASAPI)
-- ✅ **Snapcast Features** - Dedicated toggle for Active Rate Control & Time Sync (v1.6.6)
-- ✅ **Automatic Sync** - Clock synchronization via Snapcast Binary Protocol (v1.6.1)
-- ✅ **Precision Jitter Calculation** - RFC 3550 compatible network jitter or scheduler variance (v1.6.5)
 
 ### Audio Configuration
 
@@ -95,10 +93,10 @@
 ### User Experience
 
 - 🎨 **Modern UI** - Clean, icon-based tabbed interface
-- 📊 **Real-time Statistics** - Monitor bitrate, uptime, data sent
-- 📈 **Network Quality Metrics** - Real-time health score with **Jitter & Latency** tracking (v1.6.3)
-- 📉 **Jitter Monitoring** - Precise tracking of network stability (v1.6.5)
-- 📝 **Activity Logs** - Track connection events with **dedicated Sync/Trace filters** (v1.6.4)
+- � **Real-time Statistics** - Monitor bitrate, uptime, data sent
+- �📶 **Network Quality Metrics** - Real-time health score (Excellent/Good/Fair/Poor)
+- 📉 **Jitter Monitoring** - Live tracking of network stability
+- 📝 **Activity Logs** - Track connection events, buffer resizes, and errors
 - 🌙 **Minimize to Tray** - Never quits, always accessible
 
 ### Advanced Network Optimization
@@ -108,7 +106,6 @@
 - 🎛️ **Network Presets** - One-click optimization for Ethernet/WiFi/Poor connections
 - 🚦 **DSCP/TOS Support** - QoS tagging (VoIP, Low Delay, Throughput)
 - 📦 **Dynamic Chunk Size** - Configurable buffer chunks (128-4096 samples)
-- 🔄 **Snapcast Integration** - Toggleable Active Rate Control to fix clock drift (Recv-Q)
 
 ---
 
