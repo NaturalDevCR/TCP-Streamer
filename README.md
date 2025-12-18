@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.4-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -97,7 +97,7 @@
 - 📊 **Real-time Statistics** - Monitor bitrate, uptime, data sent
 - 📈 **Network Quality Metrics** - Real-time health score with **Jitter & Latency** tracking (v1.6.3)
 - 📉 **Jitter Monitoring** - Live tracking of network stability
-- 📝 **Activity Logs** - Track connection events, buffer resizes, and errors
+- 📝 **Activity Logs** - Track connection events with **dedicated Sync/Trace filters** (v1.6.4)
 - 🌙 **Minimize to Tray** - Never quits, always accessible
 
 ### Advanced Network Optimization

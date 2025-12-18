@@ -499,8 +499,10 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                             }
 
                             // Parse response
-                            let recv_sec = i32::from_le_bytes(response_buf[16..20].try_into().unwrap());
-                            let recv_usec = i32::from_le_bytes(response_buf[20..24].try_into().unwrap());
+                            // recv_sec is at offset 14 (4 bytes)
+                            // recv_usec is at offset 18 (4 bytes)
+                            let recv_sec = i32::from_le_bytes(response_buf[14..18].try_into().unwrap());
+                            let recv_usec = i32::from_le_bytes(response_buf[18..22].try_into().unwrap());
                             
                             // Client receive time
                             let now_recv = std::time::SystemTime::now();
@@ -514,42 +516,56 @@ fn spawn_sync_thread(ip: String, port: u16, app_handle: AppHandle) {
                             let latency_micros = (t_client_recv - t_client_sent) / 2;
                             let offset_micros = t_server_recv - t_client_sent - latency_micros;
                             
-                            let ppm_inst = if has_prev {
-                                let delta_offset = offset_micros - last_offset;
-                                let delta_time = t_client_recv - last_time;
-                                
-                                if delta_time > 0 {
-                                    (delta_offset as f64 / delta_time as f64) * 1_000_000.0
+                            // Sanity check: Offset > 5 seconds (5,000,000 us) is invalid for sync
+                            if offset_micros.abs() > 5_000_000 {
+                                emit_log(&app_handle, "warning", format!("Sync: Offset too large ({}us), discarding sample", offset_micros));
+                                has_prev = false; // Reset filter state
+                            } else {
+                                let ppm_inst = if has_prev {
+                                    let delta_offset = offset_micros - last_offset;
+                                    let delta_time = t_client_recv - last_time;
+                                    
+                                    if delta_time > 0 {
+                                        (delta_offset as f64 / delta_time as f64) * 1_000_000.0
+                                    } else {
+                                        0.0
+                                    }
                                 } else {
                                     0.0
+                                };
+                                
+                                last_offset = offset_micros;
+                                last_time = t_client_recv;
+                                has_prev = true;
+                            
+                                // Clamp instantaneous PPM to avoid explosions (-500 to 500 sanity check before filter)
+                                let clamped_inst = ppm_inst.clamp(-500.0, 500.0);
+
+                                // This instantaneous PPM is very noisy. Filter it.
+                                let filtered_ppm = ma_filter.add(clamped_inst);
+                                
+                                // Hard Clamp final PPM (-200 to 200) for safety
+                                let safe_ppm = filtered_ppm.clamp(-200.0, 200.0);
+                                
+                                // Update global atomic
+                                DRIFT_CORRECTION_PPM.store(safe_ppm as i32, Ordering::Relaxed);
+                                
+                                let _ = app_handle.emit("drift-event", DriftEvent {
+                                    ppm: safe_ppm as i32,
+                                    latency_us: latency_micros,
+                                });
+
+                                // Log roughly once per 5 seconds to avoid spamming
+                                log_counter += 1;
+                                let log_now = log_counter % 50 == 0; // 50 * 100ms = 5s
+                                
+                                if log_now {
+                                    emit_log(&app_handle, "sync", format!("Sync: Latency={}us, Offset={}us, PPM={:.1} (Avg: {:.1})", 
+                                        latency_micros, offset_micros, ppm_inst, filtered_ppm));
                                 }
-                            } else {
-                                0.0
-                            };
-                            
-                            last_offset = offset_micros;
-                            last_time = t_client_recv;
-                            has_prev = true;
-                        
-                        // This instantaneous PPM is very noisy. Filter it.
-                        let filtered_ppm = ma_filter.add(ppm_inst);
-                        
-                        // Update global atomic
-                        DRIFT_CORRECTION_PPM.store(filtered_ppm as i32, Ordering::Relaxed);
-                        
-                        let _ = app_handle.emit("drift-event", DriftEvent {
-                            ppm: filtered_ppm as i32,
-                            latency_us: latency_micros,
-                        });
-                        
-                            // Log roughly once per second to avoid spamming at 10Hz
-                            log_counter += 1;
-                            let log_now = log_counter % 10 == 0;
-                            
-                            if log_now {
-                                emit_log(&app_handle, "info", format!("Sync: Latency={}us, Offset={}us, PPM={:.1} (Avg: {:.1})", 
-                                    latency_micros, offset_micros, ppm_inst, filtered_ppm));
                             }
+                        
+
                         
                         thread::sleep(Duration::from_millis(100)); // 10 samples per sec = 200 samples is 20s window (Correct comment)
                     }
