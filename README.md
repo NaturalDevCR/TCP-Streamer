@@ -147,11 +147,11 @@ Download the latest release for your platform:
 
 **[→ Releases Page](https://github.com/NaturalDevCR/TCP-Streamer/releases)**
 
-| Platform    | File Type             | Installation                        |
-| ----------- | --------------------- | ----------------------------------- |
-| **macOS**   | `.dmg`                | Open and drag to Applications       |
-| **Windows** | `.msi` or `.exe`      | Run installer                       |
-| **Linux**   | `.AppImage` or `.deb` | Make executable or install via dpkg |
+| Platform    | File Type             | Installation                         |
+| ----------- | --------------------- | ------------------------------------ |
+| **macOS**   | `.dmg`                | Open and drag to Applications        |
+| **Windows** | `.msi` or `.exe`      | Run installer                        |
+| **Linux**   | `.AppImage` or `.deb` | [See LINUX_GUIDE.md](LINUX_GUIDE.md) |
 
 ### Build from Source
 

@@ -1010,3 +1010,55 @@ input:checked + .slider:before {
 .scroll-to-top-btn:hover svg {
   transform: translateY(-2px);
 }
+
+/* Responsive Design */
+@media (max-width: 500px) {
+  .glass-panel {
+    padding: 16px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h1 {
+    font-size: 1.1rem;
+  }
+
+  .stats-bar {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .stat-item {
+    min-width: 60px;
+    width: calc(50% - 6px); /* 2 items per row */
+  }
+
+  .stat-label {
+    font-size: 0.65rem;
+  }
+
+  .stat-value {
+    font-size: 0.8rem;
+  }
+
+  .control-group label {
+    font-size: 0.75rem;
+  }
+
+  .tabs-nav {
+    padding: 4px;
+    gap: 4px;
+  }
+  
+  .tab-btn {
+    padding: 8px;
+  }
+
+  .settings-card {
+    padding: 12px;
+  }
+}

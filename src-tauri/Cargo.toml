@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "1.8.1"
+version = "1.8.2"
 description = "A lightweight TCP audio streamer"
 authors = ["you"]
 edition = "2021"
@@ -28,6 +28,7 @@ tauri-plugin-store = "2"
 chrono = { version = "0.4", features = ["serde"] }
 ringbuf = "0.3"
 socket2 = "0.5"
+tauri-plugin-single-instance = "2"
 tauri-plugin-log = "2.7.1"
 log = "0.4.28"
 thread-priority = "3.0.0"
