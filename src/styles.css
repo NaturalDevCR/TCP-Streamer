@@ -74,6 +74,19 @@ h1 {
   -webkit-text-fill-color: transparent;
 }
 
+.logo-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px var(--accent-glow));
+}
+
 .status-badge {
   display: flex;
   align-items: center;
@@ -1053,7 +1066,7 @@ input:checked + .slider:before {
     padding: 4px;
     gap: 4px;
   }
-  
+
   .tab-btn {
     padding: 8px;
   }
