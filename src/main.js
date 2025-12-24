@@ -66,7 +66,15 @@ function addLog(log) {
   const entry = document.createElement("div");
   entry.className = `log-entry log-${log.level}`;
   entry.dataset.level = log.level; // Store level for filtering
-  entry.innerHTML = `<span class="log-time">[${log.timestamp}]</span> ${log.message}`;
+  entry.className = `log-entry log-${log.level}`;
+  entry.dataset.level = log.level; // Store level for filtering
+  
+  const timeSpan = document.createElement("span");
+  timeSpan.className = "log-time";
+  timeSpan.textContent = `[${log.timestamp}]`;
+  
+  entry.appendChild(timeSpan);
+  entry.appendChild(document.createTextNode(" " + log.message));
 
   // Apply filter
   if (currentLogFilter !== "all" && log.level !== currentLogFilter) {
@@ -152,12 +160,16 @@ function showNotification(message, type = "success") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
 
-  let icon = "";
   if (type === "success") icon = "✓";
   if (type === "error") icon = "✕";
   if (type === "info") icon = "ℹ";
 
-  toast.innerHTML = `<span style="font-weight:bold">${icon}</span> ${message}`;
+  const iconSpan = document.createElement("span");
+  iconSpan.style.fontWeight = "bold";
+  iconSpan.textContent = icon;
+  
+  toast.appendChild(iconSpan);
+  toast.appendChild(document.createTextNode(" " + message));
 
   container.appendChild(toast);
 
@@ -225,8 +237,17 @@ function updateQualityDisplay(quality) {
   }
 
   if (indicator) indicator.style.color = color;
-  if (value)
-    value.innerHTML = `<span class="quality-indicator" style="color: ${color}">●</span> ${text} (${quality.score})`;
+  if (indicator) indicator.style.color = color;
+  if (value) {
+      value.textContent = ""; // Clear existing
+      const dot = document.createElement("span");
+      dot.className = "quality-indicator";
+      dot.style.color = color;
+      dot.textContent = "●";
+      
+      value.appendChild(dot);
+      value.appendChild(document.createTextNode(` ${text} (${quality.score})`));
+  }
   if (jitter) jitter.textContent = quality.jitter.toFixed(1) + " ms";
 
   // Show warning BOTH as toast AND log if quality drops
