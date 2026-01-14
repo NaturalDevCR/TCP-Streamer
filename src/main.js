@@ -160,6 +160,7 @@ function showNotification(message, type = "success") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
 
+  let icon = "";
   if (type === "success") icon = "✓";
   if (type === "error") icon = "✕";
   if (type === "info") icon = "ℹ";
@@ -467,9 +468,9 @@ async function loadProfiles() {
     await store.set("current_profile", "Default");
     await store.set(
       "silence_threshold",
-      parseFloat(silenceThresholdInput.value)
+      parseFloat(document.getElementById("silence-threshold").value || 5)
     );
-    await store.set("silence_timeout", parseInt(silenceTimeoutInput.value));
+    await store.set("silence_timeout", parseInt(document.getElementById("silence-timeout").value || 0));
     if (loopbackModeInput) {
       await store.set("loopback_mode", loopbackModeInput.checked);
     }
