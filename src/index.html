@@ -355,200 +355,7 @@
               </div>
             </div>
 
-            <div class="settings-card" style="margin-top: 15px">
-              <h3>Silence Detection</h3>
 
-              <!-- Disable Silence Detection Checkbox -->
-              <div class="control-group" style="margin-bottom: 16px">
-                <label class="checkbox-container">
-                  <input type="checkbox" id="disable-silence-detection" />
-                  <span class="checkmark"></span>
-                  Disable Silence Detection (Always Transmit)
-                </label>
-                <small
-                  style="
-                    color: rgba(255, 255, 255, 0.5);
-                    font-size: 11px;
-                    margin-top: 6px;
-                    display: block;
-                    line-height: 1.4;
-                  "
-                >
-                  Bypass all silence detection logic and always transmit audio
-                </small>
-              </div>
-
-              <!-- Real-time Volume Indicator -->
-              <div class="control-group" style="margin-bottom: 20px">
-                <label style="margin-bottom: 8px; display: block"
-                  >Current Volume (RMS)</label
-                >
-                <div
-                  style="
-                    background: rgba(0, 0, 0, 0.3);
-                    border-radius: 8px;
-                    padding: 12px;
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                  "
-                >
-                  <div style="display: flex; align-items: center; gap: 12px">
-                    <div
-                      style="
-                        flex: 1;
-                        height: 24px;
-                        background: rgba(0, 0, 0, 0.4);
-                        border-radius: 12px;
-                        overflow: hidden;
-                        position: relative;
-                      "
-                    >
-                      <div
-                        id="volume-bar"
-                        style="
-                          height: 100%;
-                          width: 0%;
-                          background: linear-gradient(
-                            to right,
-                            #10b981,
-                            #3b82f6,
-                            #f59e0b,
-                            #ef4444
-                          );
-                          transition: width 0.1s ease-out;
-                          border-radius: 12px;
-                        "
-                      ></div>
-                      <div
-                        id="threshold-marker"
-                        style="
-                          position: absolute;
-                          top: 0;
-                          bottom: 0;
-                          width: 2px;
-                          background: #fff;
-                          left: 5%;
-                          box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
-                        "
-                      ></div>
-                    </div>
-                    <div
-                      style="
-                        display: flex;
-                        flex-direction: column;
-                        align-items: flex-end;
-                      "
-                    >
-                      <span
-                        id="volume-value"
-                        style="
-                          font-family: 'Fira Code', monospace;
-                          font-size: 0.9rem;
-                          min-width: 40px;
-                          text-align: right;
-                          color: var(--accent-color);
-                          font-weight: bold;
-                        "
-                        >0</span
-                      >
-                      <span
-                        id="avg-volume-value"
-                        style="
-                          font-family: 'Fira Code', monospace;
-                          font-size: 0.7rem;
-                          color: rgba(255, 255, 255, 0.5);
-                        "
-                        >Avg: 0</span
-                      >
-                    </div>
-                  </div>
-                  <small
-                    style="
-                      display: block;
-                      margin-top: 8px;
-                      color: rgba(255, 255, 255, 0.5);
-                      text-align: center;
-                    "
-                  >
-                    White line shows threshold. Volume below = silence detected
-                  </small>
-                </div>
-              </div>
-
-              <!-- Silence Detection Controls (hideable when disabled) -->
-              <div id="silence-settings-container">
-                <div class="control-group" style="margin-bottom: 16px">
-                  <label
-                    for="silence-threshold"
-                    style="margin-bottom: 8px; display: block"
-                    >Silence Threshold (RMS)</label
-                  >
-                  <input
-                    type="number"
-                    id="silence-threshold"
-                    min="0"
-                    max="10000"
-                    step="1"
-                    value="0"
-                    style="
-                      width: 100%;
-                      padding: 10px 12px;
-                      background: rgba(0, 0, 0, 0.2);
-                      border: 1px solid rgba(255, 255, 255, 0.1);
-                      border-radius: 8px;
-                      color: white;
-                    "
-                  />
-                  <small
-                    style="
-                      color: rgba(255, 255, 255, 0.5);
-                      font-size: 11px;
-                      margin-top: 6px;
-                      display: block;
-                      line-height: 1.4;
-                    "
-                  >
-                    Lower values = less aggressive silence detection (prevents
-                    fade-out cuts). Default: 5
-                  </small>
-                </div>
-
-                <div class="control-group">
-                  <label
-                    for="silence-timeout"
-                    style="margin-bottom: 8px; display: block"
-                    >Silence Timeout (seconds)</label
-                  >
-                  <input
-                    type="number"
-                    id="silence-timeout"
-                    min="0"
-                    max="300"
-                    step="1"
-                    value="0"
-                    style="
-                      width: 100%;
-                      padding: 10px 12px;
-                      background: rgba(0, 0, 0, 0.2);
-                      border: 1px solid rgba(255, 255, 255, 0.1);
-                      border-radius: 8px;
-                      color: white;
-                    "
-                  />
-                  <small
-                    style="
-                      color: rgba(255, 255, 255, 0.5);
-                      font-size: 11px;
-                      margin-top: 6px;
-                      display: block;
-                      line-height: 1.4;
-                    "
-                  >
-                    Stop transmission after X seconds of silence (0 = never
-                    stop, always transmit)
-                  </small>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -644,11 +451,7 @@
                 <input type="checkbox" id="priority-check" checked />
                 <label for="priority-check">High Priority Thread</label>
               </div>
-              <div class="form-group checkbox-group">
-                <input type="checkbox" id="spin-strategy-check" />
-                <label for="spin-strategy-check">High Precision Pacing</label>
-                <small style="display:block; color:rgba(255,255,255,0.5); font-size:11px; margin-left:28px; margin-top:4px;">Experimental: Use spin-wait for sub-ms precision (uses slightly more CPU)</small>
-              </div>
+
               <div class="form-group">
                 <label for="dscp-select">DSCP Strategy</label>
                 <select id="dscp-select">
@@ -765,23 +568,7 @@
                   <li><strong>Input</strong>: Supports F32, I16, and U16 formats automatically.</li>
                 </ul>
 
-                <h4>High Precision Pacing (v1.7.0)</h4>
-                <p>
-                  Eliminates network jitter caused by OS scheduling. Uses a
-                  hybrid sleep/spin-loop strategy to achieve microsecond-level
-                  transmission timing.
-                </p>
-                <ul>
-                  <li>
-                    <strong>Enable</strong>: If you need perfect audio spacing
-                    (0ms jitter).
-                  </li>
-                  <li>
-                    <strong>Note</strong>: Uses slightly more CPU (active waiting
-                    for &lt; 1.5ms per chunk).
-                  </li>
-                </ul>
-              </div>
+
 
               <div class="doc-section">
                 <h4>Sample Rate</h4>
@@ -1002,39 +789,7 @@
             </div>
           </div>
 
-          <div class="settings-card">
-            <h3>🔇 Silence Detection</h3>
-            <div class="doc-section">
-              <p>Automatically stops transmission when no audio is detected.</p>
-              <h4>Silence Threshold</h4>
-              <p>
-                Audio level (RMS) below which is considered silence. Higher
-                values = more aggressive detection.
-              </p>
-              <ul>
-                <li><strong>0</strong>: Disabled, always transmit</li>
-                <li><strong>5-10</strong>: Catch complete silence only</li>
-                <li>
-                  <strong>10-50</strong>: Detect quiet audio (may cut fade-outs)
-                </li>
-              </ul>
 
-              <h4>Silence Timeout</h4>
-              <p>
-                How long (in seconds) silence must persist before stopping
-                transmission.
-              </p>
-              <ul>
-                <li><strong>0</strong>: Never stop, always transmit</li>
-                <li>
-                  <strong>5-10 seconds</strong>: Good for music with pauses
-                </li>
-                <li>
-                  <strong>30+ seconds</strong>: Only stop on extended silence
-                </li>
-              </ul>
-            </div>
-          </div>
 
           <div class="settings-card">
             <h3>⚡ Network Optimization</h3>
@@ -1128,7 +883,7 @@
                 <li>Sample Rate: 48 kHz</li>
                 <li>Buffer Size: High (1024)</li>
                 <li>Ring Buffer: High (8000ms)</li>
-                <li>Silence Detection: Threshold 5, Timeout 10 seconds</li>
+
                 <li>Adaptive Buffer: Enabled for network fluctuations</li>
               </ul>
             </div>

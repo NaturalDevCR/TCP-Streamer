@@ -7,7 +7,7 @@ use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use std::io::Write;
 use std::net::SocketAddr;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -43,10 +43,6 @@ struct BufferResizeEvent {
     new_size_ms: u32,
     reason: String,
 }
-
-// Global Atomic Settings for Dynamic Updates
-static SILENCE_THRESHOLD_BITS: AtomicU32 = AtomicU32::new(0); // f32 stored as u32 bits
-static SILENCE_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(0);
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
@@ -97,13 +93,10 @@ enum AudioCommand {
         high_priority: bool,
         dscp_strategy: String,
         chunk_size: u32,
-        silence_threshold: f32,
-        silence_timeout_seconds: u64,
         is_loopback: bool,
         enable_adaptive_buffer: bool,
         min_buffer_ms: u32,
         max_buffer_ms: u32,
-        enable_spin_strategy: bool,
         app_handle: AppHandle,
     },
     Stop,
@@ -135,13 +128,10 @@ impl AudioState {
                 bool,
                 String,
                 u32,
-                f32,
-                u64,
                 bool,
                 bool,
                 u32,
                 u32,
-                bool,
                 AppHandle,
             )> = None;
 
@@ -158,13 +148,10 @@ impl AudioState {
                         high_priority,
                         dscp_strategy,
                         chunk_size,
-                        silence_threshold,
-                        silence_timeout_seconds,
                         is_loopback,
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
-                        enable_spin_strategy,
                         app_handle,
                     } => {
                         // Stop existing stream if any
@@ -172,11 +159,6 @@ impl AudioState {
                             drop(stream);
                             drop(stats); // Signals stats thread to stop
                         }
-
-                        // Initialize global settings with new values
-                        SILENCE_THRESHOLD_BITS
-                            .store(silence_threshold.to_bits(), Ordering::Relaxed);
-                        SILENCE_TIMEOUT_SECS.store(silence_timeout_seconds, Ordering::Relaxed);
 
                         // Store params for reconnection
                         _current_params = Some((
@@ -190,13 +172,10 @@ impl AudioState {
                             high_priority,
                             dscp_strategy.clone(),
                             chunk_size,
-                            silence_threshold,
-                            silence_timeout_seconds,
                             is_loopback,
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
-                            enable_spin_strategy,
                             app_handle.clone(),
                         ));
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
@@ -217,13 +196,10 @@ impl AudioState {
                             high_priority,
                             dscp_strategy,
                             chunk_size,
-                            silence_threshold,
-                            silence_timeout_seconds,
                             is_loopback,
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
-                            enable_spin_strategy,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -272,13 +248,10 @@ impl AudioState {
                         high_priority,
                         dscp_strategy,
                         chunk_size,
-                        silence_threshold,
-                        silence_timeout_seconds,
                         is_loopback,
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
-                        enable_spin_strategy,
                         app_handle,
                     )) = &_current_params
                     {
@@ -298,13 +271,10 @@ impl AudioState {
                             high_priority.clone(),
                             dscp_strategy.clone(),
                             chunk_size.clone(),
-                            silence_threshold.clone(),
-                            silence_timeout_seconds.clone(),
                             is_loopback.clone(),
                             enable_adaptive_buffer.clone(),
                             min_buffer_ms.clone(),
                             max_buffer_ms.clone(),
-                            enable_spin_strategy.clone(),
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -376,21 +346,18 @@ fn start_audio_stream(
     high_priority: bool,
     dscp_strategy: String,
     chunk_size: u32,
-    silence_threshold: f32,
-    silence_timeout_seconds: u64,
     is_loopback: bool,
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
-    enable_spin_strategy: bool,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, SilenceT={}, SilenceTO={}s, Loopback={}, AdaptiveBuf={} ({}ms-{}ms), SpinStrategy={}",
-            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, silence_threshold, silence_timeout_seconds, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms, enable_spin_strategy
+            "Init stream: Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Chunk={}, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
+            device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, chunk_size, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
         ),
     );
 
@@ -562,10 +529,7 @@ fn start_audio_stream(
         let mut last_heartbeat = Instant::now();
         const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
-        // Pacer State variables for Precision Timing (Phase 1)
-        let mut pacer_start_time = Instant::now();
-        let mut pacer_frames_sent: u64 = 0;
-        let mut pacer_initialized = false;
+        // Pacer State variables removed (Strict Clock Strategy used)
 
         // --- PREFILL GATE: Wait for buffer to fill before starting transmission ---
         // This prevents "cold start" stuttering by ensuring we have a cushion of data (1000ms).
@@ -591,10 +555,26 @@ fn start_audio_stream(
         );
         // --------------------------------------------------------------------------
 
-        // Initialize Silence Detection
-        let mut last_audio_activity = Instant::now();
+        // Strict Pacing Setup
+        let tick_duration =
+            Duration::from_micros((chunk_size as u64 * 1_000_000) / sample_rate as u64);
+        let mut next_tick = Instant::now();
 
         while is_running_clone.load(Ordering::Relaxed) {
+            // 1. Strict Pacing (Wait for the start of the timeslot)
+            let now = Instant::now();
+            if now < next_tick {
+                thread::sleep(next_tick - now);
+                next_tick += tick_duration;
+            } else {
+                // We are behind schedule
+                if now.duration_since(next_tick) > Duration::from_millis(200) {
+                    next_tick = Instant::now() + tick_duration;
+                } else {
+                    next_tick += tick_duration;
+                }
+            }
+
             // Periodic heartbeat
             if last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
                 let occupied = cons.len();
@@ -616,48 +596,35 @@ fn start_audio_stream(
                 last_heartbeat = Instant::now();
             }
 
-            // 1. Fetch Audio Chunk (Blocking/Sleeping if empty to save CPU)
-            // We need a full chunk to calculate RMS and send properly
-            if cons.len() < temp_buffer.len() {
-                thread::sleep(Duration::from_millis(1));
-                continue;
-            }
-
-            // Pop chunk (we know we have enough data)
-            let count = cons.pop_slice(&mut temp_buffer);
-            if count == 0 {
-                continue;
-            } // Should not happen given check above, but safety
-
-            // 2. RMS Calculation (Smart Silence Detection)
-            let silence_threshold = f32::from_bits(SILENCE_THRESHOLD_BITS.load(Ordering::Relaxed));
-            let silence_timeout_secs = SILENCE_TIMEOUT_SECS.load(Ordering::Relaxed);
-
-            let mut sum_squares = 0.0;
-            for sample in &temp_buffer[0..count] {
-                // Already normalized f32
-                sum_squares += sample * sample;
-            }
-            let rms = (sum_squares / count as f32).sqrt();
-            let is_silent = rms < silence_threshold;
-
-            if !is_silent {
-                last_audio_activity = Instant::now();
-            }
-
-            let silence_duration = last_audio_activity.elapsed();
-            // Timeout 0 means disabled
-            let is_deep_sleep =
-                silence_timeout_secs > 0 && silence_duration.as_secs() > silence_timeout_secs;
+            // 2. Fetch or Generate Silence (Non-blocking)
+            let required_samples = temp_buffer.len();
+            let count = if cons.len() >= required_samples {
+                cons.pop_slice(&mut temp_buffer)
+            } else {
+                // Starvation: Send silence (zeros)
+                temp_buffer.fill(0.0);
+                // Log starvation occasionally to avoid spamming
+                static LAST_STARVATION_LOG: AtomicU64 = AtomicU64::new(0);
+                let now_millis = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+                if now_millis - LAST_STARVATION_LOG.load(Ordering::Relaxed) > 5000 {
+                    emit_log(
+                        &app_handle_net,
+                        "debug",
+                        format!(
+                            "Starvation: Generating silence chunk (Buffer < {})",
+                            required_samples
+                        ),
+                    );
+                    LAST_STARVATION_LOG.store(now_millis, Ordering::Relaxed);
+                }
+                required_samples
+            };
 
             // 3. Connection Management (Reconnection or Auto-Disconnect)
             if current_stream.is_none() {
-                // If we are deep sleeping (long silence), ignore this packet and stay disconnected
-                if is_silent && is_deep_sleep {
-                    // Drop packet (implied by loop continue)
-                    continue;
-                }
-
                 // Otherwise, we have audio (or short silence), so we try to connect
                 emit_log(
                     &app_handle_net,
@@ -720,8 +687,6 @@ fn start_audio_stream(
                             "Connected successfully!".to_string(),
                         );
                         // Important: logic falls through to Sending block
-                        // We reset pacer on new connection
-                        pacer_initialized = false;
                     }
                     Err(e) => {
                         emit_log(
@@ -737,111 +702,8 @@ fn start_audio_stream(
 
             // 4. Sending Logic
             if let Some(ref mut s) = current_stream {
-                // Check if we should disconnect due to long silence
-                if is_silent && is_deep_sleep {
-                    emit_log(
-                        &app_handle_net,
-                        "info",
-                        format!(
-                            "Disconnecting due to silence timeout ({}s)",
-                            silence_timeout_secs
-                        ),
-                    );
-                    // Close stream
-                    // Close stream safely
-                    if let Ok(stream_clone) = s.try_clone() {
-                        close_tcp_stream(stream_clone, "silence timeout", &app_handle_net);
-                    } else {
-                        emit_log(
-                            &app_handle_net,
-                            "warning",
-                            "Could not clone stream for shutdown".to_string(),
-                        );
-                    }
-                    current_stream = None;
-                    continue;
-                }
-
-                // If just silent (but not deep sleep), skip sending to save bandwidth
-                if is_silent {
-                    continue;
-                }
-
-                // Pacer Logic
-                if !pacer_initialized {
-                    pacer_start_time = Instant::now();
-                    pacer_frames_sent = 0;
-                    pacer_initialized = true;
-                }
-
-                let chunk_frames = count as u64 / 2;
-                let expected_elapsed = Duration::from_micros(
-                    ((pacer_frames_sent + chunk_frames) * 1_000_000) / sample_rate as u64,
-                );
-                let target_time = pacer_start_time + expected_elapsed;
-                let now = Instant::now();
-
-                if target_time > now {
-                    let wait_time = target_time - now;
-
-                    if enable_spin_strategy {
-                        // Hybrid Precision Pacing (Sleep + Spin)
-                        // Strategy: Sleep for most of the time to save CPU, but wake up EARLY (1.5ms)
-                        // and spin-wait for the final approach to hit the target with microsecond precision.
-                        // This creates a consistent timing floor regardless of OS scheduler granularity.
-                        // Works on Windows/Linux/macOS effectively countering OS jitter.
-
-                        if wait_time > Duration::from_millis(3) {
-                            // Sleep leaves ~1.5ms margin for spin-loop to handle jitter
-                            thread::sleep(wait_time.saturating_sub(Duration::from_micros(1500)));
-                        }
-
-                        // Hot-loop for the final microseconds
-                        let spin_start = Instant::now();
-                        while Instant::now() < target_time {
-                            std::hint::spin_loop();
-                        }
-
-                        // CPU Monitoring - Log if we spin too long (>2ms is concerning for CPU usage)
-                        if spin_start.elapsed() > Duration::from_millis(2) {
-                            // Only log occasionally to avoid spamming
-                            static LAST_SPIN_WARN: AtomicU64 = AtomicU64::new(0);
-                            let now_epoch = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-                            if now_epoch - LAST_SPIN_WARN.load(Ordering::Relaxed) > 5 {
-                                emit_log(
-                                    &app_handle_net,
-                                    "warning",
-                                    format!(
-                                        "High CPU spin wait: {:.2}ms",
-                                        spin_start.elapsed().as_secs_f32() * 1000.0
-                                    ),
-                                );
-                                LAST_SPIN_WARN.store(now_epoch, Ordering::Relaxed);
-                            }
-                        }
-                    } else {
-                        // Standard Energy-Efficient Pacing (Sleep/Yield)
-                        // Less precise (1-15ms jitter) but very low CPU usage.
-                        if wait_time > Duration::from_millis(4) {
-                            thread::sleep(wait_time);
-                        } else if wait_time > Duration::from_micros(500) {
-                            thread::sleep(wait_time);
-                        } else {
-                            thread::yield_now();
-                        }
-                    }
-                } else {
-                    // Drift correction
-                    if now.duration_since(target_time)
-                        > Duration::from_millis(ring_buffer_duration_ms as u64)
-                    {
-                        pacer_start_time = Instant::now();
-                        pacer_frames_sent = 0;
-                    }
-                }
+                // Inner pacer removed. Using strict clock at top.
+                // let chunk_frames = count as u64 / 2; // Unused
 
                 // Send
                 let data_len = (count * 2) as u32;
@@ -854,10 +716,11 @@ fn start_audio_stream(
                 }
 
                 // Jitter Calculation (Deviation from schedule)
-                // We use the actual time right before sending vs the target scheduled time
                 let send_time = Instant::now();
-                let deviation_ms = if send_time > target_time {
-                    send_time.duration_since(target_time).as_secs_f32() * 1000.0
+                // Target was the tick start time (next_tick - duration)
+                let target = next_tick - tick_duration;
+                let deviation_ms = if send_time > target {
+                    send_time.duration_since(target).as_secs_f32() * 1000.0
                 } else {
                     0.0
                 };
@@ -874,7 +737,6 @@ fn start_audio_stream(
                 if let Err(e) = s.write_all(&payload) {
                     emit_log(&app_handle_net, "error", format!("Write error: {}", e));
                     current_stream = None;
-                    pacer_initialized = false;
                 } else {
                     // Update Latency (Network Write Time)
                     let write_duration_ms = write_start.elapsed().as_secs_f32() * 1000.0;
@@ -883,7 +745,6 @@ fn start_audio_stream(
                     }
                     latency_samples.push(write_duration_ms);
 
-                    pacer_frames_sent += chunk_frames;
                     let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                     sequence = sequence.wrapping_add(1);
                     _last_write_time = Some(Instant::now());
@@ -1179,10 +1040,6 @@ fn start_audio_stream(
     struct AudioProcessor {
         prod: Arc<Mutex<ringbuf::Producer<f32, Arc<ringbuf::HeapRb<f32>>>>>,
         app_handle: AppHandle,
-        smoothed_rms: f32,
-        signal_average: f32,
-        silence_start: Option<Instant>,
-        transmission_stopped: bool,
     }
 
     impl AudioProcessor {
@@ -1190,138 +1047,26 @@ fn start_audio_stream(
             prod: Arc<Mutex<ringbuf::Producer<f32, Arc<ringbuf::HeapRb<f32>>>>>,
             app_handle: AppHandle,
         ) -> Self {
-            Self {
-                prod,
-                app_handle,
-                smoothed_rms: 0.0,
-                signal_average: 0.0,
-                silence_start: None,
-                transmission_stopped: false,
-            }
+            Self { prod, app_handle }
         }
 
         fn process(&mut self, data: &[f32]) {
-            // Read dynamic settings (Global Atomics)
-            let silence_threshold = f32::from_bits(SILENCE_THRESHOLD_BITS.load(Ordering::Relaxed));
-            let silence_timeout_seconds = SILENCE_TIMEOUT_SECS.load(Ordering::Relaxed);
-
-            // RMS Calculation on F32 data (Already Normalized)
-            let mut sum_squares = 0.0;
-            for &sample in data {
-                sum_squares += sample * sample;
-            }
-            let current_rms = (sum_squares / data.len() as f32).sqrt();
-
-            // 1. Visual Smoothing
-            // UI expects 0-32768 scale (legacy compatibility), but F32 is 0.0-1.0
-            // We scale it up for the UI and logic.
-            let scaled_rms = current_rms * 32768.0;
-
-            if scaled_rms > self.smoothed_rms {
-                self.smoothed_rms = 0.5 * scaled_rms + 0.5 * self.smoothed_rms;
-            } else {
-                self.smoothed_rms = 0.05 * scaled_rms + 0.95 * self.smoothed_rms;
-            }
-
-            // 2. Signal Average
-            if scaled_rms > silence_threshold {
-                if self.signal_average == 0.0 {
-                    self.signal_average = scaled_rms;
-                } else {
-                    self.signal_average = 0.01 * scaled_rms + 0.99 * self.signal_average;
-                }
-            }
-
-            // Emit UI Event (throttled)
-            // We use a static Atomic for global throttling across the app (simplest solution)
-            static LAST_VOLUME_EMIT: AtomicU64 = AtomicU64::new(0);
-            let now_millis = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
-            if now_millis - LAST_VOLUME_EMIT.load(Ordering::Relaxed) > 100 {
-                #[derive(serde::Serialize, Clone)]
-                struct VolumePayload {
-                    current: f32,
-                    average: f32,
-                }
-                let _ = self.app_handle.emit(
-                    "volume-level",
-                    VolumePayload {
-                        current: self.smoothed_rms,
-                        average: self.signal_average,
-                    },
-                );
-                LAST_VOLUME_EMIT.store(now_millis, Ordering::Relaxed);
-            }
-
-            // Processing Logic
-            // Processing Logic
-            // Comparison is done against the SCALED RMS because silence_threshold comes from UI (0-10000)
-            if scaled_rms > silence_threshold {
-                // Audio detected
-                if let Some(start) = self.silence_start {
-                    let duration = start.elapsed();
-                    if duration.as_secs() > 1 {
-                        emit_log(
-                            &self.app_handle,
-                            "info",
-                            format!(
-                                "Audio resumed ({:.1}) after {:.1}s",
-                                scaled_rms,
-                                duration.as_secs_f32()
-                            ),
-                        );
-                    }
-                    self.silence_start = None;
-                    self.transmission_stopped = false;
-                }
-
-                // Write to Ring Buffer
-                if let Ok(mut guard) = self.prod.lock() {
-                    let pushed = guard.push_slice(data);
-                    if pushed < data.len() {
-                        static LAST_OVERFLOW: AtomicU64 = AtomicU64::new(0);
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as u64;
-                        if now - LAST_OVERFLOW.load(Ordering::Relaxed) > 5000 {
-                            emit_log(
-                                &self.app_handle,
-                                "warning",
-                                format!("Buffer overflow: Dropped {} samples", data.len() - pushed),
-                            );
-                            LAST_OVERFLOW.store(now, Ordering::Relaxed);
-                        }
-                    }
-                }
-            } else {
-                // Silence
-                if self.silence_start.is_none() {
-                    self.silence_start = Some(Instant::now());
-                    // Low-level debug log removed to reduce noise
-                }
-
-                let silence_duration = self.silence_start.as_ref().unwrap().elapsed();
-                if silence_timeout_seconds == 0
-                    || silence_duration.as_secs() < silence_timeout_seconds
-                {
-                    // Keep transmitting silence (to maintain connection/timing)
-                    if let Ok(mut guard) = self.prod.lock() {
-                        let _ = guard.push_slice(data);
-                    }
-                } else {
-                    if !self.transmission_stopped {
+            // Write to Ring Buffer
+            if let Ok(mut guard) = self.prod.lock() {
+                let pushed = guard.push_slice(data);
+                if pushed < data.len() {
+                    static LAST_OVERFLOW: AtomicU64 = AtomicU64::new(0);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    if now - LAST_OVERFLOW.load(Ordering::Relaxed) > 5000 {
                         emit_log(
                             &self.app_handle,
                             "warning",
-                            format!(
-                                "Silence timeout ({}s). Stopping transmission.",
-                                silence_timeout_seconds
-                            ),
+                            format!("Buffer overflow: Dropped {} samples", data.len() - pushed),
                         );
-                        self.transmission_stopped = true;
+                        LAST_OVERFLOW.store(now, Ordering::Relaxed);
                     }
                 }
             }
@@ -1499,13 +1244,10 @@ pub async fn start_stream(
     high_priority: bool,
     dscp_strategy: String,
     chunk_size: u32,
-    silence_threshold: f32,
-    silence_timeout_seconds: u64,
     is_loopback: bool,
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
-    enable_spin_strategy: bool,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let tx = state.tx.lock().map_err(|e| e.to_string())?;
@@ -1520,27 +1262,14 @@ pub async fn start_stream(
         high_priority,
         dscp_strategy,
         chunk_size,
-        silence_threshold,
-        silence_timeout_seconds,
         is_loopback,
         enable_adaptive_buffer,
         min_buffer_ms,
         max_buffer_ms,
-        enable_spin_strategy,
         app_handle,
     })
     .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn update_silence_settings(threshold: f32, timeout: u64) {
-    SILENCE_THRESHOLD_BITS.store(threshold.to_bits(), Ordering::Relaxed);
-    SILENCE_TIMEOUT_SECS.store(timeout, Ordering::Relaxed);
-    debug!(
-        "Updated silence settings: Threshold={:.1}, Timeout={}s",
-        threshold, timeout
-    );
 }
 
 #[tauri::command]

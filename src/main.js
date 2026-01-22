@@ -21,10 +21,8 @@ let deviceSelect,
   toggleBtn,
   statusBadge,
   statusText;
-let priorityCheck, dscpSelect, chunkSizeSelect, spinStrategyCheck;
-let silenceThreshold = 0;
-let silenceTimeoutSeconds = 0; // Default to 0 (disabled) to prevent confusion
-let disableSilenceDetection = false; // Complete bypass of silence detection
+let priorityCheck, dscpSelect, chunkSizeSelect;
+
 let profileSelect,
   btnSaveProfile,
   btnNewProfile,
@@ -353,32 +351,12 @@ async function loadSettings() {
       priorityCheck.checked = settings.high_priority;
     if (settings.dscp_strategy) dscpSelect.value = settings.dscp_strategy;
     if (settings.chunk_size) chunkSizeSelect.value = settings.chunk_size;
-    if (settings.silence_threshold !== undefined)
-      silenceThreshold = settings.silence_threshold;
-    else silenceThreshold = 5; // Default value
-    if (settings.silence_timeout !== undefined)
-      silenceTimeoutSeconds = settings.silence_timeout;
-    else silenceTimeoutSeconds = 0; // Default value (disabled)
+
     
-    if (settings.disable_silence_detection !== undefined)
-      disableSilenceDetection = settings.disable_silence_detection;
-    else disableSilenceDetection = false; // Default value (enabled)
-    
-    if (settings.enable_spin_strategy !== undefined)
-      spinStrategyCheck.checked = settings.enable_spin_strategy;
-    else spinStrategyCheck.checked = false; // Default off
+
 
     // Sync UI with loaded values
-    const silenceThresholdInput = document.getElementById("silence-threshold");
-    const silenceTimeoutInput = document.getElementById("silence-timeout");
-    const disableSilenceDetectionInput = document.getElementById(
-      "disable-silence-detection"
-    );
 
-    if (silenceThresholdInput) silenceThresholdInput.value = silenceThreshold;
-    if (silenceTimeoutInput) silenceTimeoutInput.value = silenceTimeoutSeconds;
-    if (disableSilenceDetectionInput)
-      disableSilenceDetectionInput.checked = disableSilenceDetection;
 
     // Adaptive buffer and network preset settings
     if (settings.adaptive_buffer !== undefined)
@@ -425,16 +403,14 @@ async function saveSettings() {
       high_priority: priorityCheck.checked,
       dscp_strategy: dscpSelect.value,
       chunk_size: parseInt(chunkSizeSelect.value),
-      silence_threshold: silenceThreshold,
-      silence_timeout: silenceTimeoutSeconds,
-      disable_silence_detection: disableSilenceDetection,
+
       adaptive_buffer: adaptiveBufferCheck.checked,
       min_buffer: parseInt(minBufferInput.value),
       max_buffer: parseInt(maxBufferInput.value),
       min_buffer: parseInt(minBufferInput.value),
       max_buffer: parseInt(maxBufferInput.value),
       network_preset: networkPresetSelect.value,
-      enable_spin_strategy: spinStrategyCheck.checked,
+
     };
 
     // Get existing profiles
@@ -466,11 +442,7 @@ async function loadProfiles() {
     // Initialize default profile
     await store.set("profiles", { Default: {} });
     await store.set("current_profile", "Default");
-    await store.set(
-      "silence_threshold",
-      parseFloat(document.getElementById("silence-threshold").value || 5)
-    );
-    await store.set("silence_timeout", parseInt(document.getElementById("silence-timeout").value || 0));
+    await store.set("current_profile", "Default");
     if (loopbackModeInput) {
       await store.set("loopback_mode", loopbackModeInput.checked);
     }
@@ -567,7 +539,7 @@ async function toggleStream() {
       updateStatus(true, "Error stopping: " + error);
     }
   } else {
-    const savedSilenceTimeout = await store.get("silence_timeout");
+
     const savedLoopbackMode = await store.get("loopback_mode");
 
     // Note: The following lines seem to be part of a settings loading logic,
@@ -586,8 +558,7 @@ async function toggleStream() {
     // if (savedHighPriority !== null) priorityCheck.checked = savedHighPriority;
     // if (savedDscp) dscpSelect.value = savedDscp;
     // if (savedChunkSize) chunkSizeSelect.value = savedChunkSize;
-    // if (savedSilenceThreshold) silenceThresholdInput.value = savedSilenceThreshold;
-    // if (savedSilenceTimeout) silenceTimeoutInput.value = savedSilenceTimeout;
+
 
     if (savedLoopbackMode !== null && loopbackModeInput) {
       loopbackMode = savedLoopbackMode;
@@ -603,7 +574,6 @@ async function toggleStream() {
     const highPriority = priorityCheck.checked;
     const dscpStrategy = dscpSelect.value;
     const chunkSize = parseInt(chunkSizeSelect.value);
-    const enableSpinStrategy = spinStrategyCheck.checked;
 
     if (!device) {
       updateStatus(false, "Select a device");
@@ -633,16 +603,14 @@ async function toggleStream() {
         highPriority: highPriority,
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
-        silenceThreshold, // Shorthand for silenceThreshold: silenceThreshold
-        silenceTimeoutSeconds: silenceTimeoutSeconds,
-        disableSilenceDetection: disableSilenceDetection,
+
         isLoopback: !!isLoopback, // Force boolean to prevent undefined
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
         minBufferMs: parseInt(minBufferInput.value),
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
         minBufferMs: parseInt(minBufferInput.value),
         maxBufferMs: parseInt(maxBufferInput.value),
-        enableSpinStrategy: enableSpinStrategy,
+
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
@@ -700,28 +668,7 @@ async function init() {
   }
 
   // Silence Detection UI Toggle
-  const disableSilenceDetectionCheck = document.getElementById(
-    "disable-silence-detection"
-  );
-  const silenceSettingsContainer = document.getElementById(
-    "silence-settings-container"
-  );
 
-  if (disableSilenceDetectionCheck && silenceSettingsContainer) {
-    // Initial state
-    if (disableSilenceDetectionCheck.checked) {
-      silenceSettingsContainer.style.display = "none";
-    }
-
-    // Toggle on change
-    disableSilenceDetectionCheck.addEventListener("change", (e) => {
-      if (e.target.checked) {
-        silenceSettingsContainer.style.display = "none";
-      } else {
-        silenceSettingsContainer.style.display = "block";
-      }
-    });
-  }
 
   // Initialize Store first (Tauri Plugin Store v2 API)
   try {
@@ -754,36 +701,10 @@ async function init() {
   autostreamCheck = document.getElementById("autostream-check");
   autoReconnectCheck = document.getElementById("autoreconnect-check");
   priorityCheck = document.getElementById("priority-check");
-  spinStrategyCheck = document.getElementById("spin-strategy-check");
+
   dscpSelect = document.getElementById("dscp-select");
   chunkSizeSelect = document.getElementById("chunk-size-select");
-  const silenceThresholdInput = document.getElementById("silence-threshold");
-  const silenceTimeoutInput = document.getElementById("silence-timeout");
-  const disableSilenceDetectionInput = document.getElementById(
-    "disable-silence-detection"
-  );
 
-  // Update threshold marker when value changes
-  if (silenceThresholdInput) {
-    silenceThresholdInput.addEventListener("input", (e) => {
-      const thresholdMarker = document.getElementById("threshold-marker");
-      if (thresholdMarker) {
-        const maxRms = 10000;
-        const thresholdValue = parseInt(e.target.value) || 5;
-        const thresholdPercent = Math.min((thresholdValue / maxRms) * 100, 100);
-        thresholdMarker.style.left = thresholdPercent + "%";
-      }
-      silenceThreshold = parseFloat(e.target.value);
-    });
-  }
-
-  // Handle disable silence detection checkbox
-  if (disableSilenceDetectionInput) {
-    disableSilenceDetectionInput.addEventListener("change", (e) => {
-      disableSilenceDetection = e.target.checked;
-      saveSettings();
-    });
-  }
 
   toggleBtn = document.getElementById("toggle-btn");
   statusBadge = document.getElementById("status-badge");
@@ -845,40 +766,7 @@ async function init() {
     });
   });
 
-  await listen("volume-level", (event) => {
-    const volumeBar = document.getElementById("volume-bar");
-    const volumeValue = document.getElementById("volume-value");
-    const thresholdMarker = document.getElementById("threshold-marker");
-    const avgValueDisplay = document.getElementById("avg-volume-value"); // New element
 
-    if (volumeBar && volumeValue) {
-      const { current, average } = event.payload;
-      const maxRms = 10000; // Max value for visualization
-
-      // Update Bar (Current Smoothed)
-      const percentage = Math.min((current / maxRms) * 100, 100);
-      volumeBar.style.width = percentage + "%";
-      volumeValue.textContent = Math.round(current);
-
-      // Update Average Display
-      if (avgValueDisplay) {
-        avgValueDisplay.textContent = `Avg: ${Math.round(average)}`;
-      }
-
-      // Update threshold marker position
-      if (thresholdMarker) {
-        const thresholdInput = document.getElementById("silence-threshold");
-        if (thresholdInput) {
-          const thresholdValue = parseInt(thresholdInput.value) || 5;
-          const thresholdPercent = Math.min(
-            (thresholdValue / maxRms) * 100,
-            100
-          );
-          thresholdMarker.style.left = thresholdPercent + "%";
-        }
-      }
-    }
-  });
 
   await listen("health-event", (event) => {
     const { buffer_usage, dropped_packets } = event.payload;
@@ -923,13 +811,7 @@ async function init() {
   if (priorityCheck) priorityCheck.addEventListener("change", saveSettings);
   if (dscpSelect) dscpSelect.addEventListener("change", saveSettings);
   if (chunkSizeSelect) chunkSizeSelect.addEventListener("change", saveSettings);
-  if (silenceThresholdInput)
-    silenceThresholdInput.addEventListener("change", saveSettings);
-  if (silenceTimeoutInput)
-    silenceTimeoutInput.addEventListener("change", (e) => {
-      silenceTimeoutSeconds = parseInt(e.target.value) || 0;
-      saveSettings();
-    });
+
 
   if (loopbackModeInput) {
     loopbackModeInput.addEventListener("change", async (e) => {
