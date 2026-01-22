@@ -561,17 +561,32 @@ fn start_audio_stream(
         let mut next_tick = Instant::now();
 
         while is_running_clone.load(Ordering::Relaxed) {
-            // 1. Strict Pacing (Wait for the start of the timeslot)
+            // 1. Strict Pacing with Adaptive Drain
+            // Check buffer health. If we have too much data, we are drifting behind the source.
+            // Catch up by skipping sleep.
             let now = Instant::now();
-            if now < next_tick {
-                thread::sleep(next_tick - now);
-                next_tick += tick_duration;
+            let current_buffered = cons.len();
+            // High Water Mark: Prefill + ~100ms (sample_rate / 10).
+            // We want to keep buffer close to prefill level.
+            let high_water_mark = prefill_samples + (sample_rate as usize / 10);
+
+            if current_buffered > high_water_mark {
+                // DRAIN MODE: We are lagging. Process immediately.
+                // Reset next_tick to avoid accumulating "debt" and to return to strict pacing smoothly later.
+                next_tick = now + tick_duration;
             } else {
-                // We are behind schedule
-                if now.duration_since(next_tick) > Duration::from_millis(200) {
-                    next_tick = Instant::now() + tick_duration;
-                } else {
+                // STRICT MODE: Respect the clock.
+                if now < next_tick {
+                    thread::sleep(next_tick - now);
                     next_tick += tick_duration;
+                } else {
+                    // We are visibly behind schedule (OS lag?)
+                    // If massive lag (>200ms), reset clock.
+                    if now.duration_since(next_tick) > Duration::from_millis(200) {
+                        next_tick = Instant::now() + tick_duration;
+                    } else {
+                        next_tick += tick_duration;
+                    }
                 }
             }
 
