@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "1.8.4"
+version = "1.9.0"
 description = "A lightweight TCP audio streamer"
 authors = ["you"]
 edition = "2021"

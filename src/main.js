@@ -768,29 +768,7 @@ async function init() {
 
 
 
-  await listen("health-event", (event) => {
-    const { buffer_usage, dropped_packets } = event.payload;
-    // Only log if something is wrong or periodically
-    if (buffer_usage > 0.8) {
-      addLog({
-        timestamp: new Date().toLocaleTimeString(),
-        level: "warning",
-        message: `High Buffer Usage: ${(buffer_usage * 100).toFixed(
-          1
-        )}% (Network Slow)`,
-      });
-    }
-    if (dropped_packets > 0) {
-      // We could update a UI element here instead of spamming logs
-      // For now, let's just log it once if it changes?
-      // Actually, let's just update the stats bar with health info
-      const statsText = document.getElementById("stats-text");
-      if (statsText) {
-        // Append health info to existing stats
-        // This is a bit hacky, but works for now
-      }
-    }
-  });
+
 
   // Gain slider removed
 

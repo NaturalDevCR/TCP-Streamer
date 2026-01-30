@@ -7,7 +7,7 @@ use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use std::io::Write;
 use std::net::SocketAddr;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -46,7 +46,12 @@ struct BufferResizeEvent {
 
 // Helper function to emit log events
 fn emit_log(app: &AppHandle, level: &str, message: String) {
-    // Also log to standard logger (terminal/file)
+    // Gloabl rate limiter for logs
+    // Allows max 5 logs per second to prevent flooding the main thread
+    static LOG_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    static LAST_LOG_RESET: AtomicU64 = AtomicU64::new(0);
+
+    // Also log to standard logger (terminal/file) - always log to stdout
     match level {
         "error" => error!("{}", message),
         "warning" => warn!("{}", message),
@@ -57,12 +62,28 @@ fn emit_log(app: &AppHandle, level: &str, message: String) {
         _ => info!("[{}] {}", level, message),
     }
 
-    let log = LogEvent {
-        timestamp: Local::now().format("%H:%M:%S").to_string(),
-        level: level.to_string(),
-        message,
-    };
-    let _ = app.emit("log-event", log);
+    let now_millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let last_reset = LAST_LOG_RESET.load(Ordering::Relaxed);
+
+    if now_millis - last_reset > 1000 {
+        // Reset counter every second
+        LAST_LOG_RESET.store(now_millis, Ordering::Relaxed);
+        LOG_COUNTER.store(0, Ordering::Relaxed);
+    }
+
+    // Only emit to Frontend if under limit
+    if LOG_COUNTER.fetch_add(1, Ordering::Relaxed) < 5 {
+        let log = LogEvent {
+            timestamp: Local::now().format("%H:%M:%S").to_string(),
+            level: level.to_string(),
+            message,
+        };
+        let _ = app.emit("log-event", log);
+    }
 }
 
 // Statistics tracker
@@ -513,8 +534,22 @@ fn start_audio_stream(
         };
 
         // Exponential backoff for reconnection
-        let mut retry_delay = Duration::from_secs(1);
+        // v1.9.0: Minimum 2s delay to prevent connection storms
+        let mut retry_delay = Duration::from_secs(2);
         const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
+
+        // Helper for jitter (±500ms randomness) to prevent thundering herd
+        fn add_jitter(base: Duration) -> Duration {
+            use std::time::SystemTime;
+            let jitter_ms = (SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+                % 1000) as i64
+                - 500;
+            let ms = base.as_millis() as i64 + jitter_ms;
+            Duration::from_millis(ms.max(2000) as u64)
+        }
 
         // We wrap the stream in an Option to handle reconnection
         let mut current_stream: Option<TcpStream> = None;
@@ -570,10 +605,22 @@ fn start_audio_stream(
             // We want to keep buffer close to prefill level.
             let high_water_mark = prefill_samples + (sample_rate as usize / 10);
 
-            if current_buffered > high_water_mark {
+            // v1.9.0: Freeze drain when disconnected to prevent CPU spin
+            if current_buffered > high_water_mark && current_stream.is_some() {
                 // DRAIN MODE: We are lagging. Process immediately.
                 // Reset next_tick to avoid accumulating "debt" and to return to strict pacing smoothly later.
                 next_tick = now + tick_duration;
+            } else if current_stream.is_none() && current_buffered > 0 {
+                // DISCONNECTED: Clear stale audio to send fresh on reconnect
+                // Only drain ~100ms worth at a time to avoid blocking
+                let drain_amount = (sample_rate as usize / 10).min(current_buffered);
+                let mut drain_buffer = vec![0.0f32; drain_amount];
+                let _ = cons.pop_slice(&mut drain_buffer);
+                // Use strict pacing while disconnected to avoid CPU spin
+                if now < next_tick {
+                    thread::sleep(next_tick - now);
+                }
+                next_tick = Instant::now() + tick_duration;
             } else {
                 // STRICT MODE: Respect the clock.
                 if now < next_tick {
@@ -651,8 +698,9 @@ fn start_audio_stream(
                     ),
                 );
 
-                // Wait before attempting reconnection (exponential backoff)
-                thread::sleep(retry_delay);
+                // Wait before attempting reconnection (exponential backoff with jitter)
+                let jittered_delay = add_jitter(retry_delay);
+                thread::sleep(jittered_delay);
 
                 // Advanced Socket Setup using socket2
                 let connect_result = (|| -> Result<TcpStream, Box<dyn std::error::Error>> {
@@ -751,7 +799,12 @@ fn start_audio_stream(
                 let write_start = Instant::now();
                 if let Err(e) = s.write_all(&payload) {
                     emit_log(&app_handle_net, "error", format!("Write error: {}", e));
-                    current_stream = None;
+                    // v1.9.0: Explicit socket destruction to prevent zombie connections
+                    if let Some(stream) = current_stream.take() {
+                        close_tcp_stream(stream, "write error", &app_handle_net);
+                    }
+                    // Small delay to allow kernel to process FIN before reconnect attempt
+                    thread::sleep(Duration::from_millis(100));
                 } else {
                     // Update Latency (Network Write Time)
                     let write_duration_ms = write_start.elapsed().as_secs_f32() * 1000.0;
@@ -766,8 +819,8 @@ fn start_audio_stream(
                 }
             }
 
-            // Emit stats every second regardless of audio activity
-            if last_stats_emit.elapsed() >= Duration::from_secs(1) {
+            // Emit stats every 2 seconds regardless of audio activity
+            if last_stats_emit.elapsed() >= Duration::from_secs(2) {
                 let uptime = start_time.elapsed().as_secs();
                 let current_bytes = bytes_sent_clone.load(Ordering::Relaxed);
 
@@ -788,8 +841,8 @@ fn start_audio_stream(
                 last_stats_emit = Instant::now();
             }
 
-            // Emit quality metrics every 2 seconds
-            if last_quality_emit.elapsed() >= Duration::from_secs(2) {
+            // Emit quality metrics every 4 seconds
+            if last_quality_emit.elapsed() >= Duration::from_secs(4) {
                 // Calculate average latency
                 let avg_latency = if !latency_samples.is_empty() {
                     latency_samples.iter().sum::<f32>() / latency_samples.len() as f32
