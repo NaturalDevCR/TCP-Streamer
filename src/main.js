@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Store } from "@tauri-apps/plugin-store";
 
@@ -11,6 +12,7 @@ let isStreaming = false;
 let deviceSelect,
   ipInput,
   portInput,
+  modeSelect,
   streamNameInput,
   sampleRateSelect,
   bufferSizeSelect,
@@ -21,7 +23,7 @@ let deviceSelect,
   toggleBtn,
   statusBadge,
   statusText;
-let priorityCheck, dscpSelect, chunkSizeSelect;
+let priorityCheck, dscpSelect, chunkSizeSelect, formatSelect;
 
 let profileSelect,
   btnSaveProfile,
@@ -36,24 +38,57 @@ let tabBtns, tabPanes;
 let loopbackMode = false;
 let loopbackModeInput;
 let networkPresetSelect, adaptiveBufferCheck, minBufferInput, maxBufferInput;
+let streamUrlCard, streamUrlInput, copyUrlBtn;
+let tcpInput, httpInput, configInput;
 
 const MAX_LOGS = 100;
 
 function updateStatus(active, text) {
+  const isServer = modeSelect && modeSelect.value === "server";
   if (active) {
     statusBadge.classList.add("active");
     toggleBtn.classList.add("stop");
-    toggleBtn.querySelector(".btn-text").textContent = "Stop Streaming";
+    toggleBtn.querySelector(".btn-text").textContent = isServer ? "Stop Listening" : "Stop Streaming";
     // Show stats bar when streaming
     if (statsBar) statsBar.style.display = "flex";
   } else {
     statusBadge.classList.remove("active");
     toggleBtn.classList.remove("stop");
-    toggleBtn.querySelector(".btn-text").textContent = "Start Streaming";
+    toggleBtn.querySelector(".btn-text").textContent = isServer ? "Start Listening" : "Start Streaming";
     // Hide stats bar when not streaming
     if (statsBar) statsBar.style.display = "none";
   }
   statusText.textContent = text;
+}
+
+function updateUIState() {
+  const isServer = modeSelect.value === "server";
+  // Protocol removed (Hardcoded TCP)
+  const destinationTitle = document.getElementById("destination-title");
+  const portLabel = document.getElementById("port-label");
+  const autoReconnectContainer = document.getElementById("auto-reconnect-container");
+
+  if (isServer) {
+      if (ipInput && ipInput.parentElement) ipInput.parentElement.style.display = "none";
+      if (destinationTitle) destinationTitle.textContent = "TCP Server Settings";
+      if (portLabel) portLabel.textContent = "Listen Port";
+      if (autoReconnectContainer) autoReconnectContainer.style.display = "none";
+      if (formatSelect) {
+          formatSelect.parentElement.parentElement.style.display = "flex";
+      }
+      if (streamUrlCard) streamUrlCard.style.display = "block";
+  } else {
+      if (ipInput && ipInput.parentElement) ipInput.parentElement.style.display = "block";
+      if (destinationTitle) destinationTitle.textContent = "TCP Destination";
+      if (portLabel) portLabel.textContent = "Port";
+      if (autoReconnectContainer) autoReconnectContainer.style.display = "block";
+      if (formatSelect) {
+          formatSelect.parentElement.parentElement.style.display = "none";
+      }
+      if (streamUrlCard) streamUrlCard.style.display = "none";
+  }
+  // Refresh button text based on mode
+  updateStatus(isStreaming, statusText.textContent);
 }
 
 // Log system
@@ -64,8 +99,7 @@ function addLog(log) {
   const entry = document.createElement("div");
   entry.className = `log-entry log-${log.level}`;
   entry.dataset.level = log.level; // Store level for filtering
-  entry.className = `log-entry log-${log.level}`;
-  entry.dataset.level = log.level; // Store level for filtering
+
   
   const timeSpan = document.createElement("span");
   timeSpan.className = "log-time";
@@ -236,7 +270,7 @@ function updateQualityDisplay(quality) {
   }
 
   if (indicator) indicator.style.color = color;
-  if (indicator) indicator.style.color = color;
+
   if (value) {
       value.textContent = ""; // Clear existing
       const dot = document.createElement("span");
@@ -336,6 +370,7 @@ async function loadSettings() {
 
     console.log(`Loading profile: ${currentProfile}`, settings);
 
+
     if (settings.ip) ipInput.value = settings.ip;
     if (settings.port) portInput.value = settings.port;
     if (settings.sample_rate) sampleRateSelect.value = settings.sample_rate;
@@ -351,6 +386,7 @@ async function loadSettings() {
       priorityCheck.checked = settings.high_priority;
     if (settings.dscp_strategy) dscpSelect.value = settings.dscp_strategy;
     if (settings.chunk_size) chunkSizeSelect.value = settings.chunk_size;
+    if (settings.format) formatSelect.value = settings.format;
 
     
 
@@ -391,11 +427,12 @@ async function saveSettings() {
     const currentProfile = profileSelect.value || "Default";
 
     const settings = {
+      protocol: "tcp",
       device: deviceSelect.value,
       ip: ipInput.value,
       port: parseInt(portInput.value),
       sample_rate: parseInt(sampleRateSelect.value),
-      sample_rate: parseInt(sampleRateSelect.value),
+
       buffer_size: parseInt(bufferSizeSelect.value),
       ring_buffer_duration: parseInt(ringBufferDurationSelect.value),
       auto_stream: autostreamCheck.checked,
@@ -403,12 +440,12 @@ async function saveSettings() {
       high_priority: priorityCheck.checked,
       dscp_strategy: dscpSelect.value,
       chunk_size: parseInt(chunkSizeSelect.value),
+      format: formatSelect.value,
 
       adaptive_buffer: adaptiveBufferCheck.checked,
       min_buffer: parseInt(minBufferInput.value),
       max_buffer: parseInt(maxBufferInput.value),
-      min_buffer: parseInt(minBufferInput.value),
-      max_buffer: parseInt(maxBufferInput.value),
+
       network_preset: networkPresetSelect.value,
 
     };
@@ -423,7 +460,7 @@ async function saveSettings() {
     // Actually, let's just save everything to the profile.
 
     await store.save();
-    await store.save();
+
     console.log(`💾 Settings saved to profile '${currentProfile}'`);
     showNotification(
       `Settings saved to profile '${currentProfile}'`,
@@ -442,7 +479,7 @@ async function loadProfiles() {
     // Initialize default profile
     await store.set("profiles", { Default: {} });
     await store.set("current_profile", "Default");
-    await store.set("current_profile", "Default");
+
     if (loopbackModeInput) {
       await store.set("loopback_mode", loopbackModeInput.checked);
     }
@@ -559,12 +596,16 @@ async function toggleStream() {
     // if (savedDscp) dscpSelect.value = savedDscp;
     // if (savedChunkSize) chunkSizeSelect.value = savedChunkSize;
 
+    if (streamUrlCard) streamUrlCard.style.display = "none";
+
 
     if (savedLoopbackMode !== null && loopbackModeInput) {
       loopbackMode = savedLoopbackMode;
       loopbackModeInput.checked = savedLoopbackMode;
     }
     const device = deviceSelect.value;
+    const mode = modeSelect.value;
+    const isServer = mode === "server";
     const ip = ipInput.value;
     const port = parseInt(portInput.value);
     const sampleRate = parseInt(sampleRateSelect.value);
@@ -574,12 +615,20 @@ async function toggleStream() {
     const highPriority = priorityCheck.checked;
     const dscpStrategy = dscpSelect.value;
     const chunkSize = parseInt(chunkSizeSelect.value);
+    const format = formatSelect.value;
+    const protocol = "tcp";
+
+
+    if (!isServer) {
+        // Enforce PCM for Client Mode (Snapserver compatibility)
+        // User requested: "in client mode... snapserver expects receive audio PCM directly"
+    }
 
     if (!device) {
       updateStatus(false, "Select a device");
       return;
     }
-    if (!ip) {
+    if (!isServer && !ip) {
       updateStatus(false, "Enter Target IP");
       return;
     }
@@ -593,6 +642,7 @@ async function toggleStream() {
     try {
       await saveSettings();
       await invoke("start_stream", {
+        protocol: "tcp",
         deviceName: device,
         ip,
         port,
@@ -604,16 +654,42 @@ async function toggleStream() {
         dscpStrategy: dscpStrategy,
         chunkSize: chunkSize,
 
-        isLoopback: !!isLoopback, // Force boolean to prevent undefined
-        enableAdaptiveBuffer: adaptiveBufferCheck.checked,
-        minBufferMs: parseInt(minBufferInput.value),
+        isLoopback: !!isLoopback,
+        isServer: isServer,
         enableAdaptiveBuffer: adaptiveBufferCheck.checked,
         minBufferMs: parseInt(minBufferInput.value),
         maxBufferMs: parseInt(maxBufferInput.value),
-
+        format: format,
       });
       isStreaming = true;
       updateStatus(true, "Streaming to " + ip);
+
+      if (isServer) {
+        if (streamUrlCard) {
+             streamUrlCard.style.display = "block";
+             
+             // Fetch Local IP
+             let localIp = "127.0.0.1";
+             try {
+                 localIp = await invoke("get_local_ip");
+             } catch (e) {
+                 console.warn("Failed to get local IP", e);
+             }
+
+             const tcpUrl = `tcp://${localIp}:${port}`;
+             const httpUrl = `http://${localIp}:${port}/stream.wav`; // Browsers need WAV header
+             
+             // Update Inputs
+             if (tcpInput) tcpInput.value = tcpUrl;
+             if (httpInput) httpInput.value = httpUrl;
+             
+             if (configInput) {
+                 configInput.value = `[stream]\nsource = tcp://${localIp}:${port}?name=TCPStreamer&mode=client`;
+             }
+        }
+      } else {
+        if (streamUrlCard) streamUrlCard.style.display = "none";
+      }
 
       // Initialize buffer display with starting ring buffer size
       const bufferStat = document.getElementById("stat-buffer");
@@ -663,6 +739,31 @@ async function init() {
     if (loopbackContainer && osType !== "windows") {
       loopbackContainer.style.display = "none";
     }
+
+    // Linux: Show custom titlebar (native decorations are disabled due to WebKitGTK bug)
+    if (osType === "linux") {
+      const titlebar = document.getElementById("custom-titlebar");
+      if (titlebar) {
+        titlebar.style.display = "flex";
+        document.body.classList.add("linux-custom-titlebar");
+
+        const appWindow = getCurrentWindow();
+        document.getElementById("titlebar-minimize").addEventListener("click", () => {
+          appWindow.minimize();
+        });
+        document.getElementById("titlebar-close").addEventListener("click", () => {
+          appWindow.close();
+        });
+
+        // Make titlebar draggable
+        const dragRegion = titlebar.querySelector(".titlebar-drag-region");
+        dragRegion.addEventListener("mousedown", (e) => {
+          if (e.button === 0) {
+            appWindow.startDragging();
+          }
+        });
+      }
+    }
   } catch (e) {
     console.warn("Failed to detect OS type", e);
   }
@@ -692,6 +793,7 @@ async function init() {
 
   // Initialize elements
   deviceSelect = document.getElementById("device-select");
+  modeSelect = document.getElementById("mode-select");
   ipInput = document.getElementById("ip-input");
   portInput = document.getElementById("port-input");
   sampleRateSelect = document.getElementById("sample-rate");
@@ -703,7 +805,9 @@ async function init() {
   priorityCheck = document.getElementById("priority-check");
 
   dscpSelect = document.getElementById("dscp-select");
+
   chunkSizeSelect = document.getElementById("chunk-size-select");
+  formatSelect = document.getElementById("format-select");
 
 
   toggleBtn = document.getElementById("toggle-btn");
@@ -713,7 +817,35 @@ async function init() {
   networkPresetSelect = document.getElementById("network-preset");
   adaptiveBufferCheck = document.getElementById("adaptive-buffer-check");
   minBufferInput = document.getElementById("min-buffer");
+  minBufferInput = document.getElementById("min-buffer");
   maxBufferInput = document.getElementById("max-buffer");
+  streamUrlCard = document.getElementById("stream-url-card");
+
+  
+  // New UI Elements
+  tcpInput = document.getElementById("stream-url-tcp");
+  httpInput = document.getElementById("stream-url-http");
+  configInput = document.getElementById("snapcast-config");
+  
+  const copyTcpBtn = document.getElementById("copy-tcp-btn");
+  const copyHttpBtn = document.getElementById("copy-http-btn");
+  const copyConfigBtn = document.getElementById("copy-config-btn");
+
+  const setupCopy = (btn, input) => {
+      if (btn && input) {
+          btn.addEventListener("click", () => {
+              input.select();
+              navigator.clipboard.writeText(input.value)
+                  .then(() => showNotification("Copied to clipboard!", "success"))
+                  .catch(() => showNotification("Failed to copy", "error"));
+          });
+      }
+  };
+
+  setupCopy(copyTcpBtn, tcpInput);
+  setupCopy(copyHttpBtn, httpInput);
+  setupCopy(copyConfigBtn, configInput);
+
 
   // Tabs
   tabBtns = document.querySelectorAll(".tab-btn");
@@ -789,6 +921,7 @@ async function init() {
   if (priorityCheck) priorityCheck.addEventListener("change", saveSettings);
   if (dscpSelect) dscpSelect.addEventListener("change", saveSettings);
   if (chunkSizeSelect) chunkSizeSelect.addEventListener("change", saveSettings);
+  if (formatSelect) formatSelect.addEventListener("change", saveSettings);
 
 
   if (loopbackModeInput) {
@@ -887,6 +1020,19 @@ async function init() {
     networkPresetSelect.addEventListener("change", (e) => {
       applyNetworkPreset(e.target.value);
     });
+  }
+
+  // Mode & Protocol selection change handler
+  if (modeSelect) {
+      modeSelect.addEventListener("change", () => {
+          updateUIState();
+          saveSettings();
+      });
+  }
+
+  // Trigger initial state
+  if (modeSelect) {
+      setTimeout(updateUIState, 100);
   }
 
   // EQ listeners removed

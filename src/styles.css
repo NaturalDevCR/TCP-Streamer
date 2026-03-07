@@ -1,5 +1,9 @@
 :root {
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    sans-serif;
 
   --bg-color: #0f172a;
   --card-bg: rgba(30, 41, 59, 0.7);
@@ -22,16 +26,85 @@ body {
   min-height: 100vh;
   height: 100vh;
   background-color: var(--bg-color);
-  background-image: radial-gradient(
-      at 0% 0%,
-      rgba(59, 130, 246, 0.15) 0px,
-      transparent 50%
-    ),
+  background-image:
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.15) 0px, transparent 50%);
   color: var(--text-primary);
   overflow: hidden;
   padding: 16px;
   box-sizing: border-box;
+}
+
+/* Custom Titlebar for Linux */
+#custom-titlebar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: rgba(15, 23, 42, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 9999;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#custom-titlebar .titlebar-drag-region {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  cursor: grab;
+}
+
+#custom-titlebar .titlebar-drag-region:active {
+  cursor: grabbing;
+}
+
+#custom-titlebar .titlebar-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+
+.titlebar-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.titlebar-btn {
+  width: 32px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.titlebar-btn-close:hover {
+  background: rgba(239, 68, 68, 0.8);
+  color: white;
+}
+
+body.linux-custom-titlebar {
+  padding-top: 44px;
 }
 
 .glass-panel {
@@ -868,7 +941,9 @@ input:checked + .slider:before {
   border: 1px solid rgba(255, 255, 255, 0.1);
   opacity: 0;
   transform: translateY(20px);
-  animation: toast-in 0.3s forwards, toast-out 0.3s forwards 2.7s;
+  animation:
+    toast-in 0.3s forwards,
+    toast-out 0.3s forwards 2.7s;
   pointer-events: auto;
   display: flex;
   align-items: center;

@@ -67,6 +67,16 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Linux: Disable native decorations to work around WebKitGTK bug
+            // where window control buttons become unresponsive after clicking in webview
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    use tauri::WebviewWindowExt as _;
+                    let _ = window.set_decorations(false);
+                }
+            }
+
             // If started hidden (e.g., from autostart), hide the window
             if start_hidden {
                 if let Some(window) = app.get_webview_window("main") {
@@ -87,7 +97,8 @@ pub fn run() {
             audio::get_input_devices,
             audio::start_stream,
             audio::stop_stream,
-            audio::get_os_type
+            audio::get_os_type,
+            audio::get_local_ip
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri application")
