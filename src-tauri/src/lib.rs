@@ -72,7 +72,6 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             {
                 if let Some(window) = app.get_webview_window("main") {
-                    use tauri::WebviewWindowExt as _;
                     let _ = window.set_decorations(false);
                 }
             }
