@@ -463,7 +463,7 @@ fn start_audio_stream(
     );
 
     let rb = HeapRb::<f32>::new(ring_buffer_size);
-    let (mut prod, mut cons) = rb.split();
+    let (prod, mut cons) = rb.split();
 
     // Shared stats
     let bytes_sent = Arc::new(AtomicU64::new(0));
@@ -1095,29 +1095,104 @@ fn start_audio_stream(
     });
 
     // 3. Setup Audio Stream (Producer)
-    // Logging removed to reduce spam
-    let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
-        if prod.push_slice(data) < data.len() {
-            // Buffer full - Drop samples (Overrun)
+    let supported_configs: Vec<_> = device.supported_input_configs().map_err(|e| e.to_string())?.collect();
+    let mut selected_format = cpal::SampleFormat::F32;
+    let mut best_config_range = None;
+
+    for channels in [1, 2] {
+        for format in [cpal::SampleFormat::F32, cpal::SampleFormat::I16, cpal::SampleFormat::U16] {
+            for range in &supported_configs {
+                if range.sample_format() == format && range.channels() == channels {
+                    if range.min_sample_rate().0 <= sample_rate && range.max_sample_rate().0 >= sample_rate {
+                        best_config_range = Some(range.clone());
+                        selected_format = format;
+                        break;
+                    }
+                }
+            }
+            if best_config_range.is_some() { break; }
         }
+        if best_config_range.is_some() { break; }
+    }
+
+    if best_config_range.is_none() && !supported_configs.is_empty() {
+        let fallback = supported_configs.first().unwrap();
+        selected_format = fallback.sample_format();
+        best_config_range = Some(fallback.clone());
+    }
+
+    let config_range = best_config_range.ok_or_else(|| "No supported audio config found".to_string())?;
+    let channels = config_range.channels();
+
+    emit_log(
+        &app_handle,
+        "info",
+        format!("Detected Input Format: {:?} ({} channels)", selected_format, channels),
+    );
+
+    let stream_config = cpal::StreamConfig {
+        channels,
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
     };
 
     let err_fn = move |err| {
         error!("an error occurred on stream: {}", err);
     };
 
-    let audio_stream = device
-        .build_input_stream(
-            &cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(sample_rate),
-                buffer_size: cpal::BufferSize::Fixed(chunk_size),
-            },
-            input_data_fn,
-            err_fn,
-            None,
-        )
-        .map_err(|e| e.to_string())?;
+    // Shared producer (mutex wrapped for multiple closures)
+    let prod = Arc::new(Mutex::new(prod));
+
+    let audio_stream = match selected_format {
+        cpal::SampleFormat::F32 => {
+            let prod_clone = prod.clone();
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _: &_| {
+                    if let Ok(mut guard) = prod_clone.lock() {
+                        let _ = guard.push_slice(data);
+                    }
+                },
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::I16 => {
+            let prod_clone = prod.clone();
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[i16], _: &_| {
+                    let mut converted = Vec::with_capacity(data.len());
+                    for &sample in data {
+                        converted.push(sample as f32 / 32768.0);
+                    }
+                    if let Ok(mut guard) = prod_clone.lock() {
+                        let _ = guard.push_slice(&converted);
+                    }
+                },
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::U16 => {
+            let prod_clone = prod.clone();
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[u16], _: &_| {
+                    let mut converted = Vec::with_capacity(data.len());
+                    for &sample in data {
+                        converted.push((sample as f32 - 32768.0) / 32768.0);
+                    }
+                    if let Ok(mut guard) = prod_clone.lock() {
+                        let _ = guard.push_slice(&converted);
+                    }
+                },
+                err_fn,
+                None,
+            )
+        }
+        _ => return Err(format!("Unsupported format: {:?}", selected_format))
+    }.map_err(|e| e.to_string())?;
 
     Ok((
         audio_stream,
