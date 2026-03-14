@@ -4,6 +4,18 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [1.9.6] - 2026-03-14
+### Bug Fixes
+- **🚨 Auto-Reconnection**: Fixed critical bug where reconnection never triggered after connection loss. The command receiver (`mpsc::Receiver`) was blocking the thread, preventing the reconnection check from running. Replaced with `try_recv` polling loop.
+- **Buffer Resize Events**: Fixed event name mismatch — frontend listened for `buffer-resize-event` but backend emits `buffer-resize`.
+- **I16 Audio Format**: Fixed decode/encode asymmetry for I16 sample conversion (divisor 32768→32767 to match encoder).
+- **Window Close Safety**: Replaced `window.hide().unwrap()` with safe `.ok()` to prevent potential panic on close.
+
+### Code Quality
+- **stream.rs**: Cleaned stale comments from single-variant enum.
+- **main.js**: Removed duplicate `minBufferInput` assignment and duplicate `sampleRateSelect.disabled` lines.
+- **Adaptive buffer**: Added clarifying comment that adjustments are display-only (ring buffer is fixed at creation).
+
 ## [1.9.5] - 2026-03-14
 ### Bug Fixes
 - **Latency tracking**: Replaced `Vec::remove(0)` (O(n)) with `VecDeque::pop_front()` (O(1)) for latency sample tracking.

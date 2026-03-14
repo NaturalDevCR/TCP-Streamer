@@ -98,9 +98,10 @@ impl AudioState {
             #[allow(unused_assignments)]
             let mut current_params: Option<StreamParams> = None;
 
-            for command in rx {
-                match command {
-                    AudioCommand::Start {
+            loop {
+                // Non-blocking command check — allows reconnection to run independently
+                match rx.try_recv() {
+                    Ok(AudioCommand::Start {
                         device_name,
                         ip,
                         port,
@@ -117,7 +118,7 @@ impl AudioState {
                         min_buffer_ms,
                         max_buffer_ms,
                         app_handle,
-                    } => {
+                    }) => {
                         // Stop existing stream if any
                         if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
@@ -172,7 +173,7 @@ impl AudioState {
                             }
                         }
                     }
-                    AudioCommand::Stop => {
+                    Ok(AudioCommand::Stop) => {
                         should_reconnect.store(false, Ordering::Relaxed);
                         if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
@@ -182,9 +183,16 @@ impl AudioState {
                         current_stream_handle = None;
                         current_params = None;
                     }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // No command pending — continue to reconnection check
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        // Channel closed — exit the thread
+                        break;
+                    }
                 }
 
-                // Reconnection check
+                // Reconnection check — runs every iteration, not blocked by rx
                 if should_reconnect.load(Ordering::Relaxed) && current_stream_handle.is_none() {
                     if let Some(p) = &current_params {
                         thread::sleep(Duration::from_secs(2));
@@ -210,6 +218,9 @@ impl AudioState {
                             }
                         }
                     }
+                } else if current_stream_handle.is_some() || !should_reconnect.load(Ordering::Relaxed) {
+                    // Idle — sleep briefly to avoid busy-spinning
+                    thread::sleep(Duration::from_millis(200));
                 }
             }
         });
@@ -497,7 +508,7 @@ fn start_audio_stream(
         let mut last_quality_emit = Instant::now();
         let mut error_count: u64 = 0;
 
-        // Adaptive buffer tracking
+        // Adaptive buffer tracking (display-only — ring buffer size is fixed at creation)
         let mut current_buffer_ms = adj_ms_u32;
         let mut last_buffer_check = Instant::now();
         const BUFFER_CHECK_INTERVAL_SECS: u64 = 10;
@@ -1065,7 +1076,7 @@ fn start_audio_stream(
             device.build_input_stream(
                 &stream_config,
                 move |data: &[i16], _: &_| {
-                    let converted: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
+                    let converted: Vec<f32> = data.iter().map(|&s| s as f32 / 32767.0).collect();
                     if let Ok(mut guard) = prod_clone.lock() {
                         let _ = guard.push_slice(&converted);
                     }

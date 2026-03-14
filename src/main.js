@@ -568,7 +568,6 @@ async function toggleStream() {
       ipInput.disabled = false;
       portInput.disabled = false;
       sampleRateSelect.disabled = false;
-      sampleRateSelect.disabled = false;
       bufferSizeSelect.disabled = false;
       ringBufferDurationSelect.disabled = false;
       // gainSlider remains enabled for real-time adjustment
@@ -700,7 +699,6 @@ async function toggleStream() {
       ipInput.disabled = true;
       portInput.disabled = true;
       sampleRateSelect.disabled = true;
-      sampleRateSelect.disabled = true;
       bufferSizeSelect.disabled = true;
       ringBufferDurationSelect.disabled = true;
       // gainSlider remains enabled for real-time adjustment
@@ -817,7 +815,6 @@ async function init() {
   networkPresetSelect = document.getElementById("network-preset");
   adaptiveBufferCheck = document.getElementById("adaptive-buffer-check");
   minBufferInput = document.getElementById("min-buffer");
-  minBufferInput = document.getElementById("min-buffer");
   maxBufferInput = document.getElementById("max-buffer");
   streamUrlCard = document.getElementById("stream-url-card");
 
@@ -886,7 +883,7 @@ async function init() {
     updateQualityDisplay(event.payload);
   });
 
-  await listen("buffer-resize-event", (event) => {
+  await listen("buffer-resize", (event) => {
     const bufferStat = document.getElementById("stat-buffer");
     if (bufferStat) {
       bufferStat.textContent = event.payload.new_size_ms + " ms";
