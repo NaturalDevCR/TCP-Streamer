@@ -4,6 +4,13 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.1] - 2026-03-14
+### Bug Fixes
+- **Audio Stuttering (Underflow)**: Replaced strict CPU clock-based pacing with hardware-driven ring buffer pacing in the network thread. Eliminates artificial underflows and stuttering when the CPU and audio hardware are out of sync.
+- **Audio Resampling**: Removed forced 44.1kHz downsampling. The app now relies on native OS audio stack implicit resampling (PipeWire, PulseAudio, CoreAudio, WASAPI), preserving the user's requested sample rate (e.g. 48kHz for Snapcast) without chipmunk effects.
+- **Linux Window Overlap**: Removed the custom Vue titlebar that was overlapping with native DE window decorations on Linux. The app now properly bounds within native windows.
+- **Window Size**: Reduced default Linux window height from 1000px to 750px to better fit standard laptop screens.
+
 ## [2.0.0] - 2026-03-14
 ### Added
 - **Complete UI Redesign**: Migrated from Vanilla JS to Vue 3, Pinia, and Tailwind CSS 4.

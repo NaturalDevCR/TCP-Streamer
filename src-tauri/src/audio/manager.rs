@@ -339,26 +339,10 @@ fn start_audio_stream(
         found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
     };
 
-    // 0.5. Query Device Default Config (to prevent sample rate mismatch/chipmunk effect)
-    let default_config = if is_loopback {
-         device.default_output_config()
-    } else {
-         device.default_input_config()
-    };
-
-    if let Ok(config) = default_config {
-        let native_rate = config.sample_rate().0;
-        if native_rate != sample_rate {
-             emit_log(
-                 &app_handle,
-                 "warn",
-                 format!("Overriding requested Sample Rate {} -> {} (Device Native)", sample_rate, native_rate)
-             );
-             sample_rate = native_rate;
-        }
-    } else {
-         emit_log(&app_handle, "warn", "Failed to query device default config. Using requested rate.".to_string());
-    }
+    // 0.5. Note: We deliberately DO NOT override the requested sample rate natively anymore.
+    // If the user requests 48000Hz and the device natively captures at 44100Hz, we trust
+    // the OS audio stack (PipeWire, PulseAudio, CoreAudio, WASAPI shared mode) to perform
+    // the necessary resampling. Overriding this breaks protocol synchronization (e.g. with Snapserver).
 
     // Detect supported audio formats from device
     let supported_configs: Vec<_> = if is_loopback {
@@ -392,6 +376,7 @@ fn start_audio_stream(
         let fallback = supported_configs.first().unwrap();
         selected_format = fallback.sample_format();
         best_config_range = Some(fallback.clone());
+        emit_log(&app_handle, "warn", format!("Requested Sample Rate {}Hz may not be natively supported. Relying on OS implicit resampler.", sample_rate));
     }
 
     let config_range = best_config_range.ok_or_else(|| "No supported audio config found".to_string())?;
@@ -990,29 +975,6 @@ fn start_audio_stream(
                                     BufferResizeEvent {
                                         new_size_ms: current_buffer_ms,
                                         reason: "High Latency".to_string(),
-                                    },
-                                );
-                            }
-                        }
-                    } else if buffer_health > 0.8 {
-                        if current_buffer_ms < adaptive_max_ms {
-                            let new_size =
-                                current_buffer_ms.saturating_add(500).min(adaptive_max_ms);
-                            if new_size > current_buffer_ms {
-                                current_buffer_ms = new_size;
-                                emit_log(
-                                    &app_handle_net,
-                                    "info",
-                                    format!(
-                                        "Adaptive Buffer: Underflow risk. Increasing to {}ms",
-                                        current_buffer_ms
-                                    ),
-                                );
-                                let _ = app_handle_net.emit(
-                                    "buffer-resize",
-                                    BufferResizeEvent {
-                                        new_size_ms: current_buffer_ms,
-                                        reason: "Underflow Risk".to_string(),
                                     },
                                 );
                             }
