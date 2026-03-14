@@ -1,7 +1,7 @@
 <template>
   <header class="flex items-center justify-between mb-2">
     <div class="flex items-center gap-3">
-      <img src="/assets/logo.png" alt="TCP Streamer" class="w-8 h-8 object-contain drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+      <img src="/assets/tcp-streamer-logo.svg" alt="TCP Streamer" class="w-8 h-8 object-contain drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
       <h1 class="text-lg font-semibold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">TCP Streamer</h1>
     </div>
     <div
