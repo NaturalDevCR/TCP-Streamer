@@ -6,6 +6,7 @@ use log::error;
 
 use ringbuf::HeapRb;
 use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -44,16 +45,14 @@ impl<W: Write> Write for ChunkedWriter<W> {
 pub enum AudioCommand {
     Start {
         device_name: String,
-        // protocol removed
         ip: String,
         port: u16,
         sample_rate: u32,
-        buffer_size: u32,
         ring_buffer_duration_ms: u32,
         auto_reconnect: bool,
         high_priority: bool,
         dscp_strategy: String,
-        format: String, // "pcm" or "mp3"
+        format: String, // "pcm" or "wav"
         chunk_size: u32,
         is_loopback: bool,
         is_server: bool,
@@ -65,6 +64,26 @@ pub enum AudioCommand {
     Stop,
 }
 
+/// Stores stream parameters for reconnection
+#[derive(Clone)]
+struct StreamParams {
+    device_name: String,
+    ip: String,
+    port: u16,
+    sample_rate: u32,
+    ring_buffer_duration_ms: u32,
+    high_priority: bool,
+    dscp_strategy: String,
+    format: String,
+    chunk_size: u32,
+    is_loopback: bool,
+    is_server: bool,
+    enable_adaptive_buffer: bool,
+    min_buffer_ms: u32,
+    max_buffer_ms: u32,
+    app_handle: AppHandle,
+}
+
 pub struct AudioState {
     pub tx: Mutex<mpsc::Sender<AudioCommand>>,
 }
@@ -74,41 +93,18 @@ impl AudioState {
         let (tx, rx) = mpsc::channel();
 
         thread::spawn(move || {
-            let mut _current_stream_handle: Option<(cpal::Stream, StreamStats)> = None;
-            let mut _reconnect_handle: Option<thread::JoinHandle<()>> = None;
+            let mut current_stream_handle: Option<(cpal::Stream, StreamStats)> = None;
             let should_reconnect = Arc::new(AtomicBool::new(false));
-
-            // Keep track of current params for reconnection
-            let mut _current_params: Option<(
-                String,
-                String,
-                u16,
-                u32,
-                u32,
-                u32,
-                bool,
-                bool,
-                String,
-                // protocol removed
-                String,
-                u32,
-                bool,
-                bool,
-                bool,
-                u32,
-                u32,
-                AppHandle,
-            )> = None;
+            #[allow(unused_assignments)]
+            let mut current_params: Option<StreamParams> = None;
 
             for command in rx {
                 match command {
                     AudioCommand::Start {
                         device_name,
-                        // protocol removed
                         ip,
                         port,
                         sample_rate,
-                        buffer_size,
                         ring_buffer_duration_ms,
                         auto_reconnect,
                         high_priority,
@@ -123,172 +119,94 @@ impl AudioState {
                         app_handle,
                     } => {
                         // Stop existing stream if any
-                        if let Some((stream, stats)) = _current_stream_handle.take() {
+                        if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
-                            stream.pause().ok(); // Try to pause first
+                            stream.pause().ok();
                             drop(stream);
-                            drop(stats); // Signals stats thread to stop
+                            drop(stats);
                         }
 
-                        // Store params for reconnection
-                        _current_params = Some((
-                            device_name.clone(),
-                            // protocol removed
-                            ip.clone(),
+                        let params = StreamParams {
+                            device_name: device_name.clone(),
+                            ip: ip.clone(),
                             port,
                             sample_rate,
-                            buffer_size,
                             ring_buffer_duration_ms,
-                            auto_reconnect,
                             high_priority,
-                            dscp_strategy.clone(),
-                            if is_server { format.clone() } else { "pcm".to_string() },
+                            dscp_strategy: dscp_strategy.clone(),
+                            format: if is_server { format.clone() } else { "pcm".to_string() },
                             chunk_size,
                             is_loopback,
                             is_server,
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
-                            app_handle.clone(),
-                        ));
+                            app_handle: app_handle.clone(),
+                        };
+                        current_params = Some(params);
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
 
                         if is_server {
-                            emit_log(
-                                &app_handle,
-                                "info",
-                                format!(
-                                    "Starting TCP Server on port {}",
-                                    port
-                                ),
-                            );
+                            emit_log(&app_handle, "info", format!("Starting TCP Server on port {}", port));
                         } else {
-                            emit_log(
-                                &app_handle,
-                                "info",
-                                format!(
-                                    "Starting TCP stream to {}:{}",
-                                    ip,
-                                    port
-                                ),
-                            );
+                            emit_log(&app_handle, "info", format!("Starting TCP stream to {}:{}", ip, port));
                         }
 
                         match start_audio_stream(
-                            device_name,
-                            // protocol removed
-                            ip,
-                            port,
-                            sample_rate,
-                            buffer_size,
-                            ring_buffer_duration_ms,
-                            high_priority,
-                            dscp_strategy,
-                            format,
-                            chunk_size,
-                            is_loopback,
-                            is_server,
-                            enable_adaptive_buffer,
-                            min_buffer_ms,
-                            max_buffer_ms,
+                            device_name, ip, port, sample_rate,
+                            ring_buffer_duration_ms, high_priority, dscp_strategy,
+                            format, chunk_size, is_loopback, is_server,
+                            enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
                             app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
                                 if let Err(e) = stream.play() {
                                     emit_log(&app_handle, "error", format!("Failed to play stream: {}", e));
                                 } else {
-                                    _current_stream_handle = Some((stream, stats));
-                                    emit_log(
-                                        &app_handle,
-                                        "success",
-                                        "Stream started successfully".to_string(),
-                                    );
+                                    current_stream_handle = Some((stream, stats));
+                                    emit_log(&app_handle, "success", "Stream started successfully".to_string());
                                 }
                             }
                             Err(e) => {
-                                emit_log(
-                                    &app_handle,
-                                    "error",
-                                    format!("Failed to start stream: {}", e),
-                                );
+                                emit_log(&app_handle, "error", format!("Failed to start stream: {}", e));
                             }
                         }
                     }
                     AudioCommand::Stop => {
                         should_reconnect.store(false, Ordering::Relaxed);
-                        if let Some((stream, stats)) = _current_stream_handle.take() {
-                             stats.is_running.store(false, Ordering::Relaxed);
-                             stream.pause().ok();
-                             drop(stream);
+                        if let Some((stream, stats)) = current_stream_handle.take() {
+                            stats.is_running.store(false, Ordering::Relaxed);
+                            stream.pause().ok();
+                            drop(stream);
                         }
-                        _current_stream_handle = None;
-                        _current_params = None;
+                        current_stream_handle = None;
+                        current_params = None;
                     }
                 }
 
                 // Reconnection check
-                if should_reconnect.load(Ordering::Relaxed) && _current_stream_handle.is_none() {
-                    if let Some((
-                        device_name,
-                        // protocol removed
-                        ip,
-                        port,
-                        sample_rate,
-                        buffer_size,
-                        ring_buffer_duration_ms,
-                        _auto_reconnect,
-                        high_priority,
-                        dscp_strategy,
-                        format,
-                        chunk_size,
-                        is_loopback,
-                        is_server,
-                        enable_adaptive_buffer,
-                        min_buffer_ms,
-                        max_buffer_ms,
-                        app_handle,
-                    )) = &_current_params
-                    {
+                if should_reconnect.load(Ordering::Relaxed) && current_stream_handle.is_none() {
+                    if let Some(p) = &current_params {
                         thread::sleep(Duration::from_secs(2));
-
-                        emit_log(app_handle, "info", "Attempting to reconnect...".to_string());
+                        emit_log(&p.app_handle, "info", "Attempting to reconnect...".to_string());
 
                         match start_audio_stream(
-                            device_name.clone(),
-                            ip.clone(),
-                            port.clone(),
-                            sample_rate.clone(),
-                            buffer_size.clone(),
-                            ring_buffer_duration_ms.clone(),
-                            high_priority.clone(),
-                            dscp_strategy.clone(),
-                            format.clone(),
-                            chunk_size.clone(),
-                            is_loopback.clone(),
-                            is_server.clone(),
-                            enable_adaptive_buffer.clone(),
-                            min_buffer_ms.clone(),
-                            max_buffer_ms.clone(),
-                            app_handle.clone(),
+                            p.device_name.clone(), p.ip.clone(), p.port, p.sample_rate,
+                            p.ring_buffer_duration_ms, p.high_priority, p.dscp_strategy.clone(),
+                            p.format.clone(), p.chunk_size, p.is_loopback, p.is_server,
+                            p.enable_adaptive_buffer, p.min_buffer_ms, p.max_buffer_ms,
+                            p.app_handle.clone(),
                         ) {
                             Ok((stream, stats)) => {
                                 if let Err(e) = stream.play() {
-                                    emit_log(app_handle, "error", format!("Failed to play stream (reconnect): {}", e));
+                                    emit_log(&p.app_handle, "error", format!("Failed to play stream (reconnect): {}", e));
                                 } else {
-                                    _current_stream_handle = Some((stream, stats));
-                                    emit_log(
-                                        app_handle,
-                                        "success",
-                                        "Reconnected successfully".to_string(),
-                                    );
+                                    current_stream_handle = Some((stream, stats));
+                                    emit_log(&p.app_handle, "success", "Reconnected successfully".to_string());
                                 }
                             }
                             Err(e) => {
-                                emit_log(
-                                    app_handle,
-                                    "warning",
-                                    format!("Reconnection failed: {}", e),
-                                );
+                                emit_log(&p.app_handle, "warning", format!("Reconnection failed: {}", e));
                             }
                         }
                     }
@@ -335,11 +253,9 @@ fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
 
 fn start_audio_stream(
     device_name: String,
-    // protocol removed
     ip: String,
     port: u16,
     sample_rate: u32,
-    buffer_size: u32,
     ring_buffer_duration_ms: u32,
     high_priority: bool,
     dscp_strategy: String,
@@ -352,15 +268,14 @@ fn start_audio_stream(
     max_buffer_ms: u32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
-    // Shadow sample_rate to allow override with native device rate
     let mut sample_rate = sample_rate;
 
     emit_log(
         &app_handle,
         "debug",
         format!(
-            "Init stream: Mode={} Protocol=TCP, Device='{}', Rate={}, Buf={}, RingMs={}, Priority={}, DSCP={}, Format={}, Chunk={}, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
-            if is_server { "SERVER" } else { "CLIENT" }, device_name, sample_rate, buffer_size, ring_buffer_duration_ms, high_priority, dscp_strategy, format, chunk_size, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
+            "Init stream: Mode={} Protocol=TCP, Device='{}', Rate={}, RingMs={}, Priority={}, DSCP={}, Format={}, Chunk={}, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
+            if is_server { "SERVER" } else { "CLIENT" }, device_name, sample_rate, ring_buffer_duration_ms, high_priority, dscp_strategy, format, chunk_size, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
         ),
     );
 
@@ -494,7 +409,7 @@ fn start_audio_stream(
         (sample_rate as usize) * (device_channels as usize) * (adjusted_ring_buffer_duration_ms as usize) / 1000;
 
     let adj_ms_u32 = adjusted_ring_buffer_duration_ms as u32;
-    let buffer_size_mb = (ring_buffer_size * 2) as f32 / (1024.0 * 1024.0);
+    let buffer_size_mb = (ring_buffer_size * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
 
     emit_log(
         &app_handle,
@@ -522,7 +437,6 @@ fn start_audio_stream(
     let is_running_clone = is_running.clone();
     let app_handle_net = app_handle.clone();
     let ip_clone = ip.clone();
-    // protocol_clone removed
     let format_clone = format.clone();
     let sample_rate_clone = sample_rate;
     let is_server_clone = is_server;
@@ -555,24 +469,16 @@ fn start_audio_stream(
             }
         }
 
-        // Bind listener if in server mode (TCP only)
+        // Bind listener if in server mode
         let listener = if is_server_clone {
             match std::net::TcpListener::bind(format!("0.0.0.0:{}", port)) {
                 Ok(l) => {
                     let _ = l.set_nonblocking(true);
-                    emit_log(
-                        &app_handle_net,
-                        "success",
-                        format!("TCP Server listening on 0.0.0.0:{}", port),
-                    );
+                    emit_log(&app_handle_net, "success", format!("TCP Server listening on 0.0.0.0:{}", port));
                     Some(l)
                 }
                 Err(e) => {
-                    emit_log(
-                        &app_handle_net,
-                        "error",
-                        format!("Failed to bind TCP server port: {}", e),
-                    );
+                    emit_log(&app_handle_net, "error", format!("Failed to bind TCP server port: {}", e));
                     None
                 }
             }
@@ -580,28 +486,16 @@ fn start_audio_stream(
             None
         };
 
-        // UDP Server logic removed
 
-
-        let mut sequence: u32 = 0;
         let mut temp_buffer = vec![0.0f32; chunk_size as usize * device_channels_net as usize];
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
 
-        // Quality tracking variables
-        let mut latency_samples: Vec<f32> = Vec::with_capacity(100);
+        // Quality tracking
+        let mut latency_samples: VecDeque<f32> = VecDeque::with_capacity(100);
         let mut jitter_avg: f32 = 0.0;
-        let mut _last_write_time: Option<Instant> = None;
         let mut last_quality_emit = Instant::now();
-
-        // MP3 Encoder Removed
-        // let mut mp3_encoder: Option<mp3lame_encoder::Encoder> = ...
-
-
-        // Initialize MP3 buffer if needed
-        // MP3 Buffer Removed
-        // let mp3_buffer_size = (chunk_size as usize * 2) + 7200;
-        // let mut mp3_out_buffer = vec![0u8; mp3_buffer_size];
+        let mut error_count: u64 = 0;
 
         // Adaptive buffer tracking
         let mut current_buffer_ms = adj_ms_u32;
@@ -791,9 +685,8 @@ fn start_audio_stream(
                                     }
                                 }
 
-                                stream.set_read_timeout(None).ok(); // clear timeout
-                                // KEEP BLOCKING MODE for stream to avoid partial writes/broken pipes
-                                // let _ = stream.set_nonblocking(true);
+                                stream.set_read_timeout(None).ok();
+                                // Keep blocking mode for writes
                                 
                                 emit_log(
                                     &app_handle_net,
@@ -814,9 +707,15 @@ fn start_audio_stream(
                         }
                     }
                 } else {
-                    // CLIENT MODE (TCP Only)
-                    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
-                        .unwrap_or_else(|_| panic!("Failed to create socket"));
+                    // CLIENT MODE (TCP only)
+                    let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            emit_log(&app_handle_net, "error", format!("Failed to create socket: {}", e));
+                            thread::sleep(Duration::from_secs(2));
+                            continue;
+                        }
+                    };
                     let _ = socket.set_send_buffer_size(32 * 1024);
                     let _ = socket.set_nodelay(true);
                     let keepalive = TcpKeepalive::new()
@@ -847,8 +746,7 @@ fn start_audio_stream(
                         match socket.connect_timeout(&addr.into(), Duration::from_secs(2)) {
                             Ok(_) => {
                                 let stream: TcpStream = socket.into();
-                                // KEEP BLOCKING MODE
-                                // let _ = stream.set_nonblocking(true);
+                                // Keep blocking mode
                                 emit_log(
                                     &app_handle_net,
                                     "success",
@@ -936,9 +834,8 @@ fn start_audio_stream(
                 let count = cons.pop_slice(&mut temp_buffer);
 
                 if count > 0 {
-                    let data_len = (count * 2) as u32;
-                    // Convert Float to PCM i16
-                    let mut payload = Vec::with_capacity(data_len as usize);
+                    // Convert float samples to PCM i16 payload
+                    let mut payload = Vec::with_capacity(count * 2);
                     for i in 0..count {
                         let sample = temp_buffer[i].clamp(-1.0, 1.0);
                         let sample_i16 = (sample * 32767.0) as i16;
@@ -990,31 +887,28 @@ fn start_audio_stream(
                                 }
                             }
                         }
-
                     }
 
                     if write_success {
                         let write_duration_ms = write_start.elapsed().as_secs_f32() * 1000.0;
                         if latency_samples.len() >= 100 {
-                            latency_samples.remove(0);
+                            latency_samples.pop_front();
                         }
-                        latency_samples.push(write_duration_ms);
+                        latency_samples.push_back(write_duration_ms);
 
-                        let _ =
-                            bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
-                        sequence = sequence.wrapping_add(1);
-                        _last_write_time = Some(Instant::now());
+                        let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
 
                         current_stream = Some(stream_socket);
                     } else if would_block {
                         current_stream = Some(stream_socket);
                     } else {
-                         // Error handling
+                         // Write error — disconnect and increment error counter
+                         error_count += 1;
                          let StreamSocket::Tcp(s) = stream_socket;
                          {
                              close_tcp_stream(s, "write error", &app_handle_net);
                          }
-                         current_stream = None; 
+                         current_stream = None;
                          thread::sleep(Duration::from_millis(100));
                     }
                 } else {
@@ -1070,7 +964,7 @@ fn start_audio_stream(
                         jitter: jitter_avg,
                         avg_latency,
                         buffer_health,
-                        error_count: 0,
+                        error_count,
                     },
                 );
                 last_quality_emit = Instant::now();

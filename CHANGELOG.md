@@ -4,6 +4,22 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [1.9.5] - 2026-03-14
+### Bug Fixes
+- **Latency tracking**: Replaced `Vec::remove(0)` (O(n)) with `VecDeque::pop_front()` (O(1)) for latency sample tracking.
+- **Error counting**: `error_count` in quality metrics is now tracked and emitted instead of being hardcoded to `0`.
+- **Buffer size display**: Fixed ring buffer MB calculation — was using `×2` (i16 bytes) instead of `×4` (f32 bytes).
+- **Socket safety**: Socket creation no longer panics on failure — gracefully logs the error and retries.
+- **Format comment**: Fixed `AudioCommand::format` comment from "pcm or mp3" to "pcm or wav".
+
+### Code Quality
+- **StreamParams struct**: Replaced 17-element reconnection tuple with a named `StreamParams` struct.
+- **Dead code removal**: Removed `_reconnect_handle`, `sequence`, `_last_write_time`, `data_len`, and all MP3 encoder commented code.
+- **Unused parameter**: `buffer_size` parameter removed from internal pipeline (frontend still sends it for compatibility).
+- **Copy type clones**: Fixed unnecessary `.clone()` calls on primitive/Copy types in reconnection logic.
+- **Stale comments**: Cleaned all `// protocol removed`, `// UDP removed`, `// MP3 removed` markers.
+- **Typo fix**: "Gloabl" → "Global" in stats.rs rate limiter comment.
+
 ## [1.9.4] - 2026-03-14
 ### Improvements
 - **Native Stereo Pipeline**: Audio is now captured and streamed in full stereo (2 channels) preserving complete L/R separation. No more downmixing to mono.

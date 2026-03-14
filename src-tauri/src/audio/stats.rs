@@ -53,7 +53,7 @@ impl Drop for StreamStats {
 
 // Helper function to emit log events
 pub fn emit_log(app: &AppHandle, level: &str, message: String) {
-    // Gloabl rate limiter for logs
+    // Global rate limiter for logs
     // Allows max 5 logs per second to prevent flooding the main thread
     static LOG_COUNTER: AtomicUsize = AtomicUsize::new(0);
     static LAST_LOG_RESET: AtomicU64 = AtomicU64::new(0);
