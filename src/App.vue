@@ -2,15 +2,18 @@
   <ToastNotification />
 
   <div class="w-full h-screen flex flex-col overflow-hidden bg-base">
+    <!-- Fixed Top Header -->
+    <div class="flex flex-col gap-4 pt-4 px-6 shrink-0 z-20 bg-base">
+      <AppHeader />
+      <StatsBar />
+      <TabNav v-model="activeTab" />
+    </div>
+
     <div
-      class="flex-1 overflow-y-auto overflow-x-hidden relative hide-scrollbar"
+      class="flex-1 overflow-y-auto overflow-x-hidden relative hide-scrollbar mt-4"
       ref="scrollContainer"
     >
-      <div class="flex flex-col gap-4 min-h-full pt-4 px-6 pb-6">
-        <AppHeader />
-        <StatsBar />
-        <TabNav v-model="activeTab" />
-
+      <div class="flex flex-col gap-4 min-h-full px-6 pb-6">
         <div class="flex-1 min-h-0">
           <ConnectionTab v-if="activeTab === 'connection'" />
           <AudioTab v-if="activeTab === 'audio'" />

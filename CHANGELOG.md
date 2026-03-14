@@ -4,6 +4,12 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.5] - 2026-03-14
+### Added
+- **Dynamic Window Resize:** The application now auto-detects the host screen's resolution at launch and bounds its initial height dynamically (`1000px` max, subtracting a `150px` margin to guarantee the window never sinks behind OS taskbars on smaller laptops).
+### Fixed
+- **UI Header Scroll:** Extracted the Top Header, Status Bar, and Tab Navigation out of the scrollable region. They are now permanently pinned to the absolute top of the window.
+
 ## [2.0.4] - 2026-03-14
 ### Fixed
 - **UI Overlap & Scrolling:** Refactored `App.vue` layout. The main viewport and the bottom Action Bar are now strictly separated via Flexbox (`flex-1` vs `shrink-0`), guaranteeing the footer no longer floats behind the `Start Streaming` button and the scrollbar correctly reaches the end of the content.

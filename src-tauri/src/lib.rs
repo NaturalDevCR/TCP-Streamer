@@ -6,7 +6,7 @@ use audio::AudioState;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, LogicalSize
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -66,6 +66,22 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // Adjust window height to screen height minus a margin
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(Some(monitor)) = window.current_monitor() {
+                    let size = monitor.size();
+                    let scale_factor = monitor.scale_factor();
+                    
+                    // Height minus 150px margin to avoid OS taskbar/panels
+                    let max_logical = (size.height as f64 / scale_factor) - 150.0;
+                    
+                    // Target height is 1000, but clamp to available max_logical
+                    let new_height = 1000.0f64.min(max_logical);
+                    let _ = window.set_size(tauri::Size::Logical(LogicalSize::new(550.0, new_height)));
+                    let _ = window.center();
+                }
+            }
 
             // If started hidden (e.g., from autostart), hide the window
             if start_hidden {
