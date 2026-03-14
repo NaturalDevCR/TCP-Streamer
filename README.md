@@ -2,7 +2,7 @@
 
 > A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
 
-![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
@@ -64,8 +64,9 @@ It's perfect for integrating with multi-room audio systems like Snapcast, creati
 
 ### Core Functionality
 
+- ✅ **Modern Tabbed UI** - Clean, intuitive interface powered by Vue 3 and Tailwind CSS with a premium dark glassmorphism design.
 - ✅ **Dual Operation Modes** - Run as a **Client** (push to server) or **Server** (listen for connections).
-- ✅ **Raw PCM Audio** - High-quality, uncompressed audio streaming (16-bit, stereo).
+- ✅ **Raw PCM Audio** - High-quality, uncompressed audio streaming (16-bit, stereo preserving full L/R separation).
 - ✅ **WAV Streaming** - Browser-compatible HTTP stream in Server Mode.
 - ✅ **Connection Reliability** - Auto-reconnection logic and deep sleep mode.
 - ✅ **Robust Audio Engine** - Native F32 internal architecture with safe PCM conversion.
@@ -228,7 +229,7 @@ Located in the **Advanced** tab:
 
 ### Technology Stack
 
-- **Frontend**: HTML, CSS, JavaScript (Vite)
+- **Frontend**: Vue 3 (Composition API), Pinia (State Management), Tailwind CSS 4, Vite
 - **Backend**: Rust (Tauri v2)
 - **Audio**: cpal (cross-platform audio library)
 - **Storage**: tauri-plugin-store (settings persistence)
