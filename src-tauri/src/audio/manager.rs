@@ -434,6 +434,55 @@ fn start_audio_stream(
          emit_log(&app_handle, "warn", "Failed to query device default config. Using requested rate.".to_string());
     }
 
+    // Detect supported audio formats from device
+    let supported_configs: Vec<_> = if is_loopback {
+        device.supported_output_configs().map_err(|e| e.to_string())?.collect()
+    } else {
+        device.supported_input_configs().map_err(|e| e.to_string())?.collect()
+    };
+
+    let mut selected_format = cpal::SampleFormat::F32;
+    let mut best_config_range = None;
+
+    // Prefer stereo (2 ch) for full quality, then mono. Prefer F32 > I16 > U16.
+    for ch in [2u16, 1] {
+        for fmt in [cpal::SampleFormat::F32, cpal::SampleFormat::I16, cpal::SampleFormat::U16] {
+            for range in &supported_configs {
+                if range.sample_format() == fmt && range.channels() == ch {
+                    if range.min_sample_rate().0 <= sample_rate && range.max_sample_rate().0 >= sample_rate {
+                        best_config_range = Some(range.clone());
+                        selected_format = fmt;
+                        break;
+                    }
+                }
+            }
+            if best_config_range.is_some() { break; }
+        }
+        if best_config_range.is_some() { break; }
+    }
+
+    // Fallback: use first available config
+    if best_config_range.is_none() && !supported_configs.is_empty() {
+        let fallback = supported_configs.first().unwrap();
+        selected_format = fallback.sample_format();
+        best_config_range = Some(fallback.clone());
+    }
+
+    let config_range = best_config_range.ok_or_else(|| "No supported audio config found".to_string())?;
+    let device_channels = config_range.channels();
+
+    emit_log(
+        &app_handle,
+        "info",
+        format!("Audio Input: format={:?}, channels={}, rate={}Hz", selected_format, device_channels, sample_rate),
+    );
+
+    let stream_config = cpal::StreamConfig {
+        channels: device_channels,
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
     // 1. Setup Ring Buffer
     let adjusted_ring_buffer_duration_ms = if is_loopback {
         8000.max(ring_buffer_duration_ms)
@@ -442,7 +491,7 @@ fn start_audio_stream(
     };
 
     let ring_buffer_size =
-        (sample_rate as usize) * 2 * (adjusted_ring_buffer_duration_ms as usize) / 1000;
+        (sample_rate as usize) * (device_channels as usize) * (adjusted_ring_buffer_duration_ms as usize) / 1000;
 
     let adj_ms_u32 = adjusted_ring_buffer_duration_ms as u32;
     let buffer_size_mb = (ring_buffer_size * 2) as f32 / (1024.0 * 1024.0);
@@ -477,6 +526,7 @@ fn start_audio_stream(
     let format_clone = format.clone();
     let sample_rate_clone = sample_rate;
     let is_server_clone = is_server;
+    let device_channels_net = device_channels;
 
     // 2. Spawn Network Thread (Consumer)
     let priority = if high_priority {
@@ -534,7 +584,7 @@ fn start_audio_stream(
 
 
         let mut sequence: u32 = 0;
-        let mut temp_buffer = vec![0.0f32; chunk_size as usize];
+        let mut temp_buffer = vec![0.0f32; chunk_size as usize * device_channels_net as usize];
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
 
@@ -593,7 +643,7 @@ fn start_audio_stream(
         const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
         let mut prefilled = false;
-        let prefill_samples = sample_rate as usize / 5; // 200ms prefill
+        let prefill_samples = sample_rate as usize * device_channels_net as usize / 5; // 200ms prefill (channel-aware)
         emit_log(
             &app_handle_net,
             "info",
@@ -615,7 +665,7 @@ fn start_audio_stream(
             // 1. Strict Pacing
             let now = Instant::now();
             let current_buffered = cons.len();
-            let high_water_mark = prefill_samples + (sample_rate as usize / 10);
+            let high_water_mark = prefill_samples + (sample_rate as usize * device_channels_net as usize / 10);
 
             if current_buffered > high_water_mark && current_stream.is_some() {
                 next_tick = now + tick_duration;
@@ -644,7 +694,7 @@ fn start_audio_stream(
                     );
                 } else {
                     // Short outage: drain gradually (existing behavior)
-                    let drain_amount = (sample_rate as usize / 10).min(current_buffered);
+                    let drain_amount = (sample_rate as usize * device_channels_net as usize / 10).min(current_buffered);
                     let mut drain_buffer = vec![0.0f32; drain_amount];
                     let _ = cons.pop_slice(&mut drain_buffer);
                 }
@@ -840,7 +890,7 @@ fn start_audio_stream(
                      let StreamSocket::Tcp(ref mut stream) = stream_socket;
                      {
                          // Send header with 0 length (handled by helper) for unknown/stream
-                         let header = create_wav_header(sample_rate_clone, 1, 16); 
+                         let header = create_wav_header(sample_rate_clone, device_channels_net, 16);
                          
                          if use_chunked {
                              let mut writer = ChunkedWriter::new(stream);
@@ -1094,55 +1144,7 @@ fn start_audio_stream(
         );
     });
 
-    // 3. Setup Audio Stream (Producer)
-    // Detect supported input formats from the device
-    let supported_configs: Vec<_> = if is_loopback {
-        device.supported_output_configs().map_err(|e| e.to_string())?.collect()
-    } else {
-        device.supported_input_configs().map_err(|e| e.to_string())?.collect()
-    };
-    let mut selected_format = cpal::SampleFormat::F32;
-    let mut best_config_range = None;
-
-    // Try mono first (1 ch), then stereo (2 ch). Prefer F32 > I16 > U16.
-    for ch in [1u16, 2] {
-        for fmt in [cpal::SampleFormat::F32, cpal::SampleFormat::I16, cpal::SampleFormat::U16] {
-            for range in &supported_configs {
-                if range.sample_format() == fmt && range.channels() == ch {
-                    if range.min_sample_rate().0 <= sample_rate && range.max_sample_rate().0 >= sample_rate {
-                        best_config_range = Some(range.clone());
-                        selected_format = fmt;
-                        break;
-                    }
-                }
-            }
-            if best_config_range.is_some() { break; }
-        }
-        if best_config_range.is_some() { break; }
-    }
-
-    // Fallback: use first available config if nothing matched
-    if best_config_range.is_none() && !supported_configs.is_empty() {
-        let fallback = supported_configs.first().unwrap();
-        selected_format = fallback.sample_format();
-        best_config_range = Some(fallback.clone());
-    }
-
-    let config_range = best_config_range.ok_or_else(|| "No supported audio config found".to_string())?;
-    let device_channels = config_range.channels();
-
-    emit_log(
-        &app_handle,
-        "info",
-        format!("Audio Input: format={:?}, channels={}, rate={}Hz", selected_format, device_channels, sample_rate),
-    );
-
-    let stream_config = cpal::StreamConfig {
-        channels: device_channels,
-        sample_rate: cpal::SampleRate(sample_rate),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
+    // 3. Build Audio Stream (Producer) — format detection already done above
     let err_fn = move |err| {
         error!("CPAL stream error: {}", err);
     };
@@ -1150,39 +1152,15 @@ fn start_audio_stream(
     // Shared producer (mutex wrapped for use in closures)
     let prod = Arc::new(Mutex::new(prod));
 
-    // Helper: downmix interleaved multi-channel f32 data to mono, then push to ring buffer
-    fn push_mono(prod: &Arc<Mutex<ringbuf::Producer<f32, Arc<ringbuf::HeapRb<f32>>>>>, data: &[f32], channels: u16) {
-        if channels <= 1 {
-            // Already mono – push directly
-            if let Ok(mut guard) = prod.lock() {
-                let _ = guard.push_slice(data);
-            }
-        } else {
-            // Downmix interleaved stereo (or N-channel) to mono by averaging frames
-            let ch = channels as usize;
-            let frame_count = data.len() / ch;
-            let mut mono = Vec::with_capacity(frame_count);
-            for frame in 0..frame_count {
-                let mut sum = 0.0f32;
-                for c in 0..ch {
-                    sum += data[frame * ch + c];
-                }
-                mono.push(sum / ch as f32);
-            }
-            if let Ok(mut guard) = prod.lock() {
-                let _ = guard.push_slice(&mono);
-            }
-        }
-    }
-
     let audio_stream = match selected_format {
         cpal::SampleFormat::F32 => {
             let prod_clone = prod.clone();
-            let ch = device_channels;
             device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &_| {
-                    push_mono(&prod_clone, data, ch);
+                    if let Ok(mut guard) = prod_clone.lock() {
+                        let _ = guard.push_slice(data);
+                    }
                 },
                 err_fn,
                 None,
@@ -1190,13 +1168,13 @@ fn start_audio_stream(
         }
         cpal::SampleFormat::I16 => {
             let prod_clone = prod.clone();
-            let ch = device_channels;
             device.build_input_stream(
                 &stream_config,
                 move |data: &[i16], _: &_| {
-                    // Convert I16 → F32 first
                     let converted: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
-                    push_mono(&prod_clone, &converted, ch);
+                    if let Ok(mut guard) = prod_clone.lock() {
+                        let _ = guard.push_slice(&converted);
+                    }
                 },
                 err_fn,
                 None,
@@ -1204,13 +1182,13 @@ fn start_audio_stream(
         }
         cpal::SampleFormat::U16 => {
             let prod_clone = prod.clone();
-            let ch = device_channels;
             device.build_input_stream(
                 &stream_config,
                 move |data: &[u16], _: &_| {
-                    // Convert U16 → F32 first
                     let converted: Vec<f32> = data.iter().map(|&s| (s as f32 - 32768.0) / 32768.0).collect();
-                    push_mono(&prod_clone, &converted, ch);
+                    if let Ok(mut guard) = prod_clone.lock() {
+                        let _ = guard.push_slice(&converted);
+                    }
                 },
                 err_fn,
                 None,
