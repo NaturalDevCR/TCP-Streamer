@@ -489,7 +489,6 @@ fn start_audio_stream(
 
         // Quality tracking
         let mut latency_samples: VecDeque<f32> = VecDeque::with_capacity(100);
-        let mut jitter_avg: f32 = 0.0;
         let mut last_quality_emit = Instant::now();
         let mut error_count: u64 = 0;
 
@@ -543,12 +542,8 @@ fn start_audio_stream(
             ),
         );
 
-        let tick_duration =
-            Duration::from_micros((chunk_size as u64 * 1_000_000) / sample_rate as u64);
-
         let mut use_chunked = false;
         let mut wav_header_sent = false;
-        let mut next_tick = Instant::now();
         let mut prefill_debug_timer = Instant::now();
 
         while is_running_clone.load(Ordering::Relaxed) {
@@ -825,21 +820,6 @@ fn start_audio_stream(
                         payload.extend_from_slice(&sample_i16.to_le_bytes());
                     }
 
-                    // Jitter Calc (deviation of time between sends compared to nominal chunk time)
-                    let send_time = Instant::now();
-                    let actual_tick_ms = send_time.duration_since(next_tick).as_secs_f32() * 1000.0;
-                    let nominal_tick_ms = tick_duration.as_micros() as f32 / 1000.0;
-                    
-                    // Hardware-driven pacing means actual_tick_ms should equal nominal_tick_ms very closely.
-                    let deviation_ms = (actual_tick_ms - nominal_tick_ms).abs();
-                    next_tick = send_time;
-
-                    if jitter_avg == 0.0 {
-                        jitter_avg = deviation_ms;
-                    } else {
-                        jitter_avg = 0.9 * jitter_avg + 0.1 * deviation_ms;
-                    }
-
                     let write_start = Instant::now();
                     let mut write_success = false;
                     let mut would_block = false;
@@ -926,6 +906,13 @@ fn start_audio_stream(
                 } else {
                     0.0
                 };
+                
+                let jitter_avg = if !latency_samples.is_empty() {
+                    latency_samples.iter().map(|&d| (d - avg_latency).abs()).sum::<f32>() / latency_samples.len() as f32
+                } else {
+                    0.0
+                };
+
                 let occupied = cons.len();
                 let capacity = cons.capacity();
                 let buffer_health = 1.0 - (occupied as f32 / capacity as f32);
