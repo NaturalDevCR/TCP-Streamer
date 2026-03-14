@@ -4,6 +4,14 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.0] - 2026-03-14
+### Added
+- **Complete UI Redesign**: Migrated from Vanilla JS to Vue 3, Pinia, and Tailwind CSS 4.
+- **Modern Interface**: New dark glassmorphism theme with premium components, layout, and animations.
+- **Enhanced UI Smoothness**: Added native View Transitions API for seamless tab switching, and refined cubic-bezier physics for all inputs, checkboxes, and buttons.
+- **New App Logo**: Replaced placeholder logo with custom TCP Streamer branding and generated new desktop app icons.
+- **Tabbed Layout**: Organized settings into Connection, Audio, Settings, Advanced, and Logs tabs.
+
 ## [1.9.6] - 2026-03-14
 ### Bug Fixes
 - **🚨 Auto-Reconnection**: Fixed critical bug where reconnection never triggered after connection loss. The command receiver (`mpsc::Receiver`) was blocking the thread, preventing the reconnection check from running. Replaced with `try_recv` polling loop.
