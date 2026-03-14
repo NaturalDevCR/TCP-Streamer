@@ -2,7 +2,7 @@
   <ToastNotification />
 
   <div
-    class="w-full h-screen flex flex-col gap-4 overflow-y-auto overflow-x-hidden px-6 py-4 hide-scrollbar"
+    class="w-full h-full flex flex-col gap-4 overflow-y-auto overflow-x-hidden pt-4 px-6 pb-28 hide-scrollbar"
     ref="scrollContainer"
   >
     <AppHeader />
@@ -17,8 +17,10 @@
       <LogsTab v-if="activeTab === 'logs'" />
     </div>
 
-    <StreamButton />
-    <AppFooter />
+    <div class="fixed bottom-0 left-0 w-full bg-base/90 backdrop-blur-md px-6 py-4 z-30 border-t border-white/5">
+      <StreamButton />
+    </div>
+    <AppFooter class="mb-14" />
 
     <!-- Scroll to Top -->
     <button

@@ -279,7 +279,7 @@ fn start_audio_stream(
     max_buffer_ms: u32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
-    let mut sample_rate = sample_rate;
+    let sample_rate = sample_rate;
 
     emit_log(
         &app_handle,
@@ -498,10 +498,10 @@ fn start_audio_stream(
         let mut last_buffer_check = Instant::now();
         const BUFFER_CHECK_INTERVAL_SECS: u64 = 10;
 
-        let (adaptive_min_ms, adaptive_max_ms) = if is_loopback {
-            (4000.max(min_buffer_ms), 12000.min(max_buffer_ms))
+        let adaptive_min_ms = if is_loopback {
+            4000.max(min_buffer_ms)
         } else {
-            (2000.max(min_buffer_ms), 6000.min(max_buffer_ms))
+            2000.max(min_buffer_ms)
         };
 
         let mut retry_delay = Duration::from_secs(2);
@@ -825,10 +825,12 @@ fn start_audio_stream(
                         payload.extend_from_slice(&sample_i16.to_le_bytes());
                     }
 
-                    // Jitter Calc (distance from perfectly timed hardware chunks)
+                    // Jitter Calc (deviation of time between sends compared to nominal chunk time)
                     let send_time = Instant::now();
                     let actual_tick_ms = send_time.duration_since(next_tick).as_secs_f32() * 1000.0;
                     let nominal_tick_ms = tick_duration.as_micros() as f32 / 1000.0;
+                    
+                    // Hardware-driven pacing means actual_tick_ms should equal nominal_tick_ms very closely.
                     let deviation_ms = (actual_tick_ms - nominal_tick_ms).abs();
                     next_tick = send_time;
 
