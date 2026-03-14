@@ -1,12 +1,8 @@
 <template>
-  <LinuxTitlebar />
   <ToastNotification />
 
   <div
-    :class="[
-      'w-full h-full flex flex-col gap-4 overflow-y-auto overflow-x-hidden pb-28 hide-scrollbar',
-      settings.osType === 'linux' ? 'pt-14 px-6' : 'pt-4 px-6'
-    ]"
+    class="w-full h-full flex flex-col gap-4 overflow-y-auto overflow-x-hidden pt-4 px-6 pb-28 hide-scrollbar"
     ref="scrollContainer"
   >
     <AppHeader />
@@ -43,7 +39,6 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useSettingsStore } from "./stores/settings.js";
 import { useStreamStore } from "./stores/stream.js";
 
-import LinuxTitlebar from "./components/LinuxTitlebar.vue";
 import ToastNotification from "./components/ToastNotification.vue";
 import AppHeader from "./components/AppHeader.vue";
 import StatsBar from "./components/StatsBar.vue";
