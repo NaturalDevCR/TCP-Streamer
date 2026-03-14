@@ -2,7 +2,7 @@
   <ToastNotification />
 
   <div
-    class="w-full h-full flex flex-col gap-4 overflow-y-auto overflow-x-hidden pt-4 px-6 pb-28 hide-scrollbar"
+    class="w-full h-screen flex flex-col gap-4 overflow-y-auto overflow-x-hidden pt-4 px-6 pb-40 hide-scrollbar"
     ref="scrollContainer"
   >
     <AppHeader />

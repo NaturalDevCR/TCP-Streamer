@@ -4,6 +4,12 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.3] - 2026-03-14
+### Fixed
+- **UI Scrolling:** Fixed an issue where changing the root container to `h-full` inadvertently disabled the scrollbar and clipped the bottom of long tabs. Restored `h-screen` bounding box.
+- **Native Decorations:** Enforced `"transparent": false` in Tauri config to guarantee GNOME/Wayland compositor renders native control buttons.
+- **Jitter Formula:** Replaced CPU interval deviation with TCP transmit standard deviation, correctly showing 0.0ms-0.2ms jitter for stable LAN connections instead of deceivingly reporting driver buffer slice size (16.7ms).
+
 ## [2.0.2] - 2026-03-14
 ### Fixed
 - **Linux WebKitGTK Decorations:** Removed programmatic `set_decorations(false)` override that stripped the native window controls on GNOME/Wayland.
