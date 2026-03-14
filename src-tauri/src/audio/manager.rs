@@ -567,14 +567,11 @@ fn start_audio_stream(
         let mut prefill_debug_timer = Instant::now();
 
         while is_running_clone.load(Ordering::Relaxed) {
-            // 1. Strict Pacing
-            let now = Instant::now();
+            // 1. Hardware-Driven Pacing
             let current_buffered = cons.len();
-            let high_water_mark = prefill_samples + (sample_rate as usize * device_channels_net as usize / 10);
+            let min_chunk_samples = chunk_size as usize * device_channels_net as usize;
 
-            if current_buffered > high_water_mark && current_stream.is_some() {
-                next_tick = now + tick_duration;
-            } else if current_stream.is_none() && current_buffered > 0 {
+            if current_stream.is_none() && current_buffered > 0 {
                 // Track how long we've been disconnected
                 if disconnect_time.is_none() {
                     disconnect_time = Some(Instant::now());
@@ -598,27 +595,17 @@ fn start_audio_stream(
                         ),
                     );
                 } else {
-                    // Short outage: drain gradually (existing behavior)
+                    // Short outage: drain gradually
                     let drain_amount = (sample_rate as usize * device_channels_net as usize / 10).min(current_buffered);
                     let mut drain_buffer = vec![0.0f32; drain_amount];
                     let _ = cons.pop_slice(&mut drain_buffer);
                 }
-
-                if now < next_tick {
-                    thread::sleep(next_tick - now);
-                }
-                next_tick = Instant::now() + tick_duration;
-            } else {
-                if now < next_tick {
-                    thread::sleep(next_tick - now);
-                    next_tick += tick_duration;
-                } else {
-                    if now.duration_since(next_tick) > Duration::from_millis(200) {
-                        next_tick = Instant::now() + tick_duration;
-                    } else {
-                        next_tick += tick_duration;
-                    }
-                }
+                thread::sleep(Duration::from_millis(10));
+                
+            } else if current_stream.is_some() && current_buffered < min_chunk_samples && prefilled {
+                // Hardware-driven synchronization: sleep until we have enough samples for a FULL chunk
+                thread::sleep(Duration::from_millis(2));
+                continue;
             }
 
             // Periodic heartbeat
@@ -853,14 +840,12 @@ fn start_audio_stream(
                         payload.extend_from_slice(&sample_i16.to_le_bytes());
                     }
 
-                    // Jitter Calc
+                    // Jitter Calc (distance from perfectly timed hardware chunks)
                     let send_time = Instant::now();
-                    let target = next_tick - tick_duration;
-                    let deviation_ms = if send_time > target {
-                        send_time.duration_since(target).as_secs_f32() * 1000.0
-                    } else {
-                        0.0
-                    };
+                    let actual_tick_ms = send_time.duration_since(next_tick).as_secs_f32() * 1000.0;
+                    let nominal_tick_ms = tick_duration.as_micros() as f32 / 1000.0;
+                    let deviation_ms = (actual_tick_ms - nominal_tick_ms).abs();
+                    next_tick = send_time;
 
                     if jitter_avg == 0.0 {
                         jitter_avg = deviation_ms;

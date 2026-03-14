@@ -15,9 +15,9 @@
       {
         "title": "TCP Streamer",
         "width": 550,
-        "height": 1000,
+        "height": 750,
         "minWidth": 400,
-        "minHeight": 500,
+        "minHeight": 650,
         "resizable": true,
         "center": true,
         "decorations": true
