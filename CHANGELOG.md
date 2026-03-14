@@ -4,6 +4,11 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.2] - 2026-03-14
+### Fixed
+- **Linux WebKitGTK Decorations:** Removed programmatic `set_decorations(false)` override that stripped the native window controls on GNOME/Wayland.
+- **Jitter Formula:** Replaced CPU interval deviation with TCP transmit standard deviation, correctly showing 0.0ms-0.2ms jitter for stable LAN connections instead of deceivingly reporting driver buffer slice size (16.7ms).
+
 ## [2.0.1] - 2026-03-14
 ### Bug Fixes
 - **Audio Stuttering (Underflow)**: Replaced strict CPU clock-based pacing with hardware-driven ring buffer pacing in the network thread. Eliminates artificial underflows and stuttering when the CPU and audio hardware are out of sync.

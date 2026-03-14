@@ -67,15 +67,6 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Linux: Disable native decorations to work around WebKitGTK bug
-            // where window control buttons become unresponsive after clicking in webview
-            #[cfg(target_os = "linux")]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_decorations(false);
-                }
-            }
-
             // If started hidden (e.g., from autostart), hide the window
             if start_hidden {
                 if let Some(window) = app.get_webview_window("main") {
