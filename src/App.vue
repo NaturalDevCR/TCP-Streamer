@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useSettingsStore } from "./stores/settings.js";
 import { useStreamStore } from "./stores/stream.js";
 
@@ -57,7 +57,20 @@ import LogsTab from "./components/tabs/LogsTab.vue";
 const settings = useSettingsStore();
 const stream = useStreamStore();
 
-const activeTab = ref("connection");
+const _activeTab = ref("connection");
+const activeTab = computed({
+  get: () => _activeTab.value,
+  set: (val) => {
+    if (!document.startViewTransition) {
+      _activeTab.value = val;
+      return;
+    }
+    document.startViewTransition(() => {
+      _activeTab.value = val;
+    });
+  }
+});
+
 const scrollContainer = ref(null);
 const showScrollTop = ref(false);
 

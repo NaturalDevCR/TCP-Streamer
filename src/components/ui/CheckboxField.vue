@@ -8,8 +8,8 @@
         @change="$emit('update:modelValue', $event.target.checked)"
         class="peer sr-only"
       />
-      <div class="w-[18px] h-[18px] rounded border border-white/30 bg-black/20 peer-checked:bg-accent peer-checked:border-accent transition-all flex items-center justify-center peer-disabled:opacity-50">
-        <svg v-if="modelValue" class="w-3 h-3 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+      <div class="w-[18px] h-[18px] rounded border border-white/30 bg-black/20 peer-checked:bg-accent peer-checked:border-accent transition-all duration-300 flex items-center justify-center peer-disabled:opacity-50 peer-focus-visible:ring-2 peer-focus-visible:ring-accent/50 hover:border-white/50">
+        <svg v-if="modelValue" class="animate-check w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
       </div>
     </div>
     <span class="text-sm text-slate-200 group-hover:text-white transition-colors">{{ label }}</span>
