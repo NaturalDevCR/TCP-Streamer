@@ -4,6 +4,10 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.4] - 2026-03-14
+### Fixed
+- **UI Overlap & Scrolling:** Refactored `App.vue` layout. The main viewport and the bottom Action Bar are now strictly separated via Flexbox (`flex-1` vs `shrink-0`), guaranteeing the footer no longer floats behind the `Start Streaming` button and the scrollbar correctly reaches the end of the content.
+
 ## [2.0.3] - 2026-03-14
 ### Fixed
 - **UI Scrolling:** Fixed an issue where changing the root container to `h-full` inadvertently disabled the scrollbar and clipped the bottom of long tabs. Restored `h-screen` bounding box.
