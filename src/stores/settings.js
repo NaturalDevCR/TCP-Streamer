@@ -112,7 +112,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
     // Load loopback mode
     const savedLoopback = await store.get("loopback_mode");
-    if (savedLoopback !== null) loopbackMode.value = savedLoopback;
+    if (savedLoopback !== null && savedLoopback !== undefined) loopbackMode.value = savedLoopback;
   }
 
   async function saveSettings() {
@@ -143,10 +143,10 @@ export const useSettingsStore = defineStore("settings", () => {
     const allProfiles = (await store.get("profiles")) || {};
     allProfiles[profileName] = settings;
 
-    await store.set("profiles", allProfiles);
-    await store.set("current_profile", profileName);
-    await store.set("device", deviceName.value);
-    await store.set("loopback_mode", loopbackMode.value);
+    await store.set("profiles", allProfiles ?? {});
+    await store.set("current_profile", profileName ?? "Default");
+    await store.set("device", deviceName.value ?? "");
+    await store.set("loopback_mode", loopbackMode.value ?? false);
     await store.save();
   }
 

@@ -4,6 +4,10 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.0.6] - 2026-03-15
+### Fixed
+- **Settings Store Error**: Fixed store values (e.g., `loopbackMode`) resolving to `undefined` during `store.set` which triggered a "missing required key value" crash on startup.
+
 ## [2.0.5] - 2026-03-14
 ### Added
 - **Dynamic Window Resize:** The application now auto-detects the host screen's resolution at launch and bounds its initial height dynamically (`1000px` max, subtracting a `150px` margin to guarantee the window never sinks behind OS taskbars on smaller laptops).
