@@ -25,6 +25,7 @@ pub enum AudioCommand {
         ip: String,
         port: u16,
         sample_rate: u32,
+        buffer_size: u32,
         ring_buffer_duration_ms: u32,
         auto_reconnect: bool,
         high_priority: bool,
@@ -48,6 +49,7 @@ struct StreamParams {
     ip: String,
     port: u16,
     sample_rate: u32,
+    buffer_size: u32,
     ring_buffer_duration_ms: u32,
     high_priority: bool,
     dscp_strategy: String,
@@ -83,6 +85,7 @@ impl AudioState {
                         ip,
                         port,
                         sample_rate,
+                        buffer_size,
                         ring_buffer_duration_ms,
                         auto_reconnect,
                         high_priority,
@@ -109,6 +112,7 @@ impl AudioState {
                             ip: ip.clone(),
                             port,
                             sample_rate,
+                            buffer_size,
                             ring_buffer_duration_ms,
                             high_priority,
                             dscp_strategy: dscp_strategy.clone(),
@@ -131,7 +135,7 @@ impl AudioState {
                         }
 
                         match start_audio_stream(
-                            device_name, ip, port, sample_rate,
+                            device_name, ip, port, sample_rate, buffer_size,
                             ring_buffer_duration_ms, high_priority, dscp_strategy,
                             format, chunk_size, is_loopback, is_server,
                             enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
@@ -176,7 +180,7 @@ impl AudioState {
                         emit_log(&p.app_handle, "info", "Attempting to reconnect...".to_string());
 
                         match start_audio_stream(
-                            p.device_name.clone(), p.ip.clone(), p.port, p.sample_rate,
+                            p.device_name.clone(), p.ip.clone(), p.port, p.sample_rate, p.buffer_size,
                             p.ring_buffer_duration_ms, p.high_priority, p.dscp_strategy.clone(),
                             p.format.clone(), p.chunk_size, p.is_loopback, p.is_server,
                             p.enable_adaptive_buffer, p.min_buffer_ms, p.max_buffer_ms,
@@ -245,6 +249,7 @@ fn start_audio_stream(
     ip: String,
     port: u16,
     sample_rate: u32,
+    buffer_size: u32,
     ring_buffer_duration_ms: u32,
     high_priority: bool,
     dscp_strategy: String,
@@ -390,8 +395,16 @@ fn start_audio_stream(
     let stream_config = cpal::StreamConfig {
         channels: device_channels,
         sample_rate: cpal::SampleRate(sample_rate),
-        buffer_size: cpal::BufferSize::Default,
+        buffer_size: super::engine::capture::resolve_buffer_size(
+            buffer_size,
+            config_range.buffer_size(),
+        ),
     };
+
+    emit_log(&app_handle, "info", format!(
+        "Capture buffer: requested {} frames -> {:?}",
+        buffer_size, stream_config.buffer_size
+    ));
 
     // 1. Setup Ring Buffer
     let adjusted_ring_buffer_duration_ms = if is_loopback {

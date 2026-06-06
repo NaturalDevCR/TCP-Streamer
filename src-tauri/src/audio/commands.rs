@@ -38,13 +38,12 @@ pub fn start_stream(
     min_buffer_ms: u32,
     max_buffer_ms: u32,
 ) -> Result<(), AudioError> {
-    // buffer_size accepted from frontend for backward compatibility but not used internally
-    let _ = buffer_size;
     let command = AudioCommand::Start {
         device_name,
         ip,
         port,
         sample_rate,
+        buffer_size,
         ring_buffer_duration_ms,
         auto_reconnect,
         high_priority,
