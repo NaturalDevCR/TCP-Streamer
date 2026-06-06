@@ -45,38 +45,28 @@ describe("useSettingsStore", () => {
     expect(store.showLoopback).toBe(true);
   });
 
-  it("applyPreset changes settings for ethernet", () => {
+  it("initializes with default latency profile", () => {
     const store = useSettingsStore();
-    store.applyPreset("ethernet");
-    expect(store.ringBufferDuration).toBe(2000);
-    expect(store.chunkSize).toBe(512);
-    expect(store.minBuffer).toBe(2000);
-    expect(store.maxBuffer).toBe(6000);
-    expect(store.adaptiveBuffer).toBe(true);
-    expect(store.networkPreset).toBe("ethernet");
+    expect(store.latencyProfile).toBe("balanced");
   });
 
-  it("applyPreset changes settings for wifi", () => {
+  it("supports changing latency profile", () => {
     const store = useSettingsStore();
-    store.applyPreset("wifi");
-    expect(store.ringBufferDuration).toBe(4000);
-    expect(store.chunkSize).toBe(1024);
-    expect(store.minBuffer).toBe(3000);
-    expect(store.maxBuffer).toBe(10000);
+    store.latencyProfile = "ultra-low";
+    expect(store.latencyProfile).toBe("ultra-low");
+    store.latencyProfile = "robust";
+    expect(store.latencyProfile).toBe("robust");
   });
 
-  it("applyPreset does nothing for custom", () => {
+  it("allowlist defaults to empty", () => {
     const store = useSettingsStore();
-    const original = store.ringBufferDuration;
-    store.applyPreset("custom");
-    expect(store.ringBufferDuration).toBe(original);
+    expect(store.allowlist).toBe("");
   });
 
-  it("applyPreset does nothing for invalid preset", () => {
+  it("allowlist can be set to CIDR rules", () => {
     const store = useSettingsStore();
-    const original = store.ringBufferDuration;
-    store.applyPreset("nonexistent");
-    expect(store.ringBufferDuration).toBe(original);
+    store.allowlist = "192.168.1.0/24, 10.0.0.5";
+    expect(store.allowlist).toBe("192.168.1.0/24, 10.0.0.5");
   });
 
   it("uses a DSCP strategy key the backend recognizes", () => {

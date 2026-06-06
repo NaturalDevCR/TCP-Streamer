@@ -27,6 +27,8 @@ pub enum AudioCommand {
         enable_adaptive_buffer: bool,
         min_buffer_ms: u32,
         max_buffer_ms: u32,
+        latency_profile: String,
+        allowlist: String,
         app_handle: Box<AppHandle>,
     },
     Stop,
@@ -62,6 +64,8 @@ impl AudioState {
                         enable_adaptive_buffer,
                         min_buffer_ms,
                         max_buffer_ms,
+                        latency_profile,
+                        allowlist,
                         app_handle,
                     }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
@@ -82,6 +86,7 @@ impl AudioState {
                             ring_buffer_duration_ms, high_priority, dscp_strategy,
                             format, chunk_size, is_loopback, is_server, auto_reconnect,
                             enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
+                            latency_profile, allowlist,
                             (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {

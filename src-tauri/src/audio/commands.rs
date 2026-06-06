@@ -37,6 +37,8 @@ pub fn start_stream(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
+    latency_profile: String,
+    allowlist: String,
 ) -> Result<(), AudioError> {
     let command = AudioCommand::Start {
         device_name,
@@ -55,6 +57,8 @@ pub fn start_stream(
         enable_adaptive_buffer,
         min_buffer_ms,
         max_buffer_ms,
+        latency_profile,
+        allowlist,
         app_handle: Box::new(app_handle),
     };
 

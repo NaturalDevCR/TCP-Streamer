@@ -4,7 +4,9 @@
 //! implementation is TCP; Phase 2 adds TLS and multi-client behind the same
 //! trait without touching the engine.
 
+pub mod allowlist;
 pub mod dscp;
+pub mod resolve;
 pub mod tcp_client;
 pub mod tcp_server;
 

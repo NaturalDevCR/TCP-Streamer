@@ -37,6 +37,7 @@ mac_address = "1.1"
 local-ip-address = "0.6.10"
 thiserror = "2"
 anyhow = "1"
+ipnet = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -34,7 +34,7 @@ export const useStreamStore = defineStore("stream", () => {
   // Stream URLs (server mode)
   const tcpUrl = ref("");
   const httpUrl = ref("");
-  const snapcastConfig = ref("");
+  const connectionInfo = ref("");
 
   // Quality warning tracking
   let qualityWarningShown = false;
@@ -121,6 +121,8 @@ export const useStreamStore = defineStore("stream", () => {
         minBufferMs: settings.minBuffer,
         maxBufferMs: settings.maxBuffer,
         format: settings.format,
+        latencyProfile: settings.latencyProfile,
+        allowlist: settings.allowlist,
       });
 
       isStreaming.value = true;
@@ -132,7 +134,7 @@ export const useStreamStore = defineStore("stream", () => {
         const p = settings.port;
         tcpUrl.value = `tcp://${lip}:${p}`;
         httpUrl.value = `http://${lip}:${p}/stream.wav`;
-        snapcastConfig.value = `[stream]\nsource = tcp://${lip}:${p}?name=TCPStreamer&mode=client`;
+        connectionInfo.value = `Use this as a TCP source in your audio receiver:\ntcp://${lip}:${p}`;
       }
     } catch (error) {
       statusText.value = "Error: " + error;
@@ -146,7 +148,7 @@ export const useStreamStore = defineStore("stream", () => {
       statusText.value = "Ready";
       tcpUrl.value = "";
       httpUrl.value = "";
-      snapcastConfig.value = "";
+      connectionInfo.value = "";
     } catch (error) {
       statusText.value = "Error stopping: " + error;
     }
@@ -231,7 +233,7 @@ export const useStreamStore = defineStore("stream", () => {
     toasts,
     tcpUrl,
     httpUrl,
-    snapcastConfig,
+    connectionInfo,
     // Computed
     filteredLogs,
     formattedUptime,

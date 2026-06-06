@@ -13,27 +13,11 @@ pub(crate) const DISCONNECT_FLUSH_THRESHOLD: Duration = Duration::from_secs(3);
 /// Interval between heartbeat/stats emissions to the frontend
 pub(crate) const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
-/// Minimum ring buffer duration for loopback devices (ms)
-pub(crate) const LOOPBACK_MIN_BUFFER_MS: u32 = 8000;
-
-/// Minimum ring buffer duration for non-loopback devices (ms)
-pub(crate) const DEFAULT_MIN_BUFFER_MS: u32 = 5000;
-
-/// Prefill duration as a fraction of sample rate (N in 1/N gives fraction of a second)
-#[allow(dead_code)]
-pub(crate) const PREFILL_FRACTION: usize = 5;
-
 /// Initial reconnection delay
 pub(crate) const INITIAL_RETRY_DELAY_SECS: u64 = 2;
 
 /// Minimum retry delay (after jitter)
 pub(crate) const MIN_RETRY_DELAY_MS: u64 = 2000;
-
-/// Minimum adaptive buffer for loopback (ms)
-pub(crate) const ADAPTIVE_MIN_LOOPBACK_MS: u32 = 4000;
-
-/// Minimum adaptive buffer for non-loopback (ms)
-pub(crate) const ADAPTIVE_MIN_DEFAULT_MS: u32 = 2000;
 
 /// Adaptive buffer adjustment step (ms)
 pub(crate) const ADAPTIVE_BUFFER_STEP_MS: u32 = 500;
@@ -54,14 +38,5 @@ mod tests {
         assert!(BUFFER_CHECK_INTERVAL_SECS > 0);
         assert!(HEARTBEAT_INTERVAL_SECS > 0);
         assert!(COMMAND_CHANNEL_CAPACITY > 0);
-        assert!(PREFILL_FRACTION > 0);
-    }
-
-    #[test]
-    fn test_buffer_constants_ordering() {
-        assert!(ADAPTIVE_MIN_DEFAULT_MS < ADAPTIVE_MIN_LOOPBACK_MS,
-            "Loopback devices should have larger min buffer");
-        assert!(DISCONNECT_FLUSH_THRESHOLD.as_secs() < 60,
-            "Flush threshold should be reasonable");
     }
 }

@@ -38,6 +38,7 @@ La Fase 2 se descompone en dos subproyectos, cada uno con su spec → plan:
 ## 3. Alcance
 
 ### 3.1 En 2A
+
 - Perfil Baja-latencia ⇄ Robustez (Ultra-baja / Balanceado / Robusto / Personalizado) que controla
   ring buffer, rango adaptive, prefill y chunk; quita los pisos fijos de `constants.rs`.
 - IPv6 + hostnames/DNS en cliente (`ToSocketAddrs`) y bind dual-stack `[::]` en server.
@@ -46,10 +47,12 @@ La Fase 2 se descompone en dos subproyectos, cada uno con su spec → plan:
   docs (README/CONTRIBUTING).
 
 ### 3.2 Diferido a 2B
+
 - Modo nativo tcp-streamer ↔ tcp-streamer, transporte de baja latencia (UDP vs TCP afinado), cifrado
   y autenticación por PSK, y descubrimiento de peers.
 
 ### 3.3 Limitaciones conocidas
+
 - **Loopback (WASAPI) + Ultra-baja latencia** puede causar cortes; cada perfil impone un piso más
   alto para loopback y el UI advierte al combinar ultra-baja con un dispositivo loopback.
 - El bind dual-stack `[::]` depende del SO; si falla (p. ej. IPv6 deshabilitado) se cae a
@@ -94,12 +97,12 @@ fn params(profile: &str, is_loopback: bool) -> LatencyParams
 
 Valores propuestos (no-loopback / loopback):
 
-| Perfil | ring_ms | adaptive_min | adaptive_max | chunk | prefill_ms |
-|---|---|---|---|---|---|
-| ultra-low | 100 / 600 | 50 / 400 | 300 / 1500 | 256 | = ring |
-| balanced  | 500 / 1500 | 300 / 1000 | 2000 / 4000 | 512 | = ring |
-| robust    | 3000 / 5000 | 2000 / 4000 | 8000 / 12000 | 1024 | = ring |
-| custom    | usa los campos manuales del usuario (como hoy) | | | | |
+| Perfil    | ring_ms                                        | adaptive_min | adaptive_max | chunk | prefill_ms |
+| --------- | ---------------------------------------------- | ------------ | ------------ | ----- | ---------- |
+| ultra-low | 100 / 600                                      | 50 / 400     | 300 / 1500   | 256   | = ring     |
+| balanced  | 500 / 1500                                     | 300 / 1000   | 2000 / 4000  | 512   | = ring     |
+| robust    | 3000 / 5000                                    | 2000 / 4000  | 8000 / 12000 | 1024  | = ring     |
+| custom    | usa los campos manuales del usuario (como hoy) |              |              |       |            |
 
 - `engine::run` usa estos parámetros **en vez de** `DEFAULT_MIN_BUFFER_MS` / `LOOPBACK_MIN_BUFFER_MS`
   / `ADAPTIVE_MIN_*`, que se eliminan de `constants.rs`.

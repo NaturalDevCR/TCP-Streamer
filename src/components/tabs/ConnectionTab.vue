@@ -41,8 +41,8 @@
         <option value="server">Server (Listen for Connections)</option>
       </SelectField>
       <p class="text-[11px] text-white/50 mt-2 leading-relaxed">
-        Client Mode: Connects to a Snapserver.<br />
-        Server Mode: Waits for Snapservers to connect.
+        Client: connect to an audio receiver.<br />
+        Server: wait for an audio receiver to connect.
       </p>
     </section>
 
@@ -69,6 +69,15 @@
           :disabled="stream.isStreaming"
         />
       </div>
+      <InputField
+        v-if="settings.isServer"
+        id="allowlist-input"
+        v-model="settings.allowlist"
+        label="Allowlist (optional, IP/CIDR — empty = allow all)"
+        placeholder="192.168.1.0/24, 10.0.0.5"
+        :disabled="stream.isStreaming"
+        class="mt-3"
+      />
     </section>
   </div>
 </template>

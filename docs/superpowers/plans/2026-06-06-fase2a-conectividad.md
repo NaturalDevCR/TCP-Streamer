@@ -18,20 +18,20 @@
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/Cargo.toml` | add `ipnet = "2"` | Modify |
-| `src-tauri/src/audio/engine/latency.rs` | **(pure)** latency profile → buffer params | Create |
-| `src-tauri/src/audio/transport/resolve.rs` | **(pure*)** host/IPv4/IPv6 → SocketAddrs | Create |
-| `src-tauri/src/audio/transport/allowlist.rs` | **(pure)** IP/CIDR parse + match | Create |
-| `src-tauri/src/audio/engine/mod.rs` | use latency params; dual-stack bind; allowlist check | Modify |
-| `src-tauri/src/audio/transport/tcp_client.rs` | connect via resolved addrs (hostnames/IPv6) | Modify |
-| `src-tauri/src/audio/transport/mod.rs` | `pub mod resolve; pub mod allowlist;` | Modify |
-| `src-tauri/src/audio/constants.rs` | remove hardcoded buffer floors | Modify |
-| `src-tauri/src/audio/commands.rs` · `manager.rs` | thread `latency_profile`, `allowlist` | Modify |
-| `src/stores/settings.ts` · `stream.ts` | latency profile + allowlist state/invoke | Modify |
-| `src/components/tabs/AdvancedTab.vue` · `ConnectionTab.vue` · `AudioTab.vue` | latency selector, allowlist field, generic labels | Modify |
-| `README.md` · `CONTRIBUTING.md` | generic terminology | Modify |
+| File                                                                         | Responsibility                                       | Status |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------- | ------ |
+| `src-tauri/Cargo.toml`                                                       | add `ipnet = "2"`                                    | Modify |
+| `src-tauri/src/audio/engine/latency.rs`                                      | **(pure)** latency profile → buffer params           | Create |
+| `src-tauri/src/audio/transport/resolve.rs`                                   | **(pure\*)** host/IPv4/IPv6 → SocketAddrs            | Create |
+| `src-tauri/src/audio/transport/allowlist.rs`                                 | **(pure)** IP/CIDR parse + match                     | Create |
+| `src-tauri/src/audio/engine/mod.rs`                                          | use latency params; dual-stack bind; allowlist check | Modify |
+| `src-tauri/src/audio/transport/tcp_client.rs`                                | connect via resolved addrs (hostnames/IPv6)          | Modify |
+| `src-tauri/src/audio/transport/mod.rs`                                       | `pub mod resolve; pub mod allowlist;`                | Modify |
+| `src-tauri/src/audio/constants.rs`                                           | remove hardcoded buffer floors                       | Modify |
+| `src-tauri/src/audio/commands.rs` · `manager.rs`                             | thread `latency_profile`, `allowlist`                | Modify |
+| `src/stores/settings.ts` · `stream.ts`                                       | latency profile + allowlist state/invoke             | Modify |
+| `src/components/tabs/AdvancedTab.vue` · `ConnectionTab.vue` · `AudioTab.vue` | latency selector, allowlist field, generic labels    | Modify |
+| `README.md` · `CONTRIBUTING.md`                                              | generic terminology                                  | Modify |
 
 ---
 
@@ -44,6 +44,7 @@
 - [ ] **Step 1: Add the dependency**
 
 In `src-tauri/Cargo.toml`, under `[dependencies]` (after `anyhow = "1"`), add:
+
 ```toml
 ipnet = "2"
 ```
@@ -71,6 +72,7 @@ git commit -m "build: add ipnet for CIDR allowlist"
 - [ ] **Step 1: Declare the module**
 
 In `src-tauri/src/audio/engine/mod.rs`, add to the `pub mod` block at the top:
+
 ```rust
 pub mod latency;
 ```
@@ -179,6 +181,7 @@ In `src-tauri/src/audio/commands.rs`, add `latency_profile: String,` to the `sta
 - [ ] **Step 2: Add the field to `AudioCommand::Start`**
 
 In `src-tauri/src/audio/manager.rs`:
+
 - Add `latency_profile: String,` to the `AudioCommand::Start { ... }` variant (after `max_buffer_ms: u32,`).
 - Add `latency_profile,` to the destructuring pattern in the `Ok(AudioCommand::Start { ... })` arm.
 - Add `latency_profile,` to the `super::engine::run(...)` call argument list, placed immediately after `max_buffer_ms,` and before `(*app_handle).clone(),`.
@@ -246,6 +249,7 @@ Then find the `AdaptiveBuffer::new(...)` call and change its `max` argument so i
 - [ ] **Step 4: Use `effective_chunk` everywhere the network chunk is used**
 
 `effective_chunk` and `lp` are computed in `run` (outside the network-thread closure) — move them above the `let bytes_sent_clone = ...` clones, and add `let effective_chunk_net = effective_chunk;` to the clone list so the closure can capture it. Then:
+
 - In the closure, replace `let mut temp_buffer = vec![0.0f32; chunk_size as usize * device_channels_net as usize];` → use `effective_chunk_net`.
 - Replace `let min_chunk_samples = chunk_size as usize * device_channels_net as usize;` → use `effective_chunk_net`.
 - Outside the closure, replace `let capacity_hint = chunk_size as usize * device_channels as usize;` → `let capacity_hint = effective_chunk as usize * device_channels as usize;`.
@@ -291,6 +295,7 @@ git commit -m "refactor(audio): remove fixed buffer floors superseded by latency
 - [ ] **Step 1: Replace `networkPreset` with `latencyProfile` in the store**
 
 In `src/stores/settings.ts`:
+
 - Replace `const networkPreset = ref("custom");` with `const latencyProfile = ref("balanced");`.
 - Delete the `PRESETS` constant, the `PresetValue` interface, and the `applyPreset` function (the backend now derives buffers from the profile).
 - In `SettingsDict`, replace `network_preset?: string;` with `latency_profile?: string;`.
@@ -301,6 +306,7 @@ In `src/stores/settings.ts`:
 - [ ] **Step 2: Send `latencyProfile` to the backend**
 
 In `src/stores/stream.ts`, in the `invoke("start_stream", { ... })` object inside `startStream`, add:
+
 ```ts
         latencyProfile: settings.latencyProfile,
 ```
@@ -310,8 +316,8 @@ In `src/stores/stream.ts`, in the `invoke("start_stream", { ... })` object insid
 In `src/components/tabs/AdvancedTab.vue`, replace the entire "Network Presets" `<section>` (the one with `id="network-preset"` and `@update:model-value="onPresetChange"`) with:
 
 ```vue
-    <!-- Latency Profile -->
-    <section class="glass-card">
+<!-- Latency Profile -->
+<section class="glass-card">
       <h3 class="border-b border-white/10 pb-2 mb-4 text-sm font-semibold text-slate-300">
         Latency Profile
       </h3>
@@ -490,6 +496,7 @@ git commit -m "feat(transport): client connects via hostnames and IPv6"
 - [ ] **Step 1: Replace the IPv4-only listener bind**
 
 In `engine::run`'s network thread, find the listener bind:
+
 ```rust
         let listener = if is_server_clone {
             match std::net::TcpListener::bind(format!("0.0.0.0:{}", port)) {
@@ -686,9 +693,11 @@ git commit -m "feat(transport): tested IP/CIDR allowlist matching"
 - [ ] **Step 2: Parse the rules once, before the network thread**
 
 In `engine::run`, near the other `let *_clone = ...;` bindings (before `thread_builder.spawn`), add:
+
 ```rust
     let allow_rules = super::transport::allowlist::parse_rules(&allowlist);
 ```
+
 This is `Vec<IpNet>` which is `Send`; capture it in the closure (it will move in automatically since it's used inside).
 
 - [ ] **Step 3: Reject disallowed peers in the accept arm**
@@ -724,6 +733,7 @@ git commit -m "feat(transport): enforce optional IP/CIDR allowlist on server acc
 - [ ] **Step 1: Add `allowlist` to the store**
 
 In `src/stores/settings.ts`:
+
 - Add `const allowlist = ref("");` near the connection state (after `loopbackMode`).
 - Add `allowlist?: string;` to `SettingsDict`.
 - In `loadSettings`: `if (s.allowlist) allowlist.value = s.allowlist as string;`.
@@ -733,6 +743,7 @@ In `src/stores/settings.ts`:
 - [ ] **Step 2: Send it to the backend**
 
 In `src/stores/stream.ts`, add to the `invoke("start_stream", { ... })` object:
+
 ```ts
         allowlist: settings.allowlist,
 ```
@@ -742,15 +753,15 @@ In `src/stores/stream.ts`, add to the `invoke("start_stream", { ... })` object:
 In `src/components/tabs/ConnectionTab.vue`, inside the destination/server `<section>`, add (only in server mode) an allowlist input below the port row:
 
 ```vue
-      <InputField
-        v-if="settings.isServer"
-        id="allowlist-input"
-        v-model="settings.allowlist"
-        label="Allowlist (optional, IP/CIDR — empty = allow all)"
-        placeholder="192.168.1.0/24, 10.0.0.5"
-        :disabled="stream.isStreaming"
-        class="mt-3"
-      />
+<InputField
+  v-if="settings.isServer"
+  id="allowlist-input"
+  v-model="settings.allowlist"
+  label="Allowlist (optional, IP/CIDR — empty = allow all)"
+  placeholder="192.168.1.0/24, 10.0.0.5"
+  :disabled="stream.isStreaming"
+  class="mt-3"
+/>
 ```
 
 - [ ] **Step 4: Verify frontend**
@@ -785,13 +796,17 @@ In `engine/mod.rs`, the resampling comment that names a specific server (≈ "br
 - [ ] **Step 3: Generic server connection info in the store**
 
 In `src/stores/stream.ts`, the `startStream` server branch sets `tcpUrl`, `httpUrl`, and a vendor-specific config string. Replace the vendor config with a generic hint. Find:
+
 ```ts
-        snapcastConfig.value = `[stream]\nsource = tcp://${lip}:${p}?name=TCPStreamer&mode=client`;
+snapcastConfig.value = `[stream]\nsource = tcp://${lip}:${p}?name=TCPStreamer&mode=client`;
 ```
+
 Replace with:
+
 ```ts
-        snapcastConfig.value = `Use this as a TCP source in your audio receiver:\ntcp://${lip}:${p}`;
+snapcastConfig.value = `Use this as a TCP source in your audio receiver:\ntcp://${lip}:${p}`;
 ```
+
 (Keep the `snapcastConfig` ref name OR rename to `receiverHint` — if renaming, update the ref declaration, the `return`, and `AudioTab.vue`. Minimal path: keep the ref name, change only the string.)
 
 - [ ] **Step 4: Generic labels**
@@ -840,11 +855,13 @@ git commit -m "docs: genericize terminology"
 - [ ] **Step 1: Complete check suite**
 
 Run:
+
 ```bash
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: all green; Rust tests up by ~12 (latency 5, resolve 2, allowlist 5).
 
 - [ ] **Step 2: Confirm no vendor name remains in shipped surfaces**
@@ -855,6 +872,7 @@ Expected: no functional references (empty, or only incidental words).
 - [ ] **Step 3: Behavioural verification**
 
 Run `pnpm tauri dev` and confirm:
+
 1. **Latency profile:** switch Ultra-low vs Robust; the "Ring buffer: …ms" log differs greatly (ultra-low ~100ms, robust ~3000ms); no forced 5s/8s floor.
 2. **Hostname/IPv6:** in client mode, connect to a receiver by hostname and by an IPv6 literal — both connect.
 3. **Dual-stack:** server logs "[::] (dual-stack)" (or the IPv4 fallback with its reason).

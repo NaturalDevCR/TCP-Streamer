@@ -124,6 +124,6 @@ export interface StreamState {
   toasts: Toast[];
   serverUrlTcp: string;
   serverUrlHttp: string;
-  snapcastConfig: string;
+  connectionInfo: string;
   logLevelFilter: string;
 }

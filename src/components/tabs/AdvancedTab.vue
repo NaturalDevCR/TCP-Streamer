@@ -30,45 +30,33 @@
       </div>
     </section>
 
-    <!-- Network Presets -->
+    <!-- Latency Profile -->
     <section class="glass-card">
-      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
-        Network Presets
+      <h3 class="border-b border-white/10 pb-2 mb-4 text-sm font-semibold text-slate-300">
+        Latency Profile
       </h3>
       <SelectField
-        id="network-preset"
-        v-model="settings.networkPreset"
-        label="Connection Type"
-        @update:model-value="onPresetChange"
+        id="latency-profile"
+        v-model="settings.latencyProfile"
+        label="Latency vs Robustness"
       >
-        <option value="custom">Custom</option>
-        <option value="ethernet">Ethernet (Stable)</option>
-        <option value="wifi">WiFi (Standard)</option>
-        <option value="wifi-poor">WiFi (Poor Signal)</option>
+        <option value="ultra-low">Ultra-low latency</option>
+        <option value="balanced">Balanced</option>
+        <option value="robust">Robust (high jitter tolerance)</option>
+        <option value="custom">Custom (use Audio tab buffers)</option>
       </SelectField>
-      <p class="text-[11px] text-white/50 mt-2">Optimized settings for your connection type</p>
+      <p class="mt-2 text-[11px] text-white/50">
+        Lower latency uses smaller buffers (best on wired/quiet networks). Loopback capture needs
+        more buffering &mdash; ultra-low may stutter.
+      </p>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useSettingsStore } from "../../stores/settings.ts";
-import { useStreamStore } from "../../stores/stream.ts";
 import SelectField from "../ui/SelectField.vue";
 import CheckboxField from "../ui/CheckboxField.vue";
 
 const settings = useSettingsStore();
-const stream = useStreamStore();
-
-function onPresetChange(presetId: string) {
-  if (presetId !== "custom") {
-    settings.applyPreset(presetId);
-    const names: Record<string, string> = {
-      ethernet: "Ethernet (Stable)",
-      wifi: "WiFi (Standard)",
-      "wifi-poor": "WiFi (Poor Signal)",
-    };
-    stream.addToast(`Applied ${names[presetId]} preset`, "success");
-  }
-}
 </script>

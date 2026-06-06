@@ -22,40 +22,10 @@ interface SettingsDict {
   min_buffer?: number;
   max_buffer?: number;
   network_preset?: string;
+  latency_profile?: string;
+  allowlist?: string;
   mode?: string;
 }
-
-interface PresetValue {
-  ring_buffer_duration: number;
-  chunk_size: number;
-  min_buffer: number;
-  max_buffer: number;
-  adaptive_buffer: boolean;
-}
-
-const PRESETS: Record<string, PresetValue> = {
-  ethernet: {
-    ring_buffer_duration: 2000,
-    chunk_size: 512,
-    min_buffer: 2000,
-    max_buffer: 6000,
-    adaptive_buffer: true,
-  },
-  wifi: {
-    ring_buffer_duration: 4000,
-    chunk_size: 1024,
-    min_buffer: 3000,
-    max_buffer: 10000,
-    adaptive_buffer: true,
-  },
-  "wifi-poor": {
-    ring_buffer_duration: 8000,
-    chunk_size: 2048,
-    min_buffer: 5000,
-    max_buffer: 15000,
-    adaptive_buffer: true,
-  },
-};
 
 export const useSettingsStore = defineStore("settings", () => {
   // ── Reactive State ──
@@ -69,6 +39,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const ip = ref("");
   const port = ref(1704);
   const loopbackMode = ref(false);
+  const allowlist = ref("");
 
   // Audio
   const sampleRate = ref(48000);
@@ -90,7 +61,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const highPriority = ref(true);
   const dscpStrategy = ref("voip");
   const chunkSize = ref(512);
-  const networkPreset = ref("custom");
+  const latencyProfile = ref("balanced");
 
   // Profiles
   const profiles = ref<Record<string, SettingsDict>>({});
@@ -179,7 +150,8 @@ export const useSettingsStore = defineStore("settings", () => {
     if (s.adaptive_buffer !== undefined) adaptiveBuffer.value = s.adaptive_buffer as boolean;
     if (s.min_buffer) minBuffer.value = s.min_buffer as number;
     if (s.max_buffer) maxBuffer.value = s.max_buffer as number;
-    if (s.network_preset) networkPreset.value = s.network_preset as string;
+    if (s.latency_profile) latencyProfile.value = s.latency_profile as string;
+    if (s.allowlist) allowlist.value = s.allowlist as string;
     if (s.mode) mode.value = s.mode as string;
 
     // Load loopback mode
@@ -208,7 +180,8 @@ export const useSettingsStore = defineStore("settings", () => {
       adaptive_buffer: adaptiveBuffer.value,
       min_buffer: minBuffer.value,
       max_buffer: maxBuffer.value,
-      network_preset: networkPreset.value,
+      latency_profile: latencyProfile.value,
+      allowlist: allowlist.value,
       mode: mode.value,
     };
 
@@ -285,20 +258,6 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  // ── Network Presets ──
-  function applyPreset(presetId: string) {
-    if (presetId === "custom") return;
-    const preset = PRESETS[presetId];
-    if (!preset) return;
-    ringBufferDuration.value = preset.ring_buffer_duration;
-    chunkSize.value = preset.chunk_size;
-    minBuffer.value = preset.min_buffer;
-    maxBuffer.value = preset.max_buffer;
-    adaptiveBuffer.value = preset.adaptive_buffer;
-    networkPreset.value = presetId;
-    saveSettings();
-  }
-
   return {
     // State
     devices,
@@ -322,7 +281,8 @@ export const useSettingsStore = defineStore("settings", () => {
     highPriority,
     dscpStrategy,
     chunkSize,
-    networkPreset,
+    latencyProfile,
+    allowlist,
     profiles,
     currentProfile,
     devicesLoading,
@@ -340,6 +300,5 @@ export const useSettingsStore = defineStore("settings", () => {
     createProfile,
     deleteProfile,
     toggleAutostart,
-    applyPreset,
   };
 });

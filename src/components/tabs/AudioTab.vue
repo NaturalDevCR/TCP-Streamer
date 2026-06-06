@@ -46,7 +46,7 @@
           label="Stream Format"
           :disabled="stream.isStreaming"
         >
-          <option value="pcm">PCM (Raw / Snapserver)</option>
+          <option value="pcm">PCM (Raw / Audio receiver)</option>
           <option value="wav">WAV (Header / Browser)</option>
         </SelectField>
       </div>
@@ -63,17 +63,15 @@
       <div class="space-y-3">
         <CopyField
           v-model="stream.tcpUrl"
-          label="Snapcast Server Address"
+          label="Receiver Address (TCP)"
           input-class="text-emerald-400 font-semibold"
         />
         <CopyField v-model="stream.httpUrl" label="Browser Stream URL" />
         <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-slate-400 ml-0.5"
-            >Snapserver Config (snapserver.conf)</label
-          >
+          <label class="text-xs font-medium text-slate-400 ml-0.5">Connection Info</label>
           <div class="flex gap-2 items-stretch">
             <textarea
-              :value="stream.snapcastConfig"
+              :value="stream.connectionInfo"
               readonly
               class="flex-1 h-[70px] font-mono text-[11px] bg-black/30 border border-white/10 text-white/60 resize-none p-2 rounded-lg leading-relaxed"
             />
@@ -135,9 +133,9 @@ const settings = useSettingsStore();
 const stream = useStreamStore();
 
 function copyConfig() {
-  if (stream.snapcastConfig) {
+  if (stream.connectionInfo) {
     navigator.clipboard
-      .writeText(stream.snapcastConfig)
+      .writeText(stream.connectionInfo)
       .then(() => stream.addToast("Config copied!", "success"))
       .catch(() => stream.addToast("Failed to copy", "error"));
   }

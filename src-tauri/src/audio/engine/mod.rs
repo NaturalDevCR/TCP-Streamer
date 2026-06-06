@@ -4,6 +4,7 @@ pub mod buffer;
 pub mod capture;
 pub mod device;
 pub mod encoder;
+pub mod latency;
 
 // ── Imports for the engine::run orchestrator ──
 use super::chunked::ChunkedWriter;
@@ -21,6 +22,32 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 
+
+/// Binds a listener that accepts both IPv6 and IPv4 (via an IPv6 dual-stack
+/// socket). Falls back to IPv4-only if the dual-stack bind fails (e.g. IPv6
+/// disabled). Returns the listener and a label describing what it bound to.
+fn bind_dual_stack(port: u16) -> std::io::Result<(std::net::TcpListener, &'static str)> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    use std::net::{Ipv6Addr, SocketAddr};
+
+    let try_v6 = || -> std::io::Result<std::net::TcpListener> {
+        let socket = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP))?;
+        socket.set_only_v6(false)?;
+        let _ = socket.set_reuse_address(true);
+        let addr: SocketAddr = (Ipv6Addr::UNSPECIFIED, port).into();
+        socket.bind(&addr.into())?;
+        socket.listen(128)?;
+        Ok(socket.into())
+    };
+
+    match try_v6() {
+        Ok(l) => Ok((l, "[::] (dual-stack)")),
+        Err(_) => {
+            let l = std::net::TcpListener::bind(("0.0.0.0", port))?;
+            Ok((l, "0.0.0.0 (IPv4 only)"))
+        }
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -40,6 +67,8 @@ pub fn run(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
+    latency_profile: String,
+    allowlist: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
 
@@ -104,7 +133,8 @@ pub fn run(
     // 0.5. Note: We deliberately DO NOT override the requested sample rate natively anymore.
     // If the user requests 48000Hz and the device natively captures at 44100Hz, we trust
     // the OS audio stack (PipeWire, PulseAudio, CoreAudio, WASAPI shared mode) to perform
-    // the necessary resampling. Overriding this breaks protocol synchronization (e.g. with Snapserver).
+    // the necessary resampling. Overriding this breaks protocol synchronization
+    // with the downstream audio receiver.
 
     // Detect supported audio formats from device
     let supported_configs: Vec<_> = if is_loopback {
@@ -186,18 +216,26 @@ pub fn run(
         buffer_size, stream_config.buffer_size
     ));
 
-    // 1. Setup Ring Buffer
-    let adjusted_ring_buffer_duration_ms = if is_loopback {
-        LOOPBACK_MIN_BUFFER_MS.max(ring_buffer_duration_ms)
+    // 1. Setup Ring Buffer (latency profile drives the sizes; "custom" uses the
+    // user's manual fields).
+    let lp = if latency_profile == "custom" {
+        self::latency::LatencyParams {
+            ring_ms: ring_buffer_duration_ms,
+            adaptive_min_ms: min_buffer_ms,
+            adaptive_max_ms: max_buffer_ms,
+            chunk_size,
+            prefill_ms: ring_buffer_duration_ms,
+        }
     } else {
-        DEFAULT_MIN_BUFFER_MS.max(ring_buffer_duration_ms)
+        self::latency::params(&latency_profile, is_loopback)
     };
+    let effective_chunk = lp.chunk_size;
 
-    let ring_capacity_ms = max_buffer_ms.max(adjusted_ring_buffer_duration_ms);
+    let ring_capacity_ms = lp.adaptive_max_ms.max(lp.ring_ms);
     let ring_buffer_size =
         (sample_rate as usize) * (device_channels as usize) * (ring_capacity_ms as usize) / 1000;
 
-    let adj_ms_u32 = adjusted_ring_buffer_duration_ms;
+    let adj_ms_u32 = lp.ring_ms;
     let buffer_size_mb = (ring_buffer_size * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
 
     emit_log(
@@ -236,6 +274,9 @@ pub fn run(
     let dscp_clone = dscp_strategy.clone();
     let overruns_net = overruns.clone();
     let underruns_net = underruns.clone();
+    let effective_chunk_net = effective_chunk;
+
+    let allow_rules = super::transport::allowlist::parse_rules(&allowlist);
 
     // 2. Spawn Network Thread (Consumer)
     let priority = if high_priority {
@@ -264,10 +305,10 @@ pub fn run(
 
         // Bind listener if in server mode
         let listener = if is_server_clone {
-            match std::net::TcpListener::bind(format!("0.0.0.0:{}", port)) {
-                Ok(l) => {
+            match bind_dual_stack(port) {
+                Ok((l, label)) => {
                     let _ = l.set_nonblocking(true);
-                    emit_log(&app_handle_net, "success", format!("TCP Server listening on 0.0.0.0:{}", port));
+                    emit_log(&app_handle_net, "success", format!("TCP Server listening on {} (port {})", label, port));
                     Some(l)
                 }
                 Err(e) => {
@@ -280,22 +321,18 @@ pub fn run(
         };
 
 
-        let mut temp_buffer = vec![0.0f32; chunk_size as usize * device_channels_net as usize];
+        let mut temp_buffer = vec![0.0f32; effective_chunk_net as usize * device_channels_net as usize];
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
 
         // Quality tracking
         let mut last_quality_emit = Instant::now();
 
-        let adaptive_min_ms = if is_loopback {
-            ADAPTIVE_MIN_LOOPBACK_MS.max(min_buffer_ms)
-        } else {
-            ADAPTIVE_MIN_DEFAULT_MS.max(min_buffer_ms)
-        };
+        let adaptive_min_ms = lp.adaptive_min_ms;
 
         let mut adaptive = self::buffer::AdaptiveBuffer::new(
             adaptive_min_ms,
-            max_buffer_ms.max(adaptive_min_ms),
+            lp.adaptive_max_ms.max(adaptive_min_ms),
             super::constants::ADAPTIVE_BUFFER_STEP_MS,
             adj_ms_u32,
             6,
@@ -348,7 +385,7 @@ pub fn run(
         while is_running_clone.load(Ordering::Relaxed) {
             // 1. Hardware-Driven Pacing
             let current_buffered = cons.len();
-            let min_chunk_samples = chunk_size as usize * device_channels_net as usize;
+            let min_chunk_samples = effective_chunk_net as usize * device_channels_net as usize;
 
             if current_stream.is_none() && current_buffered > 0 {
                 // Track how long we've been disconnected
@@ -417,6 +454,11 @@ pub fn run(
                         // TCP Server
                         match l.accept() {
                             Ok((mut stream, addr)) => {
+                                if !super::transport::allowlist::is_allowed(addr.ip(), &allow_rules, true) {
+                                    emit_log(&app_handle_net, "warning", format!("Rejected connection from {} (not in allowlist)", addr.ip()));
+                                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                                    continue;
+                                }
                                 let _ = stream.set_nodelay(true);
 
                                 // Apply DSCP/QoS to the accepted client connection (parity with client mode).
@@ -501,7 +543,7 @@ pub fn run(
                 // Send WAV header if needed
                 // Server Mode:
                 // - "wav": Header + PCM (Browsers/VLC)
-                // - "pcm": Raw PCM (Snapserver)
+                // - "pcm": Raw PCM (audio receiver)
                 if is_server_clone && format_clone == "wav" && !wav_header_sent {
                      {
                          // Send header with 0 length (handled by helper) for unknown/stream
@@ -698,7 +740,7 @@ pub fn run(
     });
 
     // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
-    let capacity_hint = chunk_size as usize * device_channels as usize;
+    let capacity_hint = effective_chunk as usize * device_channels as usize;
     let audio_stream = self::capture::build_input_stream(
         &device,
         &stream_config,

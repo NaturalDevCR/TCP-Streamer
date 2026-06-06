@@ -35,18 +35,18 @@
 
 **TCP Streamer** is a desktop application designed to capture and stream audio from your computer. It can operate in two modes:
 
-1.  **Client Mode**: Connects to an existing Snapcast server (or any TCP server) and pushes audio to it.
-2.  **Server Mode**: Acts as a TCP server, listening for incoming connections from Snapcast servers or media players.
+1.  **Client Mode**: Connects to an audio receiver (or any TCP server) and pushes audio to it.
+2.  **Server Mode**: Acts as a TCP server, listening for incoming connections from audio receivers or media players.
 
-It's perfect for integrating with multi-room audio systems like Snapcast, creating custom audio pipelines, or building distributed audio setups.
+It's perfect for integrating with multi-room audio systems, creating custom audio pipelines, or building distributed audio setups.
 
 ### How It Works
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
 │   Audio     │      │     TCP      │      │   Server    │
-│   Input     │─────▶│   Streamer   │─────▶│ (Snapcast,  │
-│  (Device)   │      │              │      │  Custom)    │
+│   Input     │─────▶│   Streamer   │─────▶│  (Audio    │
+│  (Device)   │      │              │      │ Receiver)  │
 └─────────────┘      └──────────────┘      └─────────────┘
 ```
 
@@ -92,20 +92,20 @@ It's perfect for integrating with multi-room audio systems like Snapcast, creati
 
 ## Use Cases
 
-### 1. **Multi-Room Audio with Snapcast**
+### 1. **Multi-Room Audio**
 
-Stream audio from your computer to a Snapcast server, enabling synchronized playback across multiple rooms.
+Stream audio from your computer to an audio receiver such as Sonium, enabling synchronized playback across multiple rooms.
 
 **Client Mode**:
 
 ```bash
-TCP Streamer (Client) → Snapserver (192.168.1.100:4953)
+TCP Streamer (Client) → Audio Receiver (192.168.1.100:4953)
 ```
 
-**Server Mode** (Snapserver connects to you):
+**Server Mode** (receiver connects to you):
 
 ```bash
-TCP Streamer (Server :1704) ← Snapserver
+TCP Streamer (Server :1704) ← Audio Receiver
 ```
 
 ### 2. **Remote Audio Monitoring**
@@ -172,8 +172,8 @@ Choose the audio source you want to stream (microphone, virtual audio device, et
 
 ### 2. **Select Mode**
 
-- **Client Mode**: Select if you have a Snapserver running elsewhere. Enter its **Target IP** and **Port**.
-- **Server Mode**: Select if you want Snapserver or a browser to connect _to you_. Set a local **Port** (e.g., 1704).
+- **Client Mode**: Select if you have an audio receiver running elsewhere. Enter its **Target IP** and **Port**.
+- **Server Mode**: Select if you want an audio receiver or browser to connect _to you_. Set a local **Port** (e.g., 1704).
 
 ### 3. **Adjust Settings**
 
@@ -195,13 +195,9 @@ Click **Start Streaming**.
 
 When running in **Server Mode**, TCP Streamer provides:
 
-1.  **Snapcast TCP Stream**:
+1.  **TCP Stream**:
     - URL: `tcp://<YOUR_IP>:<PORT>`
-    - Add to `snapserver.conf`:
-      ```ini
-      [stream]
-      source = tcp://<YOUR_IP>:<PORT>?name=TCPStreamer&mode=client
-      ```
+    - Use this address as a TCP source in your audio receiver.
 
 2.  **Browser HTTP Stream**:
     - URL: `http://<YOUR_IP>:<PORT>/stream.wav`
@@ -214,15 +210,16 @@ Automatically resizes the ring buffer based on network conditions to prevent aud
 - **Enable**: Toggles the adaptive logic.
 - **Min/Max Buffer**: Sets the valid range for automatic adjustment.
 
-### Network Presets
+### Latency Profile
 
 Located in the **Advanced** tab:
 
-| Preset | Description | Settings Applied |
-| ~ | ~ | ~ |
-| **Ethernet** | For stable wired connections | Ring Buffer: 2s, Chunk: 512 |
-| **WiFi** | For standard wireless | Ring Buffer: 4s, Chunk: 1024 |
-| **WiFi (Poor)** | For unstable/far connections | Ring Buffer: 8s, Chunk: 2048 |
+| Profile | Description |
+| ~ | ~ |
+| **Ultra-low** | Minimal latency for wired/quiet networks (100ms ring) |
+| **Balanced** | Default. Good trade-off for most networks (500ms ring) |
+| **Robust** | High jitter tolerance for unstable networks (3000ms ring) |
+| **Custom** | Use the manual buffer values from the Audio tab |
 
 ---
 
@@ -262,7 +259,7 @@ Input Device → cpal → Producer → Ring Buffer → Consumer (Thread) → TCP
 **Server Mode**:
 
 - Ensure the port (e.g., 1704) is allowed through your firewall.
-- Ensure the client (Snapserver/Browser) can reach your IP.
+- Ensure the client (audio receiver/browser) can reach your IP.
 
 **Client Mode**:
 
