@@ -540,6 +540,7 @@ fn start_audio_stream(
         let mut use_chunked = false;
         let mut wav_header_sent = false;
         let mut prefill_debug_timer = Instant::now();
+        let mut payload: Vec<u8> = Vec::new();
 
         while is_running_clone.load(Ordering::Relaxed) {
             // 1. Hardware-Driven Pacing
@@ -809,13 +810,7 @@ fn start_audio_stream(
                 let count = cons.pop_slice(&mut temp_buffer);
 
                 if count > 0 {
-                    // Convert float samples to PCM i16 payload
-                    let mut payload = Vec::with_capacity(count * 2);
-                    for &sample_f32 in temp_buffer.iter().take(count) {
-                        let sample = sample_f32.clamp(-1.0, 1.0);
-                        let sample_i16 = (sample * 32767.0) as i16;
-                        payload.extend_from_slice(&sample_i16.to_le_bytes());
-                    }
+                    super::engine::encoder::encode_f32_to_pcm_i16_le(&temp_buffer[..count], &mut payload);
 
                     let write_start = Instant::now();
                     let mut write_success = false;
