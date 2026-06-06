@@ -6,7 +6,6 @@ pub mod error;
 pub mod manager;
 pub mod metrics;
 pub mod stats;
-pub mod stream;
 pub mod transport;
 pub mod wav_helper;
 
