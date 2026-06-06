@@ -78,4 +78,10 @@ describe("useSettingsStore", () => {
     store.applyPreset("nonexistent");
     expect(store.ringBufferDuration).toBe(original);
   });
+
+  it("uses a DSCP strategy key the backend recognizes", () => {
+    const store = useSettingsStore();
+    const validKeys = ["voip", "ef", "cs5", "lowdelay", "throughput", "besteffort"];
+    expect(validKeys).toContain(store.dscpStrategy);
+  });
 });
