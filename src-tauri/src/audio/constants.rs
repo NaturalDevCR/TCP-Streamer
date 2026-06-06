@@ -45,6 +45,7 @@ pub(crate) const QUALITY_REPORT_INTERVAL_SECS: u64 = 5;
 pub(crate) const COMMAND_CHANNEL_CAPACITY: usize = 16;
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
 
