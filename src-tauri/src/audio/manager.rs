@@ -55,6 +55,7 @@ struct StreamParams {
     chunk_size: u32,
     is_loopback: bool,
     is_server: bool,
+    auto_reconnect: bool,
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
@@ -118,6 +119,7 @@ impl AudioState {
                             chunk_size,
                             is_loopback,
                             is_server,
+                            auto_reconnect,
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
@@ -135,7 +137,7 @@ impl AudioState {
                         match start_audio_stream(
                             device_name, ip, port, sample_rate, buffer_size,
                             ring_buffer_duration_ms, high_priority, dscp_strategy,
-                            format, chunk_size, is_loopback, is_server,
+                            format, chunk_size, is_loopback, is_server, auto_reconnect,
                             enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
                             (*app_handle).clone(),
                         ) {
@@ -180,7 +182,7 @@ impl AudioState {
                         match start_audio_stream(
                             p.device_name.clone(), p.ip.clone(), p.port, p.sample_rate, p.buffer_size,
                             p.ring_buffer_duration_ms, p.high_priority, p.dscp_strategy.clone(),
-                            p.format.clone(), p.chunk_size, p.is_loopback, p.is_server,
+                            p.format.clone(), p.chunk_size, p.is_loopback, p.is_server, p.auto_reconnect,
                             p.enable_adaptive_buffer, p.min_buffer_ms, p.max_buffer_ms,
                             p.app_handle.clone(),
                         ) {
@@ -255,6 +257,7 @@ fn start_audio_stream(
     chunk_size: u32,
     is_loopback: bool,
     is_server: bool,
+    auto_reconnect: bool,
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
@@ -449,6 +452,7 @@ fn start_audio_stream(
     let format_clone = format.clone();
     let sample_rate_clone = sample_rate;
     let is_server_clone = is_server;
+    let auto_reconnect_net = auto_reconnect;
     let device_channels_net = device_channels;
     let dscp_clone = dscp_strategy.clone();
     let overruns_net = overruns.clone();
@@ -814,6 +818,12 @@ fn start_audio_stream(
                              close_tcp_stream(s, "write error", &app_handle_net);
                          }
                          current_stream = None;
+
+                         if !is_server_clone && !auto_reconnect_net {
+                             emit_log(&app_handle_net, "info", "Auto-reconnect disabled; stopping stream.".to_string());
+                             is_running_clone.store(false, Ordering::Relaxed);
+                         }
+
                          thread::sleep(Duration::from_millis(100));
                     }
                 } else {
