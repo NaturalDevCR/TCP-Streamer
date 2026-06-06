@@ -11,25 +11,25 @@
 **Spec:** `docs/superpowers/specs/2026-06-05-fase1-estabilizacion-design.md` §5.2, §5.4.
 **Depends on:** Part A complete (engine modules exist; `StreamStats.overruns` exists).
 
-> **FILE LOCATION — read first:** The orchestrator `start_audio_stream`, the network thread, and the send loop live in **`src-tauri/src/audio/manager.rs`** (~1012 lines). `stream.rs` is 7 lines — *only* the `StreamSocket` enum (which `manager.rs` imports via `use super::stream::StreamSocket;`). Wherever a task says to edit orchestrator / send-loop / network-thread code, the file is **`manager.rs`**. Anchor edits by the quoted code/comment; Part A shifted line numbers.
+> **FILE LOCATION — read first:** The orchestrator `start_audio_stream`, the network thread, and the send loop live in **`src-tauri/src/audio/manager.rs`** (~1012 lines). `stream.rs` is 7 lines — _only_ the `StreamSocket` enum (which `manager.rs` imports via `use super::stream::StreamSocket;`). Wherever a task says to edit orchestrator / send-loop / network-thread code, the file is **`manager.rs`**. Anchor edits by the quoted code/comment; Part A shifted line numbers.
 
 ---
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/src/audio/engine/buffer.rs` | **(pure)** target-occupancy adaptive controller | Create |
-| `src-tauri/src/audio/metrics.rs` | underrun/overrun counters, **(pure)** quality score, per-OS RTT | Create |
-| `src-tauri/src/audio/mod.rs` | `pub mod metrics;` | Modify |
-| `src-tauri/src/audio/engine/mod.rs` | `pub mod buffer;` | Modify |
-| `src-tauri/Cargo.toml` | add `libc` under `[target.'cfg(unix)'.dependencies]` | Modify |
-| `src-tauri/src/audio/stats.rs` | add `underruns` counter; reshape `QualityEvent` | Modify |
-| `src-tauri/src/audio/manager.rs` | size ring at max; wire controller + counters; emit honest quality | Modify |
-| `src/types/events.ts` | reshape `QualityEvent` | Modify |
-| `src/stores/stream.ts` | listen with new fields; drop jitter/avgLatency/errorCount | Modify |
-| `src/components/StatsBar.vue` | show RTT / Underruns / Dropped | Modify |
-| `src/stores/__tests__/stream.test.ts` | update for new quality fields | Modify |
+| File                                   | Responsibility                                                    | Status |
+| -------------------------------------- | ----------------------------------------------------------------- | ------ |
+| `src-tauri/src/audio/engine/buffer.rs` | **(pure)** target-occupancy adaptive controller                   | Create |
+| `src-tauri/src/audio/metrics.rs`       | underrun/overrun counters, **(pure)** quality score, per-OS RTT   | Create |
+| `src-tauri/src/audio/mod.rs`           | `pub mod metrics;`                                                | Modify |
+| `src-tauri/src/audio/engine/mod.rs`    | `pub mod buffer;`                                                 | Modify |
+| `src-tauri/Cargo.toml`                 | add `libc` under `[target.'cfg(unix)'.dependencies]`              | Modify |
+| `src-tauri/src/audio/stats.rs`         | add `underruns` counter; reshape `QualityEvent`                   | Modify |
+| `src-tauri/src/audio/manager.rs`       | size ring at max; wire controller + counters; emit honest quality | Modify |
+| `src/types/events.ts`                  | reshape `QualityEvent`                                            | Modify |
+| `src/stores/stream.ts`                 | listen with new fields; drop jitter/avgLatency/errorCount         | Modify |
+| `src/components/StatsBar.vue`          | show RTT / Underruns / Dropped                                    | Modify |
+| `src/stores/__tests__/stream.test.ts`  | update for new quality fields                                     | Modify |
 
 ---
 
@@ -38,12 +38,14 @@
 ### Task 1.1: Pure target-occupancy controller
 
 **Files:**
+
 - Create: `src-tauri/src/audio/engine/buffer.rs`
 - Modify: `src-tauri/src/audio/engine/mod.rs`
 
 - [ ] **Step 1: Declare the module**
 
 In `src-tauri/src/audio/engine/mod.rs` add:
+
 ```rust
 pub mod buffer;
 ```
@@ -177,6 +179,7 @@ git commit -m "feat(engine): add tested adaptive latency-target controller"
 ### Task 2.1: Add the `libc` dependency (Unix)
 
 **Files:**
+
 - Modify: `src-tauri/Cargo.toml`
 
 - [ ] **Step 1: Add a target-specific dependency**
@@ -203,6 +206,7 @@ git commit -m "build: add libc dependency for Unix TCP_INFO RTT"
 ### Task 2.2: Pure quality-scoring (TDD)
 
 **Files:**
+
 - Create: `src-tauri/src/audio/metrics.rs`
 - Modify: `src-tauri/src/audio/mod.rs`
 
@@ -307,6 +311,7 @@ git commit -m "feat(metrics): add tested honest quality scoring"
 ### Task 2.3: Per-platform TCP RTT via getsockopt(TCP_INFO)
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/metrics.rs`
 
 - [ ] **Step 1: Append the platform-gated RTT readers**
@@ -429,6 +434,7 @@ git commit -m "feat(metrics): best-effort TCP RTT via getsockopt(TCP_INFO)"
 ### Task 3.1: Add `underruns` to `StreamStats` and reshape `QualityEvent`
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/stats.rs`
 
 - [ ] **Step 1: Add the underruns counter**
@@ -466,6 +472,7 @@ Expected: FAIL — `manager.rs` still constructs the old `QualityEvent` and the 
 ### Task 3.2: Wire the controller, counters, and honest event into the consumer loop
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/manager.rs`
 
 > All edits below are in the network-thread closure of `start_audio_stream`. Anchor by the quoted code; Part A shifted line numbers.
@@ -620,6 +627,7 @@ git commit -m "feat(audio): real adaptive target + honest underrun/overrun/RTT q
 ### Task 4.1: Reshape the TS event type
 
 **Files:**
+
 - Modify: `src/types/events.ts`
 
 - [ ] **Step 1: Replace `QualityEvent`**
@@ -646,6 +654,7 @@ Expected: FAIL in `src/stores/stream.ts` (old fields). Fixed in Task 4.2.
 ### Task 4.2: Update the stream store
 
 **Files:**
+
 - Modify: `src/stores/stream.ts`
 
 - [ ] **Step 1: Replace the quality state + listener**
@@ -653,36 +662,36 @@ Expected: FAIL in `src/stores/stream.ts` (old fields). Fixed in Task 4.2.
 In `src/stores/stream.ts`, replace the quality refs (`jitter`, `avgLatency`, `bufferHealth`, `errorCount`) with the honest ones:
 
 ```ts
-  // Quality
-  const qualityScore = ref(0);
-  const rttMs = ref<number | null>(null);
-  const rttVarMs = ref<number | null>(null);
-  const underruns = ref(0);
-  const dropped = ref(0);
-  const bufferHealth = ref(0);
-  const bufferMs = ref(0);
+// Quality
+const qualityScore = ref(0);
+const rttMs = ref<number | null>(null);
+const rttVarMs = ref<number | null>(null);
+const underruns = ref(0);
+const dropped = ref(0);
+const bufferHealth = ref(0);
+const bufferMs = ref(0);
 ```
 
 Replace the `quality-event` listener body with:
 
 ```ts
-    await listen("quality-event", (event: { payload: QualityEvent }) => {
-      const q = event.payload;
-      qualityScore.value = q.score;
-      rttMs.value = q.rtt_ms;
-      rttVarMs.value = q.rtt_var_ms;
-      underruns.value = q.underruns;
-      dropped.value = q.dropped;
-      bufferHealth.value = q.buffer_health;
+await listen("quality-event", (event: { payload: QualityEvent }) => {
+  const q = event.payload;
+  qualityScore.value = q.score;
+  rttMs.value = q.rtt_ms;
+  rttVarMs.value = q.rtt_var_ms;
+  underruns.value = q.underruns;
+  dropped.value = q.dropped;
+  bufferHealth.value = q.buffer_health;
 
-      if (q.score < 50 && !qualityWarningShown) {
-        addToast(`Network quality degraded to ${q.score}`, "warning");
-        qualityWarningShown = true;
-      } else if (q.score >= 70 && qualityWarningShown) {
-        addToast(`Network quality recovered to ${q.score}`, "success");
-        qualityWarningShown = false;
-      }
-    });
+  if (q.score < 50 && !qualityWarningShown) {
+    addToast(`Network quality degraded to ${q.score}`, "warning");
+    qualityWarningShown = true;
+  } else if (q.score >= 70 && qualityWarningShown) {
+    addToast(`Network quality recovered to ${q.score}`, "success");
+    qualityWarningShown = false;
+  }
+});
 ```
 
 Add `import type { QualityEvent } from "../types/events";` to the existing type import line, and update the store's `return { ... }` to export `rttMs, rttVarMs, underruns, dropped` and drop `jitter, avgLatency, errorCount`.
@@ -695,6 +704,7 @@ Expected: FAIL only in `src/components/StatsBar.vue` (uses `jitter`). Fixed in T
 ### Task 4.3: Update the stats bar labels
 
 **Files:**
+
 - Modify: `src/components/StatsBar.vue`
 
 - [ ] **Step 1: Replace the Jitter/Buffer stats with honest ones**
@@ -713,7 +723,11 @@ const stats = computed(() => [
     dotColor: stream.qualityLabel.color,
     style: undefined,
   },
-  { label: "RTT", value: stream.rttMs === null ? "n/a" : stream.rttMs.toFixed(1) + " ms", style: undefined },
+  {
+    label: "RTT",
+    value: stream.rttMs === null ? "n/a" : stream.rttMs.toFixed(1) + " ms",
+    style: undefined,
+  },
   { label: "Underruns", value: String(stream.underruns), style: undefined },
 ]);
 ```
@@ -726,6 +740,7 @@ Expected: typecheck clean; tests need the update in Task 4.4; lint clean.
 ### Task 4.4: Update store tests
 
 **Files:**
+
 - Modify: `src/stores/__tests__/stream.test.ts`
 
 - [ ] **Step 1: Update any assertions referencing removed fields**
@@ -733,7 +748,14 @@ Expected: typecheck clean; tests need the update in Task 4.4; lint clean.
 Open `src/stores/__tests__/stream.test.ts`. Replace assertions on `jitter`/`avgLatency`/`errorCount` with `rttMs`/`underruns`/`dropped`. If a test simulates a `quality-event`, update its payload to the new shape:
 
 ```ts
-const payload = { score: 95, rtt_ms: 4.2, rtt_var_ms: 1.1, underruns: 0, dropped: 0, buffer_health: 0.9 };
+const payload = {
+  score: 95,
+  rtt_ms: 4.2,
+  rtt_var_ms: 1.1,
+  underruns: 0,
+  dropped: 0,
+  buffer_health: 0.9,
+};
 ```
 
 - [ ] **Step 2: Run the tests**
@@ -757,16 +779,19 @@ git commit -m "feat(ui): surface honest RTT/underruns/dropped metrics"
 - [ ] **Step 1: Complete check suite**
 
 Run:
+
 ```bash
 npm test && npm run typecheck && npm run lint && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: all green; Rust test count up by ~14 (controller 4, scoring 5, rtt 1, plus Part A).
 
 - [ ] **Step 2: Manual behavioural verification**
 
 Run: `npm run tauri dev`, then with Adaptive Buffer enabled stream to Snapcast and:
+
 1. Confirm the Stats bar shows a real **RTT** (or "n/a" on an unsupported platform) and **Underruns** that stay at 0 on a healthy LAN.
 2. Induce jitter (e.g. `sudo tc qdisc add dev <iface> root netem delay 80ms 40ms` on Linux, or stream over congested WiFi). Confirm: underruns appear, the log shows "Adaptive Buffer: target now …ms" rising, and after the network calms the target steps back down.
 3. Confirm `dropped` increments only under real overrun (producer outpacing a stalled socket), not during normal operation.

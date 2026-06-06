@@ -3,10 +3,10 @@ pre-commit:
   commands:
     prettier:
       glob: "*.{js,ts,vue,css,json,md}"
-      run: npx prettier --check {staged_files}
+      run: pnpm exec prettier --check {staged_files}
     eslint:
       glob: "*.{js,ts,vue}"
-      run: npx eslint {staged_files}
+      run: pnpm exec eslint {staged_files}
     cargo-fmt:
       glob: "*.rs"
       run: cargo fmt --check
@@ -19,4 +19,4 @@ pre-commit:
 commit-msg:
   commands:
     commitlint:
-      run: echo "Commit message: {1}"
+      run: 'echo "Commit message: {1}"'

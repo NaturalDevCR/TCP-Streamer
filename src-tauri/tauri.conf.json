@@ -4,8 +4,8 @@
   "version": "2.0.6",
   "identifier": "com.jdavidoa91.tcp-streamer",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

@@ -26,3 +26,7 @@ dist-ssr
 # Build artifacts / OS cruft
 /tcp-streamer
 **/.DS_Store
+
+# This project uses pnpm; do not track npm/yarn lockfiles
+package-lock.json
+yarn.lock

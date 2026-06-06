@@ -28,12 +28,12 @@ objetivo se descompone en fases:
 Hay una migración JS→TS + tooling (eslint/prettier/lefthook/vitest/tsconfig) + split inicial del
 Rust **sin commitear** (~3570 inserciones). Se validó y está **verde**:
 
-| Check | Resultado |
-|---|---|
-| Vitest (frontend) | 17/17 ✅ |
-| vue-tsc (typecheck) | limpio ✅ |
-| ESLint | sin errores ✅ |
-| `cargo test` | compila, 10/10 ✅ |
+| Check               | Resultado         |
+| ------------------- | ----------------- |
+| Vitest (frontend)   | 17/17 ✅          |
+| vue-tsc (typecheck) | limpio ✅         |
+| ESLint              | sin errores ✅    |
+| `cargo test`        | compila, 10/10 ✅ |
 
 ### Hallazgos de la auditoría que esta fase resuelve
 
@@ -86,7 +86,7 @@ Rust **sin commitear** (~3570 inserciones). Se validó y está **verde**:
 ### 3.2 Diferido explícitamente
 
 - **Fase 2:** TLS/cifrado, autenticación/allowlist para server, multi-cliente (fan-out),
-  IPv6/hostnames/DNS, `trait Transport` *implementado* para nuevos transportes.
+  IPv6/hostnames/DNS, `trait Transport` _implementado_ para nuevos transportes.
 - **Fase 3:** rediseño UI/UX, reestructura de tabs/IA, theming claro/oscuro, densidad, i18n.
 
 ### 3.3 Limitaciones conocidas
@@ -172,8 +172,8 @@ añaden nuevos transportes hasta Fase 2.
 - **Score de calidad** = función pura de (underruns, overruns, ocupación vs target, RTT). Reemplaza
   el score basado en tiempo de `write()`.
 - **Eventos al frontend** se renombran: el `QualityEvent` pasa de `{score, jitter, avg_latency,
-  buffer_health, error_count}` a `{score, rtt_ms (Option), rtt_var_ms (Option), underruns, dropped,
-  buffer_health}`. Se actualizan los tipos en `src/types/events.ts` y el store.
+buffer_health, error_count}` a `{score, rtt_ms (Option), rtt_var_ms (Option), underruns, dropped,
+buffer_health}`. Se actualizan los tipos en `src/types/events.ts` y el store.
 
 ### 5.5 DSCP arreglado (`transport/dscp.rs`)
 

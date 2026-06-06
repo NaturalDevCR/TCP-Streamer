@@ -159,10 +159,8 @@ export const useSettingsStore = defineStore("settings", () => {
     const store = await getStore();
     await loadProfiles();
 
-    const profileName =
-      ((await store.get("current_profile")) as string) || "Default";
-    const allProfiles =
-      ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
+    const profileName = ((await store.get("current_profile")) as string) || "Default";
+    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
     const s: SettingsDict = allProfiles[profileName] || {};
 
     currentProfile.value = profileName;
@@ -171,18 +169,14 @@ export const useSettingsStore = defineStore("settings", () => {
     if (s.port) port.value = s.port as number;
     if (s.sample_rate) sampleRate.value = s.sample_rate as number;
     if (s.buffer_size) bufferSize.value = s.buffer_size as number;
-    if (s.ring_buffer_duration)
-      ringBufferDuration.value = s.ring_buffer_duration as number;
+    if (s.ring_buffer_duration) ringBufferDuration.value = s.ring_buffer_duration as number;
     if (s.format) format.value = s.format as string;
     if (s.auto_stream !== undefined) autoStream.value = s.auto_stream as boolean;
-    if (s.auto_reconnect !== undefined)
-      autoReconnect.value = s.auto_reconnect as boolean;
-    if (s.high_priority !== undefined)
-      highPriority.value = s.high_priority as boolean;
+    if (s.auto_reconnect !== undefined) autoReconnect.value = s.auto_reconnect as boolean;
+    if (s.high_priority !== undefined) highPriority.value = s.high_priority as boolean;
     if (s.dscp_strategy) dscpStrategy.value = s.dscp_strategy as string;
     if (s.chunk_size) chunkSize.value = s.chunk_size as number;
-    if (s.adaptive_buffer !== undefined)
-      adaptiveBuffer.value = s.adaptive_buffer as boolean;
+    if (s.adaptive_buffer !== undefined) adaptiveBuffer.value = s.adaptive_buffer as boolean;
     if (s.min_buffer) minBuffer.value = s.min_buffer as number;
     if (s.max_buffer) maxBuffer.value = s.max_buffer as number;
     if (s.network_preset) networkPreset.value = s.network_preset as string;
@@ -190,8 +184,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
     // Load loopback mode
     const savedLoopback = (await store.get("loopback_mode")) as boolean | null;
-    if (savedLoopback !== null && savedLoopback !== undefined)
-      loopbackMode.value = savedLoopback;
+    if (savedLoopback !== null && savedLoopback !== undefined) loopbackMode.value = savedLoopback;
   }
 
   async function saveSettings() {
@@ -219,8 +212,7 @@ export const useSettingsStore = defineStore("settings", () => {
       mode: mode.value,
     };
 
-    const allProfiles =
-      ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
+    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
     allProfiles[profileName] = settings;
 
     await store.set("profiles", allProfiles ?? {});
@@ -242,8 +234,7 @@ export const useSettingsStore = defineStore("settings", () => {
     } else {
       profiles.value = p;
     }
-    currentProfile.value =
-      ((await store.get("current_profile")) as string) || "Default";
+    currentProfile.value = ((await store.get("current_profile")) as string) || "Default";
   }
 
   async function switchProfile(name: string) {
@@ -257,8 +248,7 @@ export const useSettingsStore = defineStore("settings", () => {
   async function createProfile(name: string) {
     if (!name || profiles.value[name]) return false;
     const store = await getStore();
-    const allProfiles =
-      ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
+    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
     allProfiles[name] = allProfiles[currentProfile.value] || {};
     await store.set("profiles", allProfiles);
     await store.set("current_profile", name);
@@ -271,8 +261,7 @@ export const useSettingsStore = defineStore("settings", () => {
   async function deleteProfile(name: string) {
     if (name === "Default") return false;
     const store = await getStore();
-    const allProfiles =
-      ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
+    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
     delete allProfiles[name];
     await store.set("profiles", allProfiles);
     await store.set("current_profile", "Default");

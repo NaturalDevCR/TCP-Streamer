@@ -50,8 +50,7 @@ export const useStreamStore = defineStore("stream", () => {
     const hrs = Math.floor(s / 3600);
     const mins = Math.floor((s % 3600) / 60);
     const secs = s % 60;
-    if (hrs > 0)
-      return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    if (hrs > 0) return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
     return `${mins}:${String(secs).padStart(2, "0")}`;
   });
 
@@ -171,12 +170,17 @@ export const useStreamStore = defineStore("stream", () => {
       }
     });
 
-    await listen("stats-event", (event: { payload: { uptime_seconds: number; bytes_sent: number; bitrate_kbps: number } }) => {
-      const s = event.payload;
-      uptimeSeconds.value = s.uptime_seconds;
-      bytesSent.value = s.bytes_sent;
-      bitrateKbps.value = s.bitrate_kbps;
-    });
+    await listen(
+      "stats-event",
+      (event: {
+        payload: { uptime_seconds: number; bytes_sent: number; bitrate_kbps: number };
+      }) => {
+        const s = event.payload;
+        uptimeSeconds.value = s.uptime_seconds;
+        bytesSent.value = s.bytes_sent;
+        bitrateKbps.value = s.bitrate_kbps;
+      },
+    );
 
     await listen("quality-event", (event: { payload: QualityEvent }) => {
       const q = event.payload;

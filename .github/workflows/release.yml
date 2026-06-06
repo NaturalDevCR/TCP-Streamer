@@ -11,19 +11,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "lts/*"
+          cache: "pnpm"
 
       - name: Install Frontend Dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Run ESLint
-        run: npm run lint
+        run: pnpm lint
 
       - name: Run Frontend Tests
-        run: npm test
+        run: pnpm test
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -64,14 +68,17 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Sync node version and setup cache
         uses: actions/setup-node@v5
         with:
           node-version: "lts/*"
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0

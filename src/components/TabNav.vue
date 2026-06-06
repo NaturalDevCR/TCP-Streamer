@@ -32,13 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import {
-  IconConnection,
-  IconAudio,
-  IconSettings,
-  IconAdvanced,
-  IconLogs,
-} from "./icons";
+import { IconConnection, IconAudio, IconSettings, IconAdvanced, IconLogs } from "./icons";
 
 defineProps({ modelValue: String });
 defineEmits(["update:modelValue"]);

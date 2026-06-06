@@ -4,9 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const packageJson = JSON.parse(
-  readFileSync(resolve(__dirname, "package.json"), "utf-8")
-);
+const packageJson = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf-8"));
 
 const host = process.env.TAURI_DEV_HOST;
 

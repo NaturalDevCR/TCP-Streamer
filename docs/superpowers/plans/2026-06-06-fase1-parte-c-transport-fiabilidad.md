@@ -11,21 +11,21 @@
 **Spec:** `docs/superpowers/specs/2026-06-05-fase1-estabilizacion-design.md` §5.6, §5.7, §4.
 **Depends on:** Parts A and B complete.
 
-> **FILE LOCATION — read first:** The orchestrator `start_audio_stream`, the network thread, and the send loop live in **`src-tauri/src/audio/manager.rs`** (~1012 lines), which imports the `StreamSocket` enum from the 7-line `stream.rs`. In M2–M4, "edit the server accept block / client branch / send loop" means **`manager.rs`**. In M5 the orchestrator function is *moved out of* `manager.rs` into `engine/mod.rs`, and the `stream.rs` enum file is deleted. Anchor edits by the quoted code/comment — line numbers shifted in A and B.
+> **FILE LOCATION — read first:** The orchestrator `start_audio_stream`, the network thread, and the send loop live in **`src-tauri/src/audio/manager.rs`** (~1012 lines), which imports the `StreamSocket` enum from the 7-line `stream.rs`. In M2–M4, "edit the server accept block / client branch / send loop" means **`manager.rs`**. In M5 the orchestrator function is _moved out of_ `manager.rs` into `engine/mod.rs`, and the `stream.rs` enum file is deleted. Anchor edits by the quoted code/comment — line numbers shifted in A and B.
 
 ---
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/src/audio/transport/mod.rs` | `Connection` trait + `pub mod tcp_client/tcp_server` | Modify |
-| `src-tauri/src/audio/transport/tcp_client.rs` | client connect + socket options (keepalive, nodelay, DSCP) | Create |
-| `src-tauri/src/audio/transport/tcp_server.rs` | listener, **(pure)** HTTP helpers, non-blocking handshake | Create |
-| `src-tauri/src/audio/engine/mod.rs` | `pub fn run(...)` orchestrator (was `start_audio_stream`) | Modify |
-| `src-tauri/src/audio/stream.rs` | only the `StreamSocket` enum; **deleted** once the `Connection` trait replaces it | Delete |
-| `src-tauri/src/audio/manager.rs` | **hosts the orchestrator + send loop**; receives the M2–M4 edits (handshake, client connect, reconnection); orchestrator then moves to `engine::run` | Modify |
-| `src-tauri/src/audio/mod.rs` | drop `pub mod stream;` | Modify |
+| File                                          | Responsibility                                                                                                                                       | Status |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `src-tauri/src/audio/transport/mod.rs`        | `Connection` trait + `pub mod tcp_client/tcp_server`                                                                                                 | Modify |
+| `src-tauri/src/audio/transport/tcp_client.rs` | client connect + socket options (keepalive, nodelay, DSCP)                                                                                           | Create |
+| `src-tauri/src/audio/transport/tcp_server.rs` | listener, **(pure)** HTTP helpers, non-blocking handshake                                                                                            | Create |
+| `src-tauri/src/audio/engine/mod.rs`           | `pub fn run(...)` orchestrator (was `start_audio_stream`)                                                                                            | Modify |
+| `src-tauri/src/audio/stream.rs`               | only the `StreamSocket` enum; **deleted** once the `Connection` trait replaces it                                                                    | Delete |
+| `src-tauri/src/audio/manager.rs`              | **hosts the orchestrator + send loop**; receives the M2–M4 edits (handshake, client connect, reconnection); orchestrator then moves to `engine::run` | Modify |
+| `src-tauri/src/audio/mod.rs`                  | drop `pub mod stream;`                                                                                                                               | Modify |
 
 ---
 
@@ -34,6 +34,7 @@
 ### Task 1.1: Define the transport abstraction
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/transport/mod.rs`
 
 - [ ] **Step 1: Add the trait and a TCP implementation**
@@ -124,6 +125,7 @@ git commit -m "feat(transport): add Connection trait with TCP implementation"
 ### Task 2.1: Pure HTTP helpers (TDD)
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/transport/tcp_server.rs`
 
 - [ ] **Step 1: Write the helpers + tests**
@@ -194,6 +196,7 @@ git commit -m "feat(transport): tested HTTP detection + header helpers"
 ### Task 2.2: Replace the blocking handshake in the accept path
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/manager.rs` (the server accept block; relocated in M5)
 
 - [ ] **Step 1: Swap the 1.5 s read-timeout handshake for a bounded non-blocking one**
@@ -274,6 +277,7 @@ git commit -m "fix(transport): bounded non-blocking HTTP handshake (removes 1.5s
 ### Task 3.1: Move client socket setup into a function
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/transport/tcp_client.rs`
 - Modify: `src-tauri/src/audio/manager.rs`
 
@@ -355,6 +359,7 @@ git commit -m "refactor(transport): extract client connect with socket options"
 ### Task 4.1: Thread `auto_reconnect` into the engine and honor it
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/manager.rs`
 - Modify: `src-tauri/src/audio/manager.rs`
 
@@ -390,11 +395,13 @@ git commit -m "feat(audio): single reconnection policy honoring auto_reconnect (
 ### Task 4.2: Remove the manager's redundant reconnection
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/manager.rs`
 
 - [ ] **Step 1: Delete the manager-level reconnect machinery**
 
 In `manager.rs`'s `AudioState::new` thread loop, remove:
+
 - the `should_reconnect` `AtomicBool` and all its `store`/`load` uses,
 - the `current_params: Option<StreamParams>` binding and the `StreamParams` struct,
 - the entire reconnection block (`if should_reconnect.load(...) && current_stream_handle.is_none() { ... attempt reconnect ... } else if ... { thread::sleep(200ms) }`).
@@ -409,6 +416,7 @@ Expected: compiles (no unused `StreamParams`/`should_reconnect` warnings); all t
 - [ ] **Step 3: Manual check — auto-reconnect both ways**
 
 Run `npm run tauri dev`; client mode against a Snapserver:
+
 - With **Auto-Reconnect ON**: kill the server → logs show retry/backoff → restart server → reconnects.
 - With **Auto-Reconnect OFF**: kill the server → stream stops cleanly (one "stopping" log), no retry storm.
 
@@ -430,6 +438,7 @@ git commit -m "refactor(audio): remove redundant manager-level reconnection"
 ### Task 5.1: Route the send loop through the `Connection` trait
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/manager.rs`
 
 - [ ] **Step 1: Replace `StreamSocket` with `Box<dyn Connection>`**
@@ -457,6 +466,7 @@ git commit -m "refactor(engine): send loop writes through Connection trait"
 ### Task 5.2: Move the orchestrator to `engine/mod.rs` and delete `stream.rs`
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/engine/mod.rs`
 - Delete: `src-tauri/src/audio/stream.rs`
 - Modify: `src-tauri/src/audio/mod.rs`
@@ -475,10 +485,12 @@ Move `start_audio_stream` (and any remaining private helpers it still uses, e.g.
 - [ ] **Step 3: Verify compile + full suite**
 
 Run:
+
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: compiles clean; all tests pass; clippy clean. No reference to `stream.rs` remains (`grep -rn "audio::stream\|mod stream" src-tauri/src` → empty).
 
 - [ ] **Step 4: Commit**
@@ -497,16 +509,19 @@ git commit -m "refactor(engine): move orchestrator from manager.rs to engine::ru
 - [ ] **Step 1: Complete check suite**
 
 Run:
+
 ```bash
 npm test && npm run typecheck && npm run lint && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: all green (Rust tests up by ~3 for the server helpers).
 
 - [ ] **Step 2: Behavioural verification**
 
 Run `npm run tauri dev` and confirm, with no regressions vs Part B:
+
 1. **HTTP handshake:** open `http://<LAN_IP>:<port>/stream.wav` in a browser — audio starts within ~tens of ms (no multi-second pause); a raw-PCM client (Snapserver `mode=client`) still gets raw PCM.
 2. **Reconnection:** client mode, toggle Auto-Reconnect both ways and kill/restart the server (as in Task 4.2 Step 3) — one mechanism, correct behavior.
 3. **DSCP/RTT/adaptive** (from A/B) still work.

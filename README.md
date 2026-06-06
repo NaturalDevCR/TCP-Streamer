@@ -137,6 +137,7 @@ Download the latest release for your platform:
 #### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18 or later)
+- [pnpm](https://pnpm.io/) (v9 or later) — `npm i -g pnpm` or `corepack enable`
 - [Rust](https://www.rust-lang.org/) (latest stable)
 - **macOS**: Xcode Command Line Tools
 - **Windows**: Microsoft Visual Studio C++ Build Tools
@@ -149,13 +150,13 @@ git clone https://github.com/NaturalDevCR/TCP-Streamer.git
 cd TCP-Streamer
 
 # Install dependencies
-npm install
+pnpm install
 
 # Run in development mode
-npm run tauri dev
+pnpm tauri dev
 
 # Build for production
-npm run tauri build
+pnpm tauri build
 ```
 
 ---

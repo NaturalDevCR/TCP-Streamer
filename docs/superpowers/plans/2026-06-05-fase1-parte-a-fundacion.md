@@ -18,20 +18,20 @@
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/src/audio/transport/mod.rs` | Declares the transport submodules | Create |
-| `src-tauri/src/audio/transport/dscp.rs` | **(pure)** DSCP strategy → IP TOS byte | Create |
-| `src-tauri/src/audio/engine/mod.rs` | Declares the engine submodules | Create |
-| `src-tauri/src/audio/engine/device.rs` | **(pure)** config ranking/selection over candidate descriptors | Create |
-| `src-tauri/src/audio/engine/encoder.rs` | **(pure)** f32 → PCM i16 LE encoding | Create |
-| `src-tauri/src/audio/engine/capture.rs` | RT-safe cpal stream builder + buffer-size negotiation | Create |
-| `src-tauri/src/audio/mod.rs` | Wire new modules (`pub mod engine; pub mod transport;`) | Modify |
-| `src-tauri/src/audio/stream.rs` | Call into new modules; remove `Arc<Mutex>`; apply DSCP in client+server | Modify |
-| `src-tauri/src/audio/stats.rs` | Add `overruns` counter to `StreamStats` | Modify |
-| `src/components/tabs/AdvancedTab.vue` | Confirm DSCP option values match backend keys | Modify (verify) |
-| `src/stores/__tests__/settings.test.ts` | Lock the DSCP key contract | Modify |
-| `.gitignore` | Ignore build artifact + `.DS_Store` | Modify |
+| File                                    | Responsibility                                                          | Status          |
+| --------------------------------------- | ----------------------------------------------------------------------- | --------------- |
+| `src-tauri/src/audio/transport/mod.rs`  | Declares the transport submodules                                       | Create          |
+| `src-tauri/src/audio/transport/dscp.rs` | **(pure)** DSCP strategy → IP TOS byte                                  | Create          |
+| `src-tauri/src/audio/engine/mod.rs`     | Declares the engine submodules                                          | Create          |
+| `src-tauri/src/audio/engine/device.rs`  | **(pure)** config ranking/selection over candidate descriptors          | Create          |
+| `src-tauri/src/audio/engine/encoder.rs` | **(pure)** f32 → PCM i16 LE encoding                                    | Create          |
+| `src-tauri/src/audio/engine/capture.rs` | RT-safe cpal stream builder + buffer-size negotiation                   | Create          |
+| `src-tauri/src/audio/mod.rs`            | Wire new modules (`pub mod engine; pub mod transport;`)                 | Modify          |
+| `src-tauri/src/audio/stream.rs`         | Call into new modules; remove `Arc<Mutex>`; apply DSCP in client+server | Modify          |
+| `src-tauri/src/audio/stats.rs`          | Add `overruns` counter to `StreamStats`                                 | Modify          |
+| `src/components/tabs/AdvancedTab.vue`   | Confirm DSCP option values match backend keys                           | Modify (verify) |
+| `src/stores/__tests__/settings.test.ts` | Lock the DSCP key contract                                              | Modify          |
+| `.gitignore`                            | Ignore build artifact + `.DS_Store`                                     | Modify          |
 
 ---
 
@@ -40,6 +40,7 @@
 ### Task 0.1: Untrack build artifacts and update .gitignore
 
 **Files:**
+
 - Modify: `.gitignore`
 
 - [ ] **Step 1: Inspect whether the 10 MB binary and .DS_Store are tracked**
@@ -61,11 +62,13 @@ Add these lines to `.gitignore` (append; do not remove existing entries):
 - [ ] **Step 3: Untrack any artifacts that were tracked**
 
 Run (each is a no-op if the file was not tracked):
+
 ```bash
 git rm --cached --ignore-unmatch tcp-streamer
 git rm --cached --ignore-unmatch .DS_Store
 git ls-files | grep -E '(^|/)tcp-streamer$|\.DS_Store$' || echo "clean"
 ```
+
 Expected: final line prints `clean`.
 
 - [ ] **Step 4: Commit**
@@ -82,9 +85,11 @@ git commit -m "chore: stop tracking build artifact and .DS_Store"
 - [ ] **Step 1: Re-verify the baseline is green**
 
 Run:
+
 ```bash
 npm test && npm run typecheck && npm run lint && cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
 Expected: Vitest 17 passed; vue-tsc no output; eslint no output; `cargo test` `test result: ok. 10 passed`.
 
 - [ ] **Step 2: Stage everything except ignored artifacts**
@@ -115,6 +120,7 @@ Expected: empty (no output).
 ### Task 1.1: Create the `transport` module skeleton
 
 **Files:**
+
 - Create: `src-tauri/src/audio/transport/mod.rs`
 - Modify: `src-tauri/src/audio/mod.rs`
 
@@ -148,6 +154,7 @@ pub mod wav_helper;
 - [ ] **Step 3: Add the engine placeholder so the crate compiles**
 
 Create `src-tauri/src/audio/engine/mod.rs`:
+
 ```rust
 // Engine submodules are added in later tasks.
 ```
@@ -167,6 +174,7 @@ git commit -m "chore(audio): scaffold engine and transport modules"
 ### Task 1.2: DSCP pure mapping (TDD)
 
 **Files:**
+
 - Create: `src-tauri/src/audio/transport/dscp.rs`
 
 - [ ] **Step 1: Write the failing tests + function stub**
@@ -239,6 +247,7 @@ git commit -m "feat(transport): add tested DSCP->TOS mapping"
 ### Task 1.3: Apply DSCP in client AND server via the shared mapping
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/stream.rs`
 
 - [ ] **Step 1: Replace the inline client-side TOS match**
@@ -279,9 +288,9 @@ In the server-mode accept block, right after `let _ = stream.set_nodelay(true);`
 
 > CORRECTION — do not use `format_clone`. The DSCP strategy must be threaded into the network thread. The strategy string `dscp_strategy` is currently moved into the client branch only. Make it available to both branches:
 
-  1. Near the top of the network-thread closure (where `ip_clone`, `format_clone` are cloned, around lines 414-419), add: `let dscp_clone = dscp_strategy.clone();`
-  2. In the client branch, use `dscp_clone` instead of `dscp_strategy`.
-  3. In the server branch, after `set_nodelay`, add:
+1. Near the top of the network-thread closure (where `ip_clone`, `format_clone` are cloned, around lines 414-419), add: `let dscp_clone = dscp_strategy.clone();`
+2. In the client branch, use `dscp_clone` instead of `dscp_strategy`.
+3. In the server branch, after `set_nodelay`, add:
 
 ```rust
                                 // Apply DSCP/QoS to the accepted client connection (parity with client mode).
@@ -311,6 +320,7 @@ git commit -m "fix(audio): apply correct DSCP/TOS in client and server via share
 ### Task 1.4: Lock the DSCP key contract on the frontend
 
 **Files:**
+
 - Modify: `src/components/tabs/AdvancedTab.vue` (verify only)
 - Modify: `src/stores/__tests__/settings.test.ts`
 
@@ -352,12 +362,14 @@ git commit -m "test(settings): lock DSCP strategy key contract"
 ### Task 2.1: Define the engine module and pure config-ranking
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/engine/mod.rs`
 - Create: `src-tauri/src/audio/engine/device.rs`
 
 - [ ] **Step 1: Replace the engine placeholder**
 
 Overwrite `src-tauri/src/audio/engine/mod.rs`:
+
 ```rust
 //! Audio engine: device selection, capture, and (later) buffering.
 
@@ -466,6 +478,7 @@ git commit -m "feat(engine): add tested pure audio-config selection"
 ### Task 2.2: Use `pick_best` from `stream.rs`
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/stream.rs`
 
 - [ ] **Step 1: Map cpal configs to candidates and call `pick_best`**
@@ -547,12 +560,14 @@ git commit -m "refactor(audio): select capture config via tested engine::device:
 ### Task 3.1: Pure f32 → PCM i16 LE encoder (TDD)
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/engine/mod.rs`
 - Create: `src-tauri/src/audio/engine/encoder.rs`
 
 - [ ] **Step 1: Declare the module**
 
 In `src-tauri/src/audio/engine/mod.rs` add:
+
 ```rust
 pub mod encoder;
 ```
@@ -629,6 +644,7 @@ git commit -m "feat(engine): add tested f32->PCM i16 LE encoder"
 ### Task 3.2: Use the encoder in the send path
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/stream.rs`
 
 - [ ] **Step 1: Replace the inline conversion**
@@ -680,6 +696,7 @@ git commit -m "refactor(audio): encode PCM via tested encoder with a reused buff
 ### Task 4.1: Add an `overruns` counter to `StreamStats`
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/stats.rs`
 
 - [ ] **Step 1: Add the field**
@@ -709,6 +726,7 @@ Expected: FAIL — `missing field 'overruns' in initializer of StreamStats` at `
 ### Task 4.2: RT-safe capture builder
 
 **Files:**
+
 - Create: `src-tauri/src/audio/engine/capture.rs`
 - Modify: `src-tauri/src/audio/engine/mod.rs`
 - Modify: `src-tauri/src/audio/stream.rs`
@@ -716,6 +734,7 @@ Expected: FAIL — `missing field 'overruns' in initializer of StreamStats` at `
 - [ ] **Step 1: Declare the module**
 
 In `src-tauri/src/audio/engine/mod.rs` add:
+
 ```rust
 pub mod capture;
 ```
@@ -858,6 +877,7 @@ git commit -m "fix(audio): real-time-safe capture (no mutex/alloc in callback) +
 ### Task 5.1: Pure buffer-size negotiation (TDD)
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/engine/capture.rs`
 
 - [ ] **Step 1: Add the negotiation function + tests to `capture.rs`**
@@ -937,6 +957,7 @@ git commit -m "feat(engine): add tested cpal buffer-size negotiation"
 ### Task 5.2: Thread `buffer_size` through and apply it
 
 **Files:**
+
 - Modify: `src-tauri/src/audio/commands.rs`
 - Modify: `src-tauri/src/audio/manager.rs`
 - Modify: `src-tauri/src/audio/stream.rs`
@@ -948,6 +969,7 @@ In `src-tauri/src/audio/commands.rs`, remove the discard (line 42 `let _ = buffe
 - [ ] **Step 2: Add `buffer_size` to `AudioCommand::Start` and `StreamParams`**
 
 In `src-tauri/src/audio/manager.rs`:
+
 - Add `buffer_size: u32,` to the `AudioCommand::Start { ... }` variant (near line 24).
 - Add `buffer_size: u32,` to `struct StreamParams` (near line 47).
 - In the `Start` match arm, destructure `buffer_size,` and include it when building `StreamParams` and when calling `start_audio_stream(...)`.
@@ -999,6 +1021,7 @@ git commit -m "fix(audio): make Buffer Size control actually set the cpal buffer
 ### Task 6.1: Clarify buffer-related labels (minimal, no redesign)
 
 **Files:**
+
 - Modify: `src/components/tabs/AudioTab.vue`
 
 - [ ] **Step 1: Relabel "Buffer Size" to reflect that it is the hardware capture buffer**
@@ -1022,17 +1045,20 @@ git commit -m "ui(audio): clarify capture-buffer vs jitter-buffer labels"
 - [ ] **Step 1: Run the complete check suite**
 
 Run:
+
 ```bash
 npm test && npm run typecheck && npm run lint && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: vitest green; vue-tsc clean; eslint clean; `cargo test` ~30 tests pass; clippy clean.
 
 - [ ] **Step 2: Manual smoke test (client + server)**
 
 Run: `npm run tauri dev`
 Then verify:
+
 1. Devices load; pick an input device.
 2. Server mode: Start Listening; from another machine/VLC open `http://<LAN_IP>:<port>/stream.wav` → audio plays; logs show "Capture buffer: requested ... -> Fixed(...)" (or a Default fallback with a clear reason).
 3. Client mode against a Snapserver TCP source: Start Streaming → "Connected"; audio reaches Snapcast.

@@ -16,10 +16,7 @@
         <option v-for="d in settings.devices" :key="d" :value="d">{{ d }}</option>
       </SelectField>
 
-      <p
-        v-if="settings.devicesError"
-        class="text-xs text-red-400 mt-1 ml-0.5"
-      >
+      <p v-if="settings.devicesError" class="text-xs text-red-400 mt-1 ml-0.5">
         {{ settings.devicesError }}
       </p>
 

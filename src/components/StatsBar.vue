@@ -37,7 +37,11 @@ const stats = computed(() => [
     dotColor: stream.qualityLabel.color,
     style: undefined,
   },
-  { label: "RTT", value: stream.rttMs === null ? "n/a" : stream.rttMs.toFixed(1) + " ms", style: undefined },
+  {
+    label: "RTT",
+    value: stream.rttMs === null ? "n/a" : stream.rttMs.toFixed(1) + " ms",
+    style: undefined,
+  },
   { label: "Underruns", value: String(stream.underruns), style: undefined },
 ]);
 </script>

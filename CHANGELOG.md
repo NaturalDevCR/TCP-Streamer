@@ -5,39 +5,55 @@ All notable changes to TCP Streamer are documented in this file.
 ---
 
 ## [2.0.6] - 2026-03-15
+
 ### Fixed
+
 - **Settings Store Error**: Fixed store values (e.g., `loopbackMode`) resolving to `undefined` during `store.set` which triggered a "missing required key value" crash on startup.
 
 ## [2.0.5] - 2026-03-14
+
 ### Added
+
 - **Dynamic Window Resize:** The application now auto-detects the host screen's resolution at launch and bounds its initial height dynamically (`1000px` max, subtracting a `150px` margin to guarantee the window never sinks behind OS taskbars on smaller laptops).
+
 ### Fixed
+
 - **UI Header Scroll:** Extracted the Top Header, Status Bar, and Tab Navigation out of the scrollable region. They are now permanently pinned to the absolute top of the window.
 
 ## [2.0.4] - 2026-03-14
+
 ### Fixed
+
 - **UI Overlap & Scrolling:** Refactored `App.vue` layout. The main viewport and the bottom Action Bar are now strictly separated via Flexbox (`flex-1` vs `shrink-0`), guaranteeing the footer no longer floats behind the `Start Streaming` button and the scrollbar correctly reaches the end of the content.
 
 ## [2.0.3] - 2026-03-14
+
 ### Fixed
+
 - **UI Scrolling:** Fixed an issue where changing the root container to `h-full` inadvertently disabled the scrollbar and clipped the bottom of long tabs. Restored `h-screen` bounding box.
 - **Native Decorations:** Enforced `"transparent": false` in Tauri config to guarantee GNOME/Wayland compositor renders native control buttons.
 - **Jitter Formula:** Replaced CPU interval deviation with TCP transmit standard deviation, correctly showing 0.0ms-0.2ms jitter for stable LAN connections instead of deceivingly reporting driver buffer slice size (16.7ms).
 
 ## [2.0.2] - 2026-03-14
+
 ### Fixed
+
 - **Linux WebKitGTK Decorations:** Removed programmatic `set_decorations(false)` override that stripped the native window controls on GNOME/Wayland.
 - **Jitter Formula:** Replaced CPU interval deviation with TCP transmit standard deviation, correctly showing 0.0ms-0.2ms jitter for stable LAN connections instead of deceivingly reporting driver buffer slice size (16.7ms).
 
 ## [2.0.1] - 2026-03-14
+
 ### Bug Fixes
+
 - **Audio Stuttering (Underflow)**: Replaced strict CPU clock-based pacing with hardware-driven ring buffer pacing in the network thread. Eliminates artificial underflows and stuttering when the CPU and audio hardware are out of sync.
 - **Audio Resampling**: Removed forced 44.1kHz downsampling. The app now relies on native OS audio stack implicit resampling (PipeWire, PulseAudio, CoreAudio, WASAPI), preserving the user's requested sample rate (e.g. 48kHz for Snapcast) without chipmunk effects.
 - **Linux Window Overlap**: Removed the custom Vue titlebar that was overlapping with native DE window decorations on Linux. The app now properly bounds within native windows.
 - **Window Size**: Reduced default Linux window height from 1000px to 750px to better fit standard laptop screens.
 
 ## [2.0.0] - 2026-03-14
+
 ### Added
+
 - **Complete UI Redesign**: Migrated from Vanilla JS to Vue 3, Pinia, and Tailwind CSS 4.
 - **Modern Interface**: New dark glassmorphism theme with premium components, layout, and animations.
 - **Enhanced UI Smoothness**: Added native View Transitions API for seamless tab switching, and refined cubic-bezier physics for all inputs, checkboxes, and buttons.
@@ -45,19 +61,24 @@ All notable changes to TCP Streamer are documented in this file.
 - **Tabbed Layout**: Organized settings into Connection, Audio, Settings, Advanced, and Logs tabs.
 
 ## [1.9.6] - 2026-03-14
+
 ### Bug Fixes
+
 - **🚨 Auto-Reconnection**: Fixed critical bug where reconnection never triggered after connection loss. The command receiver (`mpsc::Receiver`) was blocking the thread, preventing the reconnection check from running. Replaced with `try_recv` polling loop.
 - **Buffer Resize Events**: Fixed event name mismatch — frontend listened for `buffer-resize-event` but backend emits `buffer-resize`.
 - **I16 Audio Format**: Fixed decode/encode asymmetry for I16 sample conversion (divisor 32768→32767 to match encoder).
 - **Window Close Safety**: Replaced `window.hide().unwrap()` with safe `.ok()` to prevent potential panic on close.
 
 ### Code Quality
+
 - **stream.rs**: Cleaned stale comments from single-variant enum.
 - **main.js**: Removed duplicate `minBufferInput` assignment and duplicate `sampleRateSelect.disabled` lines.
 - **Adaptive buffer**: Added clarifying comment that adjustments are display-only (ring buffer is fixed at creation).
 
 ## [1.9.5] - 2026-03-14
+
 ### Bug Fixes
+
 - **Latency tracking**: Replaced `Vec::remove(0)` (O(n)) with `VecDeque::pop_front()` (O(1)) for latency sample tracking.
 - **Error counting**: `error_count` in quality metrics is now tracked and emitted instead of being hardcoded to `0`.
 - **Buffer size display**: Fixed ring buffer MB calculation — was using `×2` (i16 bytes) instead of `×4` (f32 bytes).
@@ -65,6 +86,7 @@ All notable changes to TCP Streamer are documented in this file.
 - **Format comment**: Fixed `AudioCommand::format` comment from "pcm or mp3" to "pcm or wav".
 
 ### Code Quality
+
 - **StreamParams struct**: Replaced 17-element reconnection tuple with a named `StreamParams` struct.
 - **Dead code removal**: Removed `_reconnect_handle`, `sequence`, `_last_write_time`, `data_len`, and all MP3 encoder commented code.
 - **Unused parameter**: `buffer_size` parameter removed from internal pipeline (frontend still sends it for compatibility).
@@ -73,184 +95,264 @@ All notable changes to TCP Streamer are documented in this file.
 - **Typo fix**: "Gloabl" → "Global" in stats.rs rate limiter comment.
 
 ## [1.9.4] - 2026-03-14
+
 ### Improvements
+
 - **Native Stereo Pipeline**: Audio is now captured and streamed in full stereo (2 channels) preserving complete L/R separation. No more downmixing to mono.
 - **Channel-aware pipeline**: Ring buffer, pacing, prefill, drain, and WAV header all dynamically adapt to the detected device channel count.
 - **Cleaner architecture**: Format and channel detection moved earlier in the pipeline for better code organization.
 
 ## [1.9.3] - 2026-03-14
+
 ### Bug Fixes
+
 - **Fix chipmunk audio**: Added stereo-to-mono downmix in the CPAL audio capture callback. Devices capturing in stereo (2 channels) were pushing interleaved L/R samples directly into the mono pipeline, causing audio to play at 2x speed.
 - **Loopback format detection**: Loopback devices now correctly query `supported_output_configs()` instead of `supported_input_configs()`.
 
 ## [1.9.2] - 2026-03-10
+
 ### Bug Fixes
+
 - **Restore multi-format CPAL stream builder**: Restored dynamic `SampleFormat` selection (F32, I16, U16) which was lost during the v1.9.1 refactor. Devices that natively capture at 16-bit were silently failing, resulting in empty ring buffers (`Buffering... 0/9600 samples`).
 
 ## [1.9.1] - 2026-03-07
+
 ### Changes
+
 - **Linux post-install script**: Added deb post-install script to automatically set `CAP_SYS_NICE` for real-time thread priority.
 - **Linux build fix**: Removed invalid `tauri::WebviewWindowExt` import that broke Linux builds.
 
 ## [1.9.0] - 2026-03-07
+
 ### Features
+
 - **Client/Server modes**: Added TCP Server mode (listen for incoming connections) alongside existing Client mode (connect to remote server).
 - **HTTP streaming support**: Server mode auto-detects HTTP clients (browsers, VLC) and serves `audio/wav` with chunked transfer encoding.
 - **Connection resilience**: Improved reconnection logic with exponential backoff and jitter.
 - **Code refactor**: Split monolithic `audio.rs` into modular `audio/manager.rs`, `audio/commands.rs`, `audio/stats.rs`, `audio/stream.rs`, and `audio/wav_helper.rs`.
 
 ## [1.8.9] - 2026-03-07
+
 ### Bug Fixes
+
 - **Adaptive buffer drain**: Added overflow prevention by draining excess samples when buffer fills during disconnection periods.
 
 ## [1.8.8] - 2026-03-07
+
 ### Bug Fixes
+
 - **Strict clock loop**: Implemented strict pacing with silence padding to prevent clock drift and timing-related audio artifacts.
 
 ## [1.8.7]
+
 ### Maintenance
+
 - Removed accidental `pnpm-lock.yaml` from repository.
 
 ## [1.8.6]
+
 ### Bug Fixes
+
 - **Linux CI**: Added `libfuse2` dependency for `linuxdeploy` AppImage support.
 
 ## [1.8.5]
+
 ### Bug Fixes
+
 - Fixed transmission start issues causing initial silence or delays.
 
 ## [1.8.4]
+
 ### Security
+
 - Security hardening and vulnerability fixes.
 
 ## [1.8.3]
+
 ### Maintenance
+
 - Regenerated application icons.
 
 ## [1.8.2]
+
 ### Maintenance
+
 - Version bump and minor fixes.
 
 ## [1.8.1]
+
 ### Bug Fixes
+
 - **Prefill Gate**: Added 1000ms audio prefill before transmission starts to prevent cold-start stuttering.
 - **Volume fix**: Corrected volume levels in audio processing.
 
 ## [1.8.0]
+
 ### Features
+
 - **F32 Audio Engine**: Upgraded internal audio processing from I16 to F32 for higher fidelity and dynamic range.
 
 ## [1.7.0]
+
 ### Features
+
 - **High Precision Pacing**: Implemented spin-loop based high-precision pacing for ultra-low jitter audio delivery.
 
 ## [1.6.6]
+
 ### Features
+
 - Snapcast features toggle in UI.
 - Robust timestamp validation.
 - Updated documentation.
 
 ## [1.6.5]
+
 ### Bug Fixes
+
 - Fixed jitter calculation accuracy and UI precision display.
 
 ## [1.6.4]
+
 ### Bug Fixes
+
 - **Critical AutoSync Fix**: Resolved AutoSync timing issues that caused stream desynchronization.
 - Added log filters for cleaner output.
 
 ## [1.6.3]
+
 ### Features
+
 - Real-time Jitter/Latency metrics display.
 - Audio engine optimizations.
 
 ## [1.6.2]
+
 ### Bug Fixes
+
 - Fixed compilation errors introduced in v1.6.1.
 
 ## [1.6.1]
+
 ### Features
+
 - **Active Rate Control**: Implemented dynamic rate control for smoother streaming.
 - **Auto Sync**: Added automatic synchronization between sender and receiver.
 
 ## [1.6.0]
+
 ### Features
+
 - **Smart Silence Detection**: Intelligent silence detection to reduce bandwidth during quiet periods.
 - Reliability fixes for long-running streams.
 
 ## [1.5.9]
+
 ### Improvements
+
 - Precision pacing improvements for timing accuracy.
 
 ## [1.5.8]
+
 ### Bug Fixes
+
 - **Graceful TCP shutdown**: Proper FIN/ACK sequence to prevent zombie TCP connections on stop.
 
 ## [1.5.7]
+
 ### Improvements
+
 - UI improvements and platform-specific fixes.
 
 ## [1.5.6]
+
 ### Performance
+
 - **Batch processing**: Implemented batch processing in network thread for reduced CPU usage and improved throughput.
 
 ## [1.5.5]
+
 ### Bug Fixes
+
 - Fixed buffer overflow caused by CPU contention under high load.
 
 ## [1.5.4]
+
 ### Improvements
+
 - Enhanced error logging for stream debugging.
 
 ## [1.5.3]
+
 ### Improvements
+
 - WASAPI Loopback buffer improvements for Windows audio capture stability.
 
 ## [1.5.2]
+
 ### Bug Fixes
+
 - Fixed silence timeout logic causing premature stream termination.
 
 ## [1.5.1]
+
 ### Bug Fixes
+
 - Critical fixes and stability improvements.
 
 ## [1.5.0]
+
 ### Features
+
 - UI improvements and comprehensive documentation overhaul.
 
 ## [1.4.0]
+
 ### Features
+
 - **Dual RMS metrics**: Separate input/output RMS level monitoring.
 - **Dynamic silence detection**: Adaptive silence threshold based on ambient noise.
 - Improved Windows WASAPI loopback reliability.
 
 ## [1.3.0]
+
 ### Features
+
 - **Adaptive Buffer**: Dynamic ring buffer sizing based on network jitter.
 - **Quality Metrics**: Real-time quality score (0-100) based on jitter, buffer health, and errors.
 - UI improvements for monitoring stream health.
 
 ## [1.2.0]
+
 ### Features
+
 - Added PayPal donation button.
 
 ## [1.1.0]
+
 ### Improvements
+
 - Improved loopback device matching on Windows.
 - Verbose logging for debugging device selection.
 - UI fixes.
 
 ## [1.0.2]
+
 ### Bug Fixes
+
 - Forced boolean type for `isLoopback` argument to fix Tauri command deserialization.
 
 ## [1.0.1]
+
 ### Bug Fixes
+
 - Resolved log spam by throttling repetitive messages.
 - Disabled silence timeout by default to prevent unexpected disconnections.
 
 ## [1.0.0]
+
 ### 🎉 Initial Stable Release
+
 - TCP audio streaming from any input device or WASAPI loopback.
 - Configurable sample rate, buffer size, and chunk size.
 - Auto-reconnection with exponential backoff.
@@ -258,14 +360,18 @@ All notable changes to TCP Streamer are documented in this file.
 - Built with Tauri 2 + Rust + CPAL.
 
 ## [0.9.x]
+
 ### Pre-release
+
 - Loopback checkbox UI.
 - Snake_case/camelCase argument fixes for Tauri compatibility.
 - WASAPI loopback support (Windows).
 - Initial device selection and streaming logic.
 
 ## [0.8.x]
+
 ### Pre-release
+
 - Enhanced metadata and smart reconnection.
 - Removed Snapcast headers to fix audio distortion.
 - UI cleanup and code refinement.
