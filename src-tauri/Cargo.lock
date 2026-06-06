@@ -4580,6 +4580,7 @@ dependencies = [
  "chrono",
  "cpal",
  "hostname",
+ "libc",
  "local-ip-address",
  "log",
  "mac_address",

@@ -4,6 +4,7 @@ pub mod constants;
 pub mod engine;
 pub mod error;
 pub mod manager;
+pub mod metrics;
 pub mod stats;
 pub mod stream;
 pub mod transport;
