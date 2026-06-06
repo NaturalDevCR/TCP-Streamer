@@ -36,6 +36,15 @@
         :disabled="stream.isStreaming"
         class="mt-3"
       />
+      <InputField
+        id="psk-sink"
+        v-model="settings.psk"
+        label="Encryption key (PSK — empty = no encryption)"
+        type="password"
+        placeholder="Pre-shared key"
+        :disabled="stream.isStreaming"
+        class="mt-3"
+      />
     </section>
 
     <!-- Source -->
@@ -79,6 +88,18 @@
         <option value="tcp">TCP</option>
         <option value="udp">Native UDP</option>
       </SelectField>
+
+      <!-- PSK (only for Native UDP) -->
+      <InputField
+        v-if="settings.transport === 'udp'"
+        id="psk-source"
+        v-model="settings.psk"
+        label="Encryption key (PSK — empty = no encryption)"
+        type="password"
+        placeholder="Pre-shared key"
+        :disabled="stream.isStreaming"
+        class="mt-3"
+      />
     </section>
 
     <!-- Connection Mode -->

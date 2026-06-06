@@ -40,6 +40,7 @@ pub fn start_stream(
     latency_profile: String,
     allowlist: String,
     transport: String,
+    psk: String,
 ) -> Result<(), AudioError> {
     let command = AudioCommand::Start {
         device_name,
@@ -61,6 +62,7 @@ pub fn start_stream(
         latency_profile,
         allowlist,
         transport,
+        psk,
         app_handle: Box::new(app_handle),
     };
 
@@ -92,11 +94,12 @@ pub fn start_sink(
     output_device: String,
     source_addr: String,
     latency_profile: String,
+    psk: String,
 ) -> Result<(), AudioError> {
     state.tx.lock()
         .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
         .send(AudioCommand::StartSink {
-            output_device, source_addr, latency_profile, app_handle: Box::new(app_handle),
+            output_device, source_addr, latency_profile, psk, app_handle: Box::new(app_handle),
         })
         .map_err(|e| AudioError::ChannelError(e.to_string()))
 }

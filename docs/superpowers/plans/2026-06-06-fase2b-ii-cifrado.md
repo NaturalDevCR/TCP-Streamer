@@ -15,16 +15,16 @@
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/Cargo.toml` | add `chacha20poly1305`, `hkdf`, `sha2` | Modify |
-| `src-tauri/src/audio/transport/udp/crypto.rs` | **(pure)** derive_key, seal/open, replay window | Create |
-| `src-tauri/src/audio/transport/udp/mod.rs` | `pub mod crypto;` | Modify |
-| `src-tauri/src/audio/transport/udp/source.rs` | seal payload + set encrypted flag + random salt_a | Modify |
-| `src-tauri/src/audio/transport/udp/sink.rs` | open payload + replay window | Modify |
-| `src-tauri/src/audio/engine/{mod,sink}.rs` | thread `psk` to source/sink | Modify |
-| `src-tauri/src/audio/commands.rs` · `manager.rs` | thread `psk` (start_stream native + start_sink) | Modify |
-| `src/stores/settings.ts` · `stream.ts` · `ConnectionTab.vue` | PSK field | Modify |
+| File                                                         | Responsibility                                    | Status |
+| ------------------------------------------------------------ | ------------------------------------------------- | ------ |
+| `src-tauri/Cargo.toml`                                       | add `chacha20poly1305`, `hkdf`, `sha2`            | Modify |
+| `src-tauri/src/audio/transport/udp/crypto.rs`                | **(pure)** derive_key, seal/open, replay window   | Create |
+| `src-tauri/src/audio/transport/udp/mod.rs`                   | `pub mod crypto;`                                 | Modify |
+| `src-tauri/src/audio/transport/udp/source.rs`                | seal payload + set encrypted flag + random salt_a | Modify |
+| `src-tauri/src/audio/transport/udp/sink.rs`                  | open payload + replay window                      | Modify |
+| `src-tauri/src/audio/engine/{mod,sink}.rs`                   | thread `psk` to source/sink                       | Modify |
+| `src-tauri/src/audio/commands.rs` · `manager.rs`             | thread `psk` (start_stream native + start_sink)   | Modify |
+| `src/stores/settings.ts` · `stream.ts` · `ConnectionTab.vue` | PSK field                                         | Modify |
 
 ---
 
@@ -37,6 +37,7 @@
 - [ ] **Step 1: Add dependencies**
 
 In `src-tauri/Cargo.toml` under `[dependencies]`, add:
+
 ```toml
 chacha20poly1305 = "0.10"
 hkdf = "0.12"
@@ -246,22 +247,26 @@ git commit -m "feat(udp): tested AEAD/PSK crypto (HKDF + ChaCha20-Poly1305 + rep
 - [ ] **Step 1: Give `UdpSource` an optional key + random salt_a**
 
 Add fields and a setter. In `UdpSource::bind`, set `info.salt_a` to a random value (e.g. derived from `std::time::SystemTime` nanos) instead of 0. Add:
+
 ```rust
     key: Option<[u8; 32]>,
     nonce_salt: u32,
     psk: String,
 ```
+
 Initialize `key: None, nonce_salt: 0, psk` (pass `psk: String` into `bind`). Set `info.salt_a` to a random `u64`.
 
 - [ ] **Step 2: Derive the key when a subscriber arrives**
 
 In `poll_subscribe`, after `packet::decode_subscribe(&buf[..n])` yields `salt_b` and before/after sending STREAM_INFO: if `!self.psk.is_empty()`, set
+
 ```rust
                 let key = super::crypto::derive_key(&self.psk, self.info.salt_a, salt_b);
                 self.nonce_salt = super::crypto::nonce_salt(self.info.salt_a, salt_b);
                 self.key = Some(key);
                 self.info.flags = 1; // encrypted
 ```
+
 (Set `self.info.flags = 0` and `self.key = None` when `psk` is empty — the default.) `decode_subscribe` currently returns `Option<u64>` (the salt_b) — use it.
 
 - [ ] **Step 3: Seal in `send_audio`**
@@ -364,6 +369,7 @@ Thread a `psk: String` param: `start_stream` → `AudioCommand::Start` → `engi
 - [ ] **Step 2: Sink side**
 
 Thread `psk: String` into `start_sink` → `AudioCommand::StartSink` → `engine::sink::run_sink`. In `run_sink`, after `subscribe` returns `info` (with `info.salt_a` and `info.flags`), compute the key when a PSK is set:
+
 ```rust
     let (key, nonce_salt) = if !psk.is_empty() {
         (
@@ -374,6 +380,7 @@ Thread `psk: String` into `start_sink` → `AudioCommand::StartSink` → `engine
         (None, 0)
     };
 ```
+
 Pass `key, nonce_salt` into the `receive_loop(&socket, salt_b, lost_after, key, nonce_salt, prod, running_net)` call.
 
 - [ ] **Step 3: Verify compile + tests**
@@ -426,7 +433,7 @@ git commit -m "feat(ui): optional PSK field for native-mode encryption"
 
 - [ ] **Step 1: Add an encrypted end-to-end assertion**
 
-Extend the loopback test (or add a sibling) that derives a key on both sides from the same PSK + salts, has the source seal a frame and the sink open it, and asserts a frame sealed with a *different* PSK fails to open. Use `crypto::{derive_key, nonce_salt, seal, open}` directly with the captured `salt_a`/`salt_b`:
+Extend the loopback test (or add a sibling) that derives a key on both sides from the same PSK + salts, has the source seal a frame and the sink open it, and asserts a frame sealed with a _different_ PSK fails to open. Use `crypto::{derive_key, nonce_salt, seal, open}` directly with the captured `salt_a`/`salt_b`:
 
 ```rust
 #[test]
@@ -446,11 +453,13 @@ fn encrypted_frame_roundtrips_and_wrong_psk_fails() {
 - [ ] **Step 2: Full gate**
 
 Run:
+
 ```bash
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: all green; Rust tests up by ~5 (crypto 4 + encrypted loopback 1).
 
 - [ ] **Step 3: Manual check (two instances)**

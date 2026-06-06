@@ -73,6 +73,7 @@ pub fn run(
     latency_profile: String,
     allowlist: String,
     transport: String,
+    psk: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
 
@@ -280,6 +281,7 @@ pub fn run(
     let underruns_net = underruns.clone();
     let effective_chunk_net = effective_chunk;
     let transport_net = transport.clone();
+    let psk_net = psk.clone();
 
     let allow_rules = super::transport::allowlist::parse_rules(&allowlist);
 
@@ -456,7 +458,7 @@ pub fn run(
             if transport_net == "udp" {
                 // Lazily bind the UDP source on first iteration.
                 if udp_source.is_none() {
-                    match super::transport::udp::source::UdpSource::bind(port, sample_rate_clone, device_channels_net) {
+                    match super::transport::udp::source::UdpSource::bind(port, sample_rate_clone, device_channels_net, psk_net.clone()) {
                         Ok(s) => { emit_log(&app_handle_net, "success", format!("Native UDP source on port {}", port)); udp_source = Some(s); }
                         Err(e) => { emit_log(&app_handle_net, "error", format!("UDP bind failed: {}", e)); thread::sleep(Duration::from_millis(500)); }
                     }

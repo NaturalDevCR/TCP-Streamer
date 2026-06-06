@@ -30,6 +30,7 @@ pub enum AudioCommand {
         latency_profile: String,
         allowlist: String,
         transport: String,
+        psk: String,
         app_handle: Box<AppHandle>,
     },
     Stop,
@@ -37,6 +38,7 @@ pub enum AudioCommand {
         output_device: String,
         source_addr: String,
         latency_profile: String,
+        psk: String,
         app_handle: Box<AppHandle>,
     },
 }
@@ -74,6 +76,7 @@ impl AudioState {
                         latency_profile,
                         allowlist,
                         transport,
+                        psk,
                         app_handle,
                     }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
@@ -94,7 +97,7 @@ impl AudioState {
                             ring_buffer_duration_ms, high_priority, dscp_strategy,
                             format, chunk_size, is_loopback, is_server, auto_reconnect,
                             enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
-                            latency_profile, allowlist, transport,
+                            latency_profile, allowlist, transport, psk,
                             (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -122,6 +125,7 @@ impl AudioState {
                         output_device,
                         source_addr,
                         latency_profile,
+                        psk,
                         app_handle,
                     }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
@@ -134,7 +138,7 @@ impl AudioState {
                         emit_log(&app_handle, "info", format!("Starting Sink: subscribing to {} for output {}", source_addr, output_device));
 
                         match super::engine::sink::run_sink(
-                            output_device, source_addr, latency_profile,
+                            output_device, source_addr, latency_profile, psk,
                             (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {

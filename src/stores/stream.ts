@@ -103,6 +103,7 @@ export const useStreamStore = defineStore("stream", () => {
           outputDevice: settings.outputDevice,
           sourceAddr: settings.sourceAddr,
           latencyProfile: settings.latencyProfile,
+          psk: settings.psk,
         });
         isStreaming.value = true;
         statusText.value = `Playing from ${settings.sourceAddr}`;
@@ -148,6 +149,7 @@ export const useStreamStore = defineStore("stream", () => {
         latencyProfile: settings.latencyProfile,
         allowlist: settings.allowlist,
         transport: settings.transport,
+        psk: settings.psk,
       });
 
       isStreaming.value = true;

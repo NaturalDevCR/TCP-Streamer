@@ -16,6 +16,7 @@ pub fn run_sink(
     output_device_name: String,
     source_addr: String,
     latency_profile: String,
+    psk: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     // Subscribe (blocking, off the audio thread).
@@ -25,6 +26,14 @@ pub fn run_sink(
     )
     .map_err(|e| format!("subscribe failed: {e}"))?;
     let info = sub.info;
+    let (key, nonce_salt) = if !psk.is_empty() {
+        (
+            Some(super::super::transport::udp::crypto::derive_key(&psk, info.salt_a, salt_b)),
+            super::super::transport::udp::crypto::nonce_salt(info.salt_a, salt_b),
+        )
+    } else {
+        (None, 0)
+    };
     emit_log(&app_handle, "success", format!(
         "Subscribed to {} ({}Hz, {}ch)", source_addr, info.sample_rate, info.channels
     ));
@@ -59,7 +68,7 @@ pub fn run_sink(
     let lost_after = (lp.ring_ms / 5).max(2) as usize; // ~frames tolerance
     thread::spawn(move || {
         super::super::transport::udp::sink::receive_loop(
-            &socket, salt_b, lost_after, prod, running_net,
+            &socket, salt_b, lost_after, key, nonce_salt, prod, running_net,
         );
     });
 

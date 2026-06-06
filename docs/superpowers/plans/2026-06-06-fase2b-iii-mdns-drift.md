@@ -15,17 +15,17 @@
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/Cargo.toml` | add `mdns-sd = "0.11"` | Modify |
-| `src-tauri/src/audio/transport/discovery.rs` | mDNS advertise (source) + browse (sink) | Create |
-| `src-tauri/src/audio/transport/mod.rs` | `pub mod discovery;` | Modify |
-| `src-tauri/src/audio/transport/udp/drift.rs` | **(pure)** drift controller | Create |
-| `src-tauri/src/audio/transport/udp/mod.rs` | `pub mod drift;` | Modify |
-| `src-tauri/src/audio/transport/udp/sink.rs` | apply drift correction in the feed | Modify |
-| `src-tauri/src/audio/commands.rs` · `lib.rs` | `list_sources` command | Modify |
-| `src-tauri/src/audio/engine/mod.rs` | advertise when native source starts | Modify |
-| `src/stores/settings.ts` · `stream.ts` · `ConnectionTab.vue` | discovered-sources picker | Modify |
+| File                                                         | Responsibility                          | Status |
+| ------------------------------------------------------------ | --------------------------------------- | ------ |
+| `src-tauri/Cargo.toml`                                       | add `mdns-sd = "0.11"`                  | Modify |
+| `src-tauri/src/audio/transport/discovery.rs`                 | mDNS advertise (source) + browse (sink) | Create |
+| `src-tauri/src/audio/transport/mod.rs`                       | `pub mod discovery;`                    | Modify |
+| `src-tauri/src/audio/transport/udp/drift.rs`                 | **(pure)** drift controller             | Create |
+| `src-tauri/src/audio/transport/udp/mod.rs`                   | `pub mod drift;`                        | Modify |
+| `src-tauri/src/audio/transport/udp/sink.rs`                  | apply drift correction in the feed      | Modify |
+| `src-tauri/src/audio/commands.rs` · `lib.rs`                 | `list_sources` command                  | Modify |
+| `src-tauri/src/audio/engine/mod.rs`                          | advertise when native source starts     | Modify |
+| `src/stores/settings.ts` · `stream.ts` · `ConnectionTab.vue` | discovered-sources picker               | Modify |
 
 ---
 
@@ -203,6 +203,7 @@ In `[dependencies]`, add: `mdns-sd = "0.11"`.
 - [ ] **Step 2: Verify + commit**
 
 Run: `cargo build --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3`
+
 ```bash
 git add src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "build: add mdns-sd for native-source discovery"
@@ -305,17 +306,20 @@ git commit -m "feat(transport): mDNS advertise + browse for native sources"
 - [ ] **Step 1: Command**
 
 In `commands.rs`:
+
 ```rust
 #[tauri::command]
 pub fn list_sources() -> Vec<crate::audio::transport::discovery::DiscoveredSource> {
     crate::audio::transport::discovery::browse(std::time::Duration::from_millis(1500))
 }
 ```
+
 Register `audio::list_sources,` in `lib.rs`'s `generate_handler!`.
 
 - [ ] **Step 2: Advertise when the native source starts**
 
 In `engine::run`'s UDP branch, after binding the `UdpSource`, advertise once and keep the `Advertiser` alive for the thread's lifetime:
+
 ```rust
                 if advertiser.is_none() {
                     let name = format!("tcp-streamer-{}", port);
@@ -325,11 +329,13 @@ In `engine::run`'s UDP branch, after binding the `UdpSource`, advertise once and
                     }
                 }
 ```
+
 Declare `let mut advertiser: Option<super::transport::discovery::Advertiser> = None;` near the UDP-source local. (`psk` is available if 2B-ii landed; otherwise pass `false`.)
 
 - [ ] **Step 3: Verify + commit**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tail -5`
+
 ```bash
 git add src-tauri/src/audio/commands.rs src-tauri/src/lib.rs src-tauri/src/audio/engine/mod.rs
 git commit -m "feat(audio): list_sources command + advertise native source via mDNS"
@@ -346,17 +352,21 @@ git commit -m "feat(audio): list_sources command + advertise native source via m
 - [ ] **Step 1: Store action**
 
 In `settings.ts`, add `const discoveredSources = ref<{name:string;addr:string;encrypted:boolean}[]>([]);` and:
+
 ```ts
-  async function scanSources() {
-    try {
-      discoveredSources.value = (await invoke("list_sources")) as {
-        name: string; addr: string; encrypted: boolean;
-      }[];
-    } catch {
-      discoveredSources.value = [];
-    }
+async function scanSources() {
+  try {
+    discoveredSources.value = (await invoke("list_sources")) as {
+      name: string;
+      addr: string;
+      encrypted: boolean;
+    }[];
+  } catch {
+    discoveredSources.value = [];
   }
+}
 ```
+
 Export both.
 
 - [ ] **Step 2: UI**
@@ -384,11 +394,13 @@ git commit -m "feat(ui): scan + pick discovered native sources (mDNS)"
 - [ ] **Step 1: Complete check suite**
 
 Run:
+
 ```bash
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: all green; Rust tests up by ~4 (drift).
 
 - [ ] **Step 2: Manual (two instances)**

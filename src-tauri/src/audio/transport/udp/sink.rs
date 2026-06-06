@@ -51,6 +51,8 @@ pub fn receive_loop(
     socket: &UdpSocket,
     salt_b: u64,
     lost_after: usize,
+    key: Option<[u8; 32]>,
+    nonce_salt: u32,
     mut producer: HeapProducer<f32>,
     running: Arc<AtomicBool>,
 ) {
@@ -60,6 +62,7 @@ pub fn receive_loop(
     let mut sub = Vec::new();
     packet::encode_subscribe(salt_b, &mut sub);
     let mut last_hb = Instant::now();
+    let mut replay = super::crypto::ReplayWindow::new();
 
     while running.load(Ordering::Relaxed) {
         if last_hb.elapsed() >= Duration::from_secs(1) {
@@ -69,7 +72,29 @@ pub fn receive_loop(
         match socket.recv(&mut buf) {
             Ok(n) => {
                 if let Some((h, payload)) = packet::decode_audio(&buf[..n]) {
-                    jb.push(h.seq, payload.to_vec());
+                    let pcm = if h.flags & 1 != 0 {
+                        match &key {
+                            Some(k) => {
+                                if !replay.check_and_update(h.seq) {
+                                    continue; // replayed/old
+                                }
+                                let mut hdr = Vec::new();
+                                super::packet::encode_audio(
+                                    &super::packet::AudioHeader { flags: h.flags, seq: h.seq, ts_us: h.ts_us },
+                                    &[],
+                                    &mut hdr,
+                                );
+                                match super::crypto::open(k, nonce_salt, h.seq, &hdr[..super::packet::AUDIO_HEADER_LEN], payload) {
+                                    Some(pt) => pt,
+                                    None => continue, // forged/tampered
+                                }
+                            }
+                            None => continue, // encrypted frame but no key configured
+                        }
+                    } else {
+                        payload.to_vec()
+                    };
+                    jb.push(h.seq, pcm);
                 }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}

@@ -1,4 +1,5 @@
 //! Native low-latency UDP transport (Phase 2B).
+pub mod crypto;
 pub mod jitter;
 pub mod packet;
 pub mod sink;

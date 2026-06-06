@@ -29,6 +29,7 @@ interface SettingsDict {
   transport?: string;
   output_device?: string;
   source_addr?: string;
+  psk?: string;
 }
 
 export const useSettingsStore = defineStore("settings", () => {
@@ -53,6 +54,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const outputDevice = ref("");
   const sourceAddr = ref("");
   const outputDevices = ref<string[]>([]);
+
+  // Encryption
+  const psk = ref("");
 
   // Audio
   const sampleRate = ref(48000);
@@ -184,6 +188,7 @@ export const useSettingsStore = defineStore("settings", () => {
     if (s.transport) transport.value = s.transport as string;
     if (s.output_device) outputDevice.value = s.output_device as string;
     if (s.source_addr) sourceAddr.value = s.source_addr as string;
+    if (s.psk) psk.value = s.psk as string;
 
     // Load loopback mode
     const savedLoopback = (await store.get("loopback_mode")) as boolean | null;
@@ -218,6 +223,7 @@ export const useSettingsStore = defineStore("settings", () => {
       transport: transport.value,
       output_device: outputDevice.value,
       source_addr: sourceAddr.value,
+      psk: psk.value,
     };
 
     const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
@@ -327,6 +333,7 @@ export const useSettingsStore = defineStore("settings", () => {
     outputDevice,
     sourceAddr,
     outputDevices,
+    psk,
     // Computed
     isServer,
     isLoopback,
