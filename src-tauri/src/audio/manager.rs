@@ -8,9 +8,8 @@ use super::wav_helper::create_wav_header;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use ringbuf::HeapRb;
-use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -695,67 +694,21 @@ fn start_audio_stream(
                     }
                 } else {
                     // CLIENT MODE (TCP only)
-                    let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
-                        Ok(s) => s,
+                    match super::transport::tcp_client::connect(
+                        &ip_clone, port, &dscp_clone, Duration::from_secs(2),
+                    ) {
+                        Ok(stream) => {
+                            emit_log(&app_handle_net, "success", format!("Connected to {}:{}", ip_clone, port));
+                            current_stream = Some(StreamSocket::Tcp(stream));
+                            disconnect_time = None;
+                            retry_delay = Duration::from_secs(2);
+                            last_heartbeat = Instant::now();
+                        }
                         Err(e) => {
-                            emit_log(&app_handle_net, "error", format!("Failed to create socket: {}", e));
-                            thread::sleep(Duration::from_secs(2));
-                            continue;
+                            emit_log(&app_handle_net, "error", format!("Connection failed: {}", e));
+                            thread::sleep(add_jitter(retry_delay));
+                            retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
                         }
-                    };
-                    let _ = socket.set_send_buffer_size(32 * 1024);
-                    let _ = socket.set_nodelay(true);
-                    let keepalive = TcpKeepalive::new()
-                        .with_time(Duration::from_secs(10))
-                        .with_interval(Duration::from_secs(1));
-                    let _ = socket.set_tcp_keepalive(&keepalive);
-
-                    let tos_val = super::transport::dscp::dscp_to_tos(&dscp_clone);
-
-                    if tos_val > 0 {
-                        if let Err(e) = socket.set_tos(u32::from(tos_val)) {
-                            emit_log(
-                                &app_handle_net,
-                                "warning",
-                                format!("Failed to set QoS/TOS: {}", e),
-                            );
-                        }
-                    }
-
-                    // For client mode, ip_clone is the target IP
-                    let addr_str = format!("{}:{}", ip_clone, port);
-                    if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-                        match socket.connect_timeout(&addr.into(), Duration::from_secs(2)) {
-                            Ok(_) => {
-                                let stream: TcpStream = socket.into();
-                                // Keep blocking mode
-                                emit_log(
-                                    &app_handle_net,
-                                    "success",
-                                    format!("Connected to {}", addr_str),
-                                );
-                                current_stream = Some(StreamSocket::Tcp(stream));
-                                disconnect_time = None;
-                                retry_delay = Duration::from_secs(2);
-                                last_heartbeat = Instant::now();
-                            }
-                            Err(e) => {
-                                emit_log(
-                                    &app_handle_net,
-                                    "error",
-                                    format!("Connection failed: {}", e),
-                                );
-                                thread::sleep(add_jitter(retry_delay));
-                                retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
-                            }
-                        }
-                    } else {
-                        emit_log(
-                            &app_handle_net,
-                            "error",
-                            format!("Invalid address: {}", addr_str),
-                        );
-                        thread::sleep(Duration::from_secs(5));
                     }
                 }
             }
