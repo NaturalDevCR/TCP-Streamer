@@ -6,7 +6,6 @@ use super::stats::{emit_log, BufferResizeEvent, QualityEvent, StatsEvent, Stream
 use super::stream::StreamSocket;
 use super::wav_helper::create_wav_header;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use log::error;
 
 use ringbuf::HeapRb;
 use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
@@ -975,58 +974,18 @@ fn start_audio_stream(
         );
     });
 
-    // 3. Build Audio Stream (Producer) — format detection already done above
-    let err_fn = move |err| {
-        error!("CPAL stream error: {}", err);
-    };
-
-    // Shared producer (mutex wrapped for use in closures)
-    let prod = Arc::new(Mutex::new(prod));
-
-    let audio_stream = match selected_format {
-        cpal::SampleFormat::F32 => {
-            let prod_clone = prod.clone();
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[f32], _: &_| {
-                    if let Ok(mut guard) = prod_clone.lock() {
-                        let _ = guard.push_slice(data);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        cpal::SampleFormat::I16 => {
-            let prod_clone = prod.clone();
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _: &_| {
-                    let converted: Vec<f32> = data.iter().map(|&s| s as f32 / 32767.0).collect();
-                    if let Ok(mut guard) = prod_clone.lock() {
-                        let _ = guard.push_slice(&converted);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        cpal::SampleFormat::U16 => {
-            let prod_clone = prod.clone();
-            device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _: &_| {
-                    let converted: Vec<f32> = data.iter().map(|&s| (s as f32 - 32768.0) / 32768.0).collect();
-                    if let Ok(mut guard) = prod_clone.lock() {
-                        let _ = guard.push_slice(&converted);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        _ => return Err(format!("Unsupported format: {:?}", selected_format))
-    }.map_err(|e| e.to_string())?;
+    // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
+    let overruns = Arc::new(AtomicU64::new(0));
+    let capacity_hint = chunk_size as usize * device_channels as usize;
+    let audio_stream = super::engine::capture::build_input_stream(
+        &device,
+        &stream_config,
+        selected_format,
+        prod,
+        overruns.clone(),
+        capacity_hint,
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok((
         audio_stream,
@@ -1034,6 +993,7 @@ fn start_audio_stream(
             bytes_sent,
             start_time: Instant::now(),
             is_running,
+            overruns,
         },
     ))
 }

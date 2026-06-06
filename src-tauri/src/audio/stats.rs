@@ -45,6 +45,10 @@ pub struct StreamStats {
     #[allow(dead_code)]
     pub start_time: Instant,
     pub is_running: Arc<AtomicBool>,
+    /// Samples dropped because the ring buffer was full when the capture
+    /// callback tried to push (real overrun signal). Used by metrics (Part B).
+    #[allow(dead_code)]
+    pub overruns: Arc<AtomicU64>,
 }
 
 impl Drop for StreamStats {
