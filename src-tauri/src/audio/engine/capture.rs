@@ -2,7 +2,7 @@
 //! no heap allocation after warmup.
 
 use cpal::traits::DeviceTrait;
-use cpal::SampleFormat;
+use cpal::{BufferSize, SampleFormat, SupportedBufferSize};
 use ringbuf::HeapProducer;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -70,5 +70,58 @@ pub fn build_input_stream(
             log::error!("Unsupported sample format: {:?}", other);
             Err(cpal::BuildStreamError::StreamConfigNotSupported)
         }
+    }
+}
+
+/// Resolves a requested hardware buffer size (in frames) against the device's
+/// supported range. Out-of-range requests are clamped; `Unknown` ranges and a
+/// zero/unset request fall back to the driver default.
+pub fn resolve_buffer_size(requested: u32, supported: &SupportedBufferSize) -> BufferSize {
+    match supported {
+        SupportedBufferSize::Range { min, max } => {
+            if requested == 0 {
+                BufferSize::Default
+            } else {
+                BufferSize::Fixed(requested.clamp(*min, *max))
+            }
+        }
+        SupportedBufferSize::Unknown => BufferSize::Default,
+    }
+}
+
+#[cfg(test)]
+mod buffer_size_tests {
+    use super::*;
+
+    #[test]
+    fn within_range_is_used_verbatim() {
+        let s = SupportedBufferSize::Range { min: 64, max: 4096 };
+        assert!(matches!(resolve_buffer_size(1024, &s), BufferSize::Fixed(1024)));
+    }
+
+    #[test]
+    fn below_min_clamps_up() {
+        let s = SupportedBufferSize::Range { min: 256, max: 4096 };
+        assert!(matches!(resolve_buffer_size(64, &s), BufferSize::Fixed(256)));
+    }
+
+    #[test]
+    fn above_max_clamps_down() {
+        let s = SupportedBufferSize::Range { min: 64, max: 2048 };
+        assert!(matches!(resolve_buffer_size(8192, &s), BufferSize::Fixed(2048)));
+    }
+
+    #[test]
+    fn unknown_range_falls_back_to_default() {
+        assert!(matches!(
+            resolve_buffer_size(1024, &SupportedBufferSize::Unknown),
+            BufferSize::Default
+        ));
+    }
+
+    #[test]
+    fn zero_request_falls_back_to_default() {
+        let s = SupportedBufferSize::Range { min: 64, max: 4096 };
+        assert!(matches!(resolve_buffer_size(0, &s), BufferSize::Default));
     }
 }
