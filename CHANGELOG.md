@@ -4,6 +4,27 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.1.0] - 2026-06-06
+
+### Added
+
+- **Real adaptive buffer**: a target-occupancy controller now grows the buffered-latency target when glitches occur and shrinks it toward the minimum when the stream is stable (previously the control was cosmetic and never resized anything).
+- **Honest metrics**: real underrun/overrun counters and best-effort TCP round-trip time via `TCP_INFO` (Linux/macOS) replace the misleading `write()`-timing "jitter/latency". The stats bar now shows RTT and Underruns.
+- **Effective capture buffer size**: the Buffer Size control now sets the CPAL hardware buffer (`BufferSize::Fixed`, validated against the device's supported range) instead of being silently ignored.
+- Audio engine decomposed into tested modules — `engine/{device,encoder,capture,buffer}`, `transport/{dscp,tcp_client,tcp_server}` behind a `Connection` trait, and `metrics`. Rust unit tests grew from 10 to 40.
+
+### Fixed
+
+- **DSCP/QoS**: the strategy dropdown now maps to the correct IP TOS bytes (previously no UI value matched the backend, so QoS was never applied) and is applied in both client and server modes.
+- **Real-time-safe audio callback**: removed the `Arc<Mutex>` lock and per-callback heap allocation from the CPAL capture callback, eliminating priority-inversion/dropout risk.
+- **HTTP handshake** no longer blocks the network thread for up to 1.5 s on each new connection.
+- Consolidated two competing reconnection mechanisms into a single policy that honors the Auto-Reconnect toggle.
+
+### Changed
+
+- `QualityEvent` IPC payload reshaped to honest fields (`rtt_ms`, `rtt_var_ms`, `underruns`, `dropped`); UI labels distinguish the capture buffer from the jitter buffer.
+- Migrated the package manager to **pnpm**.
+
 ## [2.0.6] - 2026-03-15
 
 ### Fixed
