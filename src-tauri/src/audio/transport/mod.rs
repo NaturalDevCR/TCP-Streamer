@@ -13,6 +13,7 @@ use std::io::Write;
 use std::net::{Shutdown, TcpStream};
 
 /// A writable, RTT-observable stream connection.
+#[allow(dead_code)]
 pub trait Connection: Write + Send {
     /// Best-effort smoothed RTT for metrics; `None` when unavailable.
     fn rtt(&self) -> Option<RttSample>;
@@ -23,12 +24,14 @@ pub trait Connection: Write + Send {
 }
 
 /// TCP implementation of [`Connection`].
+#[allow(dead_code)]
 pub struct TcpConnection {
     pub stream: TcpStream,
     peer: String,
 }
 
 impl TcpConnection {
+    #[allow(dead_code)]
     pub fn new(stream: TcpStream) -> Self {
         let peer = stream
             .peer_addr()

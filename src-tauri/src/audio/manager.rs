@@ -646,59 +646,41 @@ fn start_audio_stream(
                                     }
                                 }
                                 
-                                // Peek for HTTP
-                                let mut buf = [0u8; 4];
+                                // Bounded, non-blocking handshake (no thread stall).
+                                stream.set_nonblocking(true).ok();
+                                let mut peekbuf = [0u8; 8];
                                 let mut is_http = false;
-                                let mut request_format = format_clone.clone(); // Default to configured
-
-                                // Temporarily set blocking for a short peek? 
-                                // Actually, since we just accepted, we can try to peek.
-                                // If it blocks, it means client hasn't sent anything yet. 
-                                // But browsers send immediately. 
-                                // We can use a short timeout.
-                                
-                                // Note: set_read_timeout might not work for peek on all platforms/implementations but usually does on sockets
-                                stream.set_read_timeout(Some(Duration::from_millis(1500))).ok();
-                                
-                                if let Ok(n) = stream.peek(&mut buf) {
-                                    if n >= 4 && &buf[0..4] == b"GET " {
-                                        is_http = true;
+                                let deadline = Instant::now() + Duration::from_millis(50);
+                                loop {
+                                    match stream.peek(&mut peekbuf) {
+                                        Ok(n) if n >= 4 => {
+                                            is_http = super::transport::tcp_server::looks_like_http(&peekbuf[..n]);
+                                            break;
+                                        }
+                                        Ok(_) => {}
+                                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                                        Err(_) => break,
                                     }
+                                    if Instant::now() >= deadline {
+                                        break;
+                                    }
+                                    thread::sleep(Duration::from_millis(2));
                                 }
+                                stream.set_nonblocking(false).ok();
 
                                 if is_http {
-                                    // Read Request Line
-                                    let mut headers_buf = [0u8; 1024];
-                                    if let Ok(n) = stream.read(&mut headers_buf) {
-                                        let request = String::from_utf8_lossy(&headers_buf[0..n]);
-                                        // Parse first line: GET /stream.wav HTTP/1.1
-                                        if let Some(_line) = request.lines().next() {
-                                            request_format = "wav".to_string();
-                                        }
-                                        
-                                        // Send HTTP Headers with Chunked Encoding (Always WAV)
-                                        let content_type = "audio/wav";
-                                        let response = format!(
-                                            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\nCache-Control: no-cache, no-store, must-revalidate\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
-                                            content_type
-                                        );
-                                        if let Err(e) = stream.write_all(response.as_bytes()) {
-                                             emit_log(&app_handle_net, "error", format!("Failed to send HTTP headers: {}", e));
-                                        } else {
-                                             emit_log(&app_handle_net, "info", "HTTP Client detected. Serving audio/wav".to_string());
-                                        }
+                                    let mut hdr = [0u8; 1024];
+                                    let _ = stream.read(&mut hdr); // consume request line (best-effort)
+                                    let resp = super::transport::tcp_server::http_stream_headers("audio/wav");
+                                    if let Err(e) = stream.write_all(resp.as_bytes()) {
+                                        emit_log(&app_handle_net, "error", format!("Failed to send HTTP headers: {}", e));
+                                    } else {
+                                        emit_log(&app_handle_net, "info", "HTTP client detected. Serving audio/wav".to_string());
                                     }
                                 }
 
-                                stream.set_read_timeout(None).ok();
-                                // Keep blocking mode for writes
-                                
-                                emit_log(
-                                    &app_handle_net,
-                                    "success",
-                                    format!("Client connected from {} (Format: {})", addr, request_format),
-                                );
-                                
+                                let request_format = if is_http { "wav" } else { format_clone.as_str() };
+                                emit_log(&app_handle_net, "success", format!("Client connected from {} (Format: {})", addr, request_format));
                                 use_chunked = is_http;
                                 wav_header_sent = false;
                                 current_stream = Some(StreamSocket::Tcp(stream));
