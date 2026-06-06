@@ -18,7 +18,7 @@
         <SelectField
           id="buffer-size"
           v-model.number="settings.bufferSize"
-          label="Buffer Size"
+          label="Capture Buffer (frames)"
           :disabled="stream.isStreaming"
         >
           <option :value="256">Low (256)</option>
@@ -31,7 +31,7 @@
         <SelectField
           id="ring-buffer-duration"
           v-model.number="settings.ringBufferDuration"
-          label="Ring Buffer (ms)"
+          label="Jitter Buffer (ms)"
           :disabled="stream.isStreaming"
         >
           <option :value="2000">Low (2000ms)</option>
