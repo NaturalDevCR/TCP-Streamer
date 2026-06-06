@@ -9,7 +9,9 @@
 **Tech Stack:** Rust (Tauri 2), `cpal 0.15.3`, `ringbuf 0.3.3`, `libc 0.2` (Unix only); Vue 3 + Pinia + Vitest.
 
 **Spec:** `docs/superpowers/specs/2026-06-05-fase1-estabilizacion-design.md` §5.2, §5.4.
-**Depends on:** Part A complete (engine modules exist; `StreamStats.overruns` exists). **Line numbers in `stream.rs` shifted during Part A — anchor edits by the quoted code/comment, not line number.**
+**Depends on:** Part A complete (engine modules exist; `StreamStats.overruns` exists).
+
+> **FILE LOCATION — read first:** The orchestrator `start_audio_stream`, the network thread, and the send loop live in **`src-tauri/src/audio/manager.rs`** (~1012 lines). `stream.rs` is 7 lines — *only* the `StreamSocket` enum (which `manager.rs` imports via `use super::stream::StreamSocket;`). Wherever a task says to edit orchestrator / send-loop / network-thread code, the file is **`manager.rs`**. Anchor edits by the quoted code/comment; Part A shifted line numbers.
 
 ---
 
@@ -23,7 +25,7 @@
 | `src-tauri/src/audio/engine/mod.rs` | `pub mod buffer;` | Modify |
 | `src-tauri/Cargo.toml` | add `libc` under `[target.'cfg(unix)'.dependencies]` | Modify |
 | `src-tauri/src/audio/stats.rs` | add `underruns` counter; reshape `QualityEvent` | Modify |
-| `src-tauri/src/audio/stream.rs` | size ring at max; wire controller + counters; emit honest quality | Modify |
+| `src-tauri/src/audio/manager.rs` | size ring at max; wire controller + counters; emit honest quality | Modify |
 | `src/types/events.ts` | reshape `QualityEvent` | Modify |
 | `src/stores/stream.ts` | listen with new fields; drop jitter/avgLatency/errorCount | Modify |
 | `src/components/StatsBar.vue` | show RTT / Underruns / Dropped | Modify |
@@ -456,15 +458,15 @@ pub struct QualityEvent {
 }
 ```
 
-- [ ] **Step 3: Verify (expect errors in `stream.rs` until Task 3.2)**
+- [ ] **Step 3: Verify (expect errors in `manager.rs` until Task 3.2)**
 
 Run: `cargo build --manifest-path src-tauri/Cargo.toml 2>&1 | tail -8`
-Expected: FAIL — `stream.rs` still constructs the old `QualityEvent` and the old `StreamStats`. Fixed in Task 3.2. Do not commit yet.
+Expected: FAIL — `manager.rs` still constructs the old `QualityEvent` and the old `StreamStats`. Fixed in Task 3.2. Do not commit yet.
 
 ### Task 3.2: Wire the controller, counters, and honest event into the consumer loop
 
 **Files:**
-- Modify: `src-tauri/src/audio/stream.rs`
+- Modify: `src-tauri/src/audio/manager.rs`
 
 > All edits below are in the network-thread closure of `start_audio_stream`. Anchor by the quoted code; Part A shifted line numbers.
 
@@ -549,7 +551,7 @@ Find the quality-emit block (the `if last_quality_emit.elapsed() >= Duration::fr
 
                 // Best-effort RTT from the live socket, if connected.
                 let rtt = current_stream.as_ref().and_then(|s| {
-                    let super::stream::StreamSocket::Tcp(tcp) = s;
+                    let StreamSocket::Tcp(tcp) = s; // StreamSocket already imported in manager.rs
                     super::metrics::tcp_rtt(tcp)
                 });
 
@@ -607,7 +609,7 @@ Expected: compiles clean (clippy-clean, no unused warnings); all tests pass.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src-tauri/src/audio/stats.rs src-tauri/src/audio/stream.rs
+git add src-tauri/src/audio/stats.rs src-tauri/src/audio/manager.rs
 git commit -m "feat(audio): real adaptive target + honest underrun/overrun/RTT quality event"
 ```
 
@@ -784,4 +786,4 @@ git add -A && git commit -m "chore: Phase 1 Part B verification fixes"
 - **Spec coverage:** §5.2 adaptive (real target-occupancy) → M1 + M3.2; §5.4 honest metrics (underrun/overrun + RTT + scoring) → M2 + M3; frontend surface (§5.9 metrics rename) → M4.
 - **Type consistency:** `AdaptiveBuffer::{new(min,max,step,initial,stable_threshold), target_ms(), on_tick(bool)->Option<u32>}`; `quality_score(u64, f32, Option<f32>)->u8`; `tcp_rtt(&TcpStream)->Option<RttSample>`; `RttSample{srtt_ms,rttvar_ms}`; `QualityEvent{score,rtt_ms:Option,rtt_var_ms:Option,underruns,dropped,buffer_health}` matches the TS `{score,rtt_ms:number|null,rtt_var_ms,underruns,dropped,buffer_health}`. `StreamStats` gains `underruns` (this part) next to `overruns` (Part A).
 - **No placeholders:** the non-Unix `tcp_rtt` returning `None` is the spec's documented best-effort behavior, not an unfinished stub.
-- **Note for executor:** `StreamSocket` still lives in `stream.rs` in Part B (Part C dissolves it); the RTT read pattern-matches `super::stream::StreamSocket::Tcp(tcp)`.
+- **Note for executor:** all edits are in **`manager.rs`** (the orchestrator). `stream.rs` only defines the `StreamSocket` enum, already imported by `manager.rs`, so the RTT read pattern-matches `StreamSocket::Tcp(tcp)`. Part C dissolves both.

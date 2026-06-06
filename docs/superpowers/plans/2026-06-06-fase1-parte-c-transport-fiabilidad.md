@@ -2,14 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extract networking into a `transport` module behind a `Connection` trait (preparing Phase 2's TLS/multi-client without implementing them), remove the 1.5 s blocking HTTP handshake, consolidate the two competing reconnection mechanisms into one that honors `auto_reconnect`, and relocate the remaining orchestration out of the monolithic `stream.rs` into `engine/mod.rs`.
+**Goal:** Extract networking into a `transport` module behind a `Connection` trait (preparing Phase 2's TLS/multi-client without implementing them), remove the 1.5 s blocking HTTP handshake, consolidate the two competing reconnection mechanisms into one that honors `auto_reconnect`, and relocate the remaining orchestration out of the monolithic `manager.rs` into `engine/mod.rs`.
 
-**Architecture:** A lean `Connection: Write + Send` trait abstracts a client/server TCP socket (with a best-effort `rtt()` and graceful `close()`); `transport::tcp_client::connect()` and `transport::tcp_server` own socket setup. HTTP detection becomes pure, testable helpers and a bounded non-blocking handshake. The network thread loops over a single reconnection policy. The orchestrator moves to `engine::run`, leaving `stream.rs` removed.
+**Architecture:** A lean `Connection: Write + Send` trait abstracts a client/server TCP socket (with a best-effort `rtt()` and graceful `close()`); `transport::tcp_client::connect()` and `transport::tcp_server` own socket setup. HTTP detection becomes pure, testable helpers and a bounded non-blocking handshake. The network thread loops over a single reconnection policy. The orchestrator moves to `engine::run`, slimming `manager.rs` and removing the now-unused `stream.rs` enum.
 
 **Tech Stack:** Rust (Tauri 2), `socket2 0.5`, `std::net`.
 
 **Spec:** `docs/superpowers/specs/2026-06-05-fase1-estabilizacion-design.md` §5.6, §5.7, §4.
-**Depends on:** Parts A and B complete. **Anchor every `stream.rs` edit by the quoted code/comment — line numbers shifted in A and B.**
+**Depends on:** Parts A and B complete.
+
+> **FILE LOCATION — read first:** The orchestrator `start_audio_stream`, the network thread, and the send loop live in **`src-tauri/src/audio/manager.rs`** (~1012 lines), which imports the `StreamSocket` enum from the 7-line `stream.rs`. In M2–M4, "edit the server accept block / client branch / send loop" means **`manager.rs`**. In M5 the orchestrator function is *moved out of* `manager.rs` into `engine/mod.rs`, and the `stream.rs` enum file is deleted. Anchor edits by the quoted code/comment — line numbers shifted in A and B.
 
 ---
 
@@ -21,8 +23,8 @@
 | `src-tauri/src/audio/transport/tcp_client.rs` | client connect + socket options (keepalive, nodelay, DSCP) | Create |
 | `src-tauri/src/audio/transport/tcp_server.rs` | listener, **(pure)** HTTP helpers, non-blocking handshake | Create |
 | `src-tauri/src/audio/engine/mod.rs` | `pub fn run(...)` orchestrator (was `start_audio_stream`) | Modify |
-| `src-tauri/src/audio/stream.rs` | **deleted** (logic relocated) | Delete |
-| `src-tauri/src/audio/manager.rs` | call `engine::run`; remove redundant reconnection | Modify |
+| `src-tauri/src/audio/stream.rs` | only the `StreamSocket` enum; **deleted** once the `Connection` trait replaces it | Delete |
+| `src-tauri/src/audio/manager.rs` | **hosts the orchestrator + send loop**; receives the M2–M4 edits (handshake, client connect, reconnection); orchestrator then moves to `engine::run` | Modify |
 | `src-tauri/src/audio/mod.rs` | drop `pub mod stream;` | Modify |
 
 ---
@@ -192,7 +194,7 @@ git commit -m "feat(transport): tested HTTP detection + header helpers"
 ### Task 2.2: Replace the blocking handshake in the accept path
 
 **Files:**
-- Modify: `src-tauri/src/audio/stream.rs` (the server accept block; relocated in M5)
+- Modify: `src-tauri/src/audio/manager.rs` (the server accept block; relocated in M5)
 
 - [ ] **Step 1: Swap the 1.5 s read-timeout handshake for a bounded non-blocking one**
 
@@ -261,7 +263,7 @@ Expected: compiles; all tests pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src-tauri/src/audio/stream.rs
+git add src-tauri/src/audio/manager.rs
 git commit -m "fix(transport): bounded non-blocking HTTP handshake (removes 1.5s stall)"
 ```
 
@@ -273,7 +275,7 @@ git commit -m "fix(transport): bounded non-blocking HTTP handshake (removes 1.5s
 
 **Files:**
 - Modify: `src-tauri/src/audio/transport/tcp_client.rs`
-- Modify: `src-tauri/src/audio/stream.rs`
+- Modify: `src-tauri/src/audio/manager.rs`
 
 - [ ] **Step 1: Write `connect` in `tcp_client.rs`**
 
@@ -311,7 +313,7 @@ pub fn connect(ip: &str, port: u16, dscp_strategy: &str, connect_timeout: Durati
 }
 ```
 
-- [ ] **Step 2: Use it in the client branch of `stream.rs`**
+- [ ] **Step 2: Use it in the client branch of `manager.rs`**
 
 In the client-mode branch, replace the inline `Socket::new(...)` setup + DSCP + `connect_timeout` logic with a call to `connect`, keeping the existing backoff/retry around it:
 
@@ -337,12 +339,12 @@ In the client-mode branch, replace the inline `Socket::new(...)` setup + DSCP + 
 - [ ] **Step 3: Verify compile + tests**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tail -8`
-Expected: compiles; all tests pass. Remove now-unused `socket2` imports from `stream.rs` if the compiler flags them.
+Expected: compiles; all tests pass. Remove now-unused `socket2` imports from `manager.rs` if the compiler flags them.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src-tauri/src/audio/transport/tcp_client.rs src-tauri/src/audio/stream.rs
+git add src-tauri/src/audio/transport/tcp_client.rs src-tauri/src/audio/manager.rs
 git commit -m "refactor(transport): extract client connect with socket options"
 ```
 
@@ -353,7 +355,7 @@ git commit -m "refactor(transport): extract client connect with socket options"
 ### Task 4.1: Thread `auto_reconnect` into the engine and honor it
 
 **Files:**
-- Modify: `src-tauri/src/audio/stream.rs`
+- Modify: `src-tauri/src/audio/manager.rs`
 - Modify: `src-tauri/src/audio/manager.rs`
 
 - [ ] **Step 1: Pass `auto_reconnect` into `start_audio_stream`**
@@ -381,7 +383,7 @@ Expected: compiles; all tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src-tauri/src/audio/stream.rs src-tauri/src/audio/manager.rs
+git add src-tauri/src/audio/manager.rs
 git commit -m "feat(audio): single reconnection policy honoring auto_reconnect (engine-side)"
 ```
 
@@ -428,7 +430,7 @@ git commit -m "refactor(audio): remove redundant manager-level reconnection"
 ### Task 5.1: Route the send loop through the `Connection` trait
 
 **Files:**
-- Modify: `src-tauri/src/audio/stream.rs`
+- Modify: `src-tauri/src/audio/manager.rs`
 
 - [ ] **Step 1: Replace `StreamSocket` with `Box<dyn Connection>`**
 
@@ -438,7 +440,7 @@ In the network thread, change `let mut current_stream: Option<StreamSocket> = No
 
 - Writes: the `ChunkedWriter::new(stream)` / `stream.write_all(&payload)` sites take `&mut **conn` (a `&mut dyn Write`). `ChunkedWriter::new(conn.as_mut())` works since `Box<dyn Connection>: Write`.
 - Disconnect: replace `close_tcp_stream(s, ...)` with `conn.close();`.
-- RTT (from Part B): replace the `let super::stream::StreamSocket::Tcp(tcp) = s;` match with `conn.rtt()`.
+- RTT (from Part B): replace the `let StreamSocket::Tcp(tcp) = s;` match with `conn.rtt()`.
 
 - [ ] **Step 3: Verify compile + tests**
 
@@ -448,7 +450,7 @@ Expected: compiles; all tests pass. The `StreamSocket` enum and `close_tcp_strea
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src-tauri/src/audio/stream.rs
+git add src-tauri/src/audio/manager.rs
 git commit -m "refactor(engine): send loop writes through Connection trait"
 ```
 
@@ -462,13 +464,13 @@ git commit -m "refactor(engine): send loop writes through Connection trait"
 
 - [ ] **Step 1: Relocate the function**
 
-Move `start_audio_stream` (and any remaining private helpers it still uses, e.g. `add_jitter`) from `stream.rs` into `src-tauri/src/audio/engine/mod.rs`, renaming it `pub fn run(...)` with the same parameter list. Update its internal `super::` paths: it now lives in `engine`, so `super::transport::…`, `super::metrics::…`, `super::constants::…`, `super::stats::…` resolve from `audio::engine`. The `StreamSocket` enum and `close_tcp_stream` are dropped (replaced in Task 5.1).
+Move `start_audio_stream` (and any remaining private helpers it still uses, e.g. `add_jitter`) from `manager.rs` into `src-tauri/src/audio/engine/mod.rs`, renaming it `pub fn run(...)` with the same parameter list. Update its internal `super::` paths: it now lives in `engine`, so `super::transport::…`, `super::metrics::…`, `super::constants::…`, `super::stats::…` resolve from `audio::engine`. The `StreamSocket` enum and `close_tcp_stream` are dropped (replaced in Task 5.1).
 
 - [ ] **Step 2: Delete `stream.rs` and update module wiring**
 
 - Delete `src-tauri/src/audio/stream.rs`.
 - In `src-tauri/src/audio/mod.rs`, remove `pub mod stream;`.
-- In `manager.rs`, change the two `start_audio_stream(...)` calls (now one, after Task 4.2) to `super::engine::run(...)` and update the `use` import accordingly.
+- In `manager.rs`, delete the relocated `start_audio_stream`, `close_tcp_stream`, and `add_jitter` definitions and the `use super::stream::StreamSocket;` import; change the (single, post-Task-4.2) call site to `super::engine::run(...)`.
 
 - [ ] **Step 3: Verify compile + full suite**
 
@@ -483,7 +485,7 @@ Expected: compiles clean; all tests pass; clippy clean. No reference to `stream.
 
 ```bash
 git add -A
-git commit -m "refactor(engine): relocate orchestrator to engine::run; remove stream.rs monolith"
+git commit -m "refactor(engine): move orchestrator from manager.rs to engine::run; delete stream.rs enum"
 ```
 
 ---
