@@ -329,37 +329,57 @@ fn start_audio_stream(
         device.supported_input_configs().map_err(|e| e.to_string())?.collect()
     };
 
-    let mut selected_format = cpal::SampleFormat::F32;
-    let mut best_config_range = None;
+    use super::engine::device::{pick_best, ConfigCandidate, SampleFmt};
 
-    // Prefer stereo (2 ch) for full quality, then mono. Prefer F32 > I16 > U16.
-    for ch in [2u16, 1] {
-        for fmt in [cpal::SampleFormat::F32, cpal::SampleFormat::I16, cpal::SampleFormat::U16] {
-            for range in &supported_configs {
-                if range.sample_format() == fmt
-                    && range.channels() == ch
-                    && range.min_sample_rate().0 <= sample_rate
-                    && range.max_sample_rate().0 >= sample_rate
-                {
-                    best_config_range = Some(*range);
-                    selected_format = fmt;
-                    break;
-                }
-            }
-            if best_config_range.is_some() { break; }
+    let to_fmt = |f: cpal::SampleFormat| match f {
+        cpal::SampleFormat::F32 => Some(SampleFmt::F32),
+        cpal::SampleFormat::I16 => Some(SampleFmt::I16),
+        cpal::SampleFormat::U16 => Some(SampleFmt::U16),
+        _ => None,
+    };
+
+    let candidates: Vec<ConfigCandidate> = supported_configs
+        .iter()
+        .filter_map(|r| {
+            to_fmt(r.sample_format()).map(|format| ConfigCandidate {
+                channels: r.channels(),
+                format,
+                min_rate: r.min_sample_rate().0,
+                max_rate: r.max_sample_rate().0,
+            })
+        })
+        .collect();
+
+    let (config_range, selected_format) = match pick_best(&candidates, sample_rate) {
+        Some(i) => {
+            let cand = candidates[i];
+            let range = supported_configs
+                .iter()
+                .find(|r| {
+                    to_fmt(r.sample_format()) == Some(cand.format)
+                        && r.channels() == cand.channels
+                        && r.min_sample_rate().0 == cand.min_rate
+                        && r.max_sample_rate().0 == cand.max_rate
+                })
+                .copied()
+                .expect("candidate originates from supported_configs");
+            (range, range.sample_format())
         }
-        if best_config_range.is_some() { break; }
-    }
-
-    // Fallback: use first available config
-    if best_config_range.is_none() && !supported_configs.is_empty() {
-        let fallback = supported_configs.first().expect("supported_configs non-empty");
-        selected_format = fallback.sample_format();
-        best_config_range = Some(*fallback);
-        emit_log(&app_handle, "warn", format!("Requested Sample Rate {}Hz may not be natively supported. Relying on OS implicit resampler.", sample_rate));
-    }
-
-    let config_range = best_config_range.ok_or_else(|| "No supported audio config found".to_string())?;
+        None => {
+            let fallback = *supported_configs
+                .first()
+                .ok_or_else(|| "No supported audio config found".to_string())?;
+            emit_log(
+                &app_handle,
+                "warn",
+                format!(
+                    "Requested Sample Rate {}Hz not natively supported. Relying on OS resampler.",
+                    sample_rate
+                ),
+            );
+            (fallback, fallback.sample_format())
+        }
+    };
     let device_channels = config_range.channels();
 
     emit_log(
