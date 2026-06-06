@@ -18,11 +18,14 @@ pub struct LogEvent {
 
 #[derive(Clone, Serialize)]
 pub struct QualityEvent {
-    pub score: u8,          // 0-100
-    pub jitter: f32,        // milliseconds
-    pub avg_latency: f32,   // milliseconds
-    pub buffer_health: f32, // 0.0-1.0
-    pub error_count: u64,
+    pub score: u8,
+    /// Best-effort smoothed RTT in ms; `None` => "n/a".
+    pub rtt_ms: Option<f32>,
+    /// Best-effort RTT variance in ms; `None` => "n/a".
+    pub rtt_var_ms: Option<f32>,
+    pub underruns: u64,
+    pub dropped: u64,
+    pub buffer_health: f32,
 }
 
 #[derive(Clone, Serialize)]
@@ -46,9 +49,12 @@ pub struct StreamStats {
     pub start_time: Instant,
     pub is_running: Arc<AtomicBool>,
     /// Samples dropped because the ring buffer was full when the capture
-    /// callback tried to push (real overrun signal). Used by metrics (Part B).
+    /// callback tried to push (real overrun signal).
     #[allow(dead_code)]
     pub overruns: Arc<AtomicU64>,
+    /// Times the consumer was starved (buffer below one chunk after prefill).
+    #[allow(dead_code)]
+    pub underruns: Arc<AtomicU64>,
 }
 
 impl Drop for StreamStats {

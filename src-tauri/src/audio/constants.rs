@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 /// Interval between adaptive buffer health checks
+#[allow(dead_code)]
 pub(crate) const BUFFER_CHECK_INTERVAL_SECS: u64 = 10;
 
 /// Maximum delay between reconnection attempts
@@ -19,6 +20,7 @@ pub(crate) const LOOPBACK_MIN_BUFFER_MS: u32 = 8000;
 pub(crate) const DEFAULT_MIN_BUFFER_MS: u32 = 5000;
 
 /// Prefill duration as a fraction of sample rate (N in 1/N gives fraction of a second)
+#[allow(dead_code)]
 pub(crate) const PREFILL_FRACTION: usize = 5;
 
 /// Initial reconnection delay

@@ -9,7 +9,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use ringbuf::HeapRb;
 use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
-use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -413,8 +412,9 @@ fn start_audio_stream(
         DEFAULT_MIN_BUFFER_MS.max(ring_buffer_duration_ms)
     };
 
+    let ring_capacity_ms = max_buffer_ms.max(adjusted_ring_buffer_duration_ms);
     let ring_buffer_size =
-        (sample_rate as usize) * (device_channels as usize) * (adjusted_ring_buffer_duration_ms as usize) / 1000;
+        (sample_rate as usize) * (device_channels as usize) * (ring_capacity_ms as usize) / 1000;
 
     let adj_ms_u32 = adjusted_ring_buffer_duration_ms;
     let buffer_size_mb = (ring_buffer_size * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
@@ -440,6 +440,8 @@ fn start_audio_stream(
     // Shared stats
     let bytes_sent = Arc::new(AtomicU64::new(0));
     let is_running = Arc::new(AtomicBool::new(true));
+    let overruns = Arc::new(AtomicU64::new(0));
+    let underruns = Arc::new(AtomicU64::new(0));
 
     let bytes_sent_clone = bytes_sent.clone();
     let is_running_clone = is_running.clone();
@@ -450,6 +452,8 @@ fn start_audio_stream(
     let is_server_clone = is_server;
     let device_channels_net = device_channels;
     let dscp_clone = dscp_strategy.clone();
+    let overruns_net = overruns.clone();
+    let underruns_net = underruns.clone();
 
     // 2. Spawn Network Thread (Consumer)
     let priority = if high_priority {
@@ -499,19 +503,22 @@ fn start_audio_stream(
         let mut last_stats_emit = Instant::now();
 
         // Quality tracking
-        let mut latency_samples: VecDeque<f32> = VecDeque::with_capacity(100);
         let mut last_quality_emit = Instant::now();
-        let mut error_count: u64 = 0;
-
-        // Adaptive buffer tracking (display-only — ring buffer size is fixed at creation)
-        let mut current_buffer_ms = adj_ms_u32;
-        let mut last_buffer_check = Instant::now();
 
         let adaptive_min_ms = if is_loopback {
             ADAPTIVE_MIN_LOOPBACK_MS.max(min_buffer_ms)
         } else {
             ADAPTIVE_MIN_DEFAULT_MS.max(min_buffer_ms)
         };
+
+        let mut adaptive = super::engine::buffer::AdaptiveBuffer::new(
+            adaptive_min_ms,
+            max_buffer_ms.max(adaptive_min_ms),
+            super::constants::ADAPTIVE_BUFFER_STEP_MS,
+            adj_ms_u32,
+            6,
+        );
+        let mut glitch_baseline: u64 = 0;
 
         let mut retry_delay = Duration::from_secs(INITIAL_RETRY_DELAY_SECS);
 
@@ -539,7 +546,9 @@ fn start_audio_stream(
         let mut last_heartbeat = Instant::now();
 
         let mut prefilled = false;
-        let prefill_samples = sample_rate as usize * device_channels_net as usize / PREFILL_FRACTION; // 200ms prefill (channel-aware)
+        let prefill_ms = adaptive.target_ms();
+        let prefill_samples =
+            sample_rate as usize * device_channels_net as usize * prefill_ms as usize / 1000;
         emit_log(
             &app_handle_net,
             "info",
@@ -591,6 +600,7 @@ fn start_audio_stream(
                 thread::sleep(Duration::from_millis(10));
                 
             } else if current_stream.is_some() && current_buffered < min_chunk_samples && prefilled {
+                underruns_net.fetch_add(1, Ordering::Relaxed);
                 // Hardware-driven synchronization: sleep until we have enough samples for a FULL chunk
                 thread::sleep(Duration::from_millis(2));
                 continue;
@@ -824,7 +834,7 @@ fn start_audio_stream(
                 if count > 0 {
                     super::engine::encoder::encode_f32_to_pcm_i16_le(&temp_buffer[..count], &mut payload);
 
-                    let write_start = Instant::now();
+                    let _write_start = Instant::now();
                     let mut write_success = false;
                     let mut would_block = false;
 
@@ -857,20 +867,13 @@ fn start_audio_stream(
                     }
 
                     if write_success {
-                        let write_duration_ms = write_start.elapsed().as_secs_f32() * 1000.0;
-                        if latency_samples.len() >= 100 {
-                            latency_samples.pop_front();
-                        }
-                        latency_samples.push_back(write_duration_ms);
-
                         let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
 
                         current_stream = Some(stream_socket);
                     } else if would_block {
                         current_stream = Some(stream_socket);
                     } else {
-                         // Write error — disconnect and increment error counter
-                         error_count += 1;
+                         // Write error — disconnect
                          let StreamSocket::Tcp(s) = stream_socket;
                          {
                              close_tcp_stream(s, "write error", &app_handle_net);
@@ -903,73 +906,63 @@ fn start_audio_stream(
                 last_stats_emit = Instant::now();
             }
 
-            // Quality Logic
+            // Quality Logic (honest metrics)
             if last_quality_emit.elapsed() >= Duration::from_secs(QUALITY_REPORT_INTERVAL_SECS) {
-                let avg_latency = if !latency_samples.is_empty() {
-                    latency_samples.iter().sum::<f32>() / latency_samples.len() as f32
-                } else {
-                    0.0
-                };
-                
-                let jitter_avg = if !latency_samples.is_empty() {
-                    latency_samples.iter().map(|&d| (d - avg_latency).abs()).sum::<f32>() / latency_samples.len() as f32
-                } else {
-                    0.0
-                };
-
                 let occupied = cons.len();
                 let capacity = cons.capacity();
                 let buffer_health = 1.0 - (occupied as f32 / capacity as f32);
-                let jitter_penalty = ((jitter_avg / 20.0).min(1.0) * 50.0) as u8;
-                let buffer_pct = occupied as f32 / capacity as f32;
-                let buffer_penalty = if buffer_pct > 0.5 {
-                    ((buffer_pct - 0.5) * 2.0 * 30.0) as u8
-                } else {
-                    0
-                };
-                let score = 100u8
-                    .saturating_sub(jitter_penalty)
-                    .saturating_sub(buffer_penalty);
+                let occupancy_ratio = occupied as f32 / capacity as f32;
+
+                let total_glitches =
+                    underruns_net.load(Ordering::Relaxed) + overruns_net.load(Ordering::Relaxed);
+                let glitches_delta = total_glitches.saturating_sub(glitch_baseline);
+                glitch_baseline = total_glitches;
+
+                // Best-effort RTT from the live socket, if connected.
+                let rtt = current_stream.as_ref().and_then(|s| {
+                    let StreamSocket::Tcp(tcp) = s;
+                    super::metrics::tcp_rtt(tcp)
+                });
+
+                let score = super::metrics::quality_score(
+                    glitches_delta,
+                    occupancy_ratio,
+                    rtt.map(|r| r.srtt_ms),
+                );
 
                 let _ = app_handle_net.emit(
                     "quality-event",
                     QualityEvent {
                         score,
-                        jitter: jitter_avg,
-                        avg_latency,
+                        rtt_ms: rtt.map(|r| r.srtt_ms),
+                        rtt_var_ms: rtt.map(|r| r.rttvar_ms),
+                        underruns: underruns_net.load(Ordering::Relaxed),
+                        dropped: overruns_net.load(Ordering::Relaxed),
                         buffer_health,
-                        error_count,
                     },
                 );
                 last_quality_emit = Instant::now();
 
-                // Adaptive Buffer
-                if enable_adaptive_buffer
-                    && last_buffer_check.elapsed()
-                        >= Duration::from_secs(BUFFER_CHECK_INTERVAL_SECS)
-                {
-                    last_buffer_check = Instant::now();
-                    if buffer_health < 0.2 && current_buffer_ms > adaptive_min_ms {
-                            let new_size =
-                                current_buffer_ms.saturating_sub(ADAPTIVE_BUFFER_STEP_MS).max(adaptive_min_ms);
-                            if new_size < current_buffer_ms {
-                                current_buffer_ms = new_size;
-                                emit_log(
-                                    &app_handle_net,
-                                    "info",
-                                    format!(
-                                        "Adaptive Buffer: High latency. Reducing to {}ms",
-                                        current_buffer_ms
-                                    ),
-                                );
-                                let _ = app_handle_net.emit(
-                                    "buffer-resize",
-                                    BufferResizeEvent {
-                                        new_size_ms: current_buffer_ms,
-                                        reason: "High Latency".to_string(),
-                                    },
-                                );
-                        }
+                // Real adaptive control: one tick per quality interval.
+                if enable_adaptive_buffer {
+                    if let Some(new_target) = adaptive.on_tick(glitches_delta > 0) {
+                        emit_log(
+                            &app_handle_net,
+                            "info",
+                            format!("Adaptive Buffer: target now {}ms", new_target),
+                        );
+                        let _ = app_handle_net.emit(
+                            "buffer-resize",
+                            BufferResizeEvent {
+                                new_size_ms: new_target,
+                                reason: if glitches_delta > 0 {
+                                    "Glitches detected"
+                                } else {
+                                    "Stable"
+                                }
+                                .to_string(),
+                            },
+                        );
                     }
                 }
             }
@@ -988,7 +981,6 @@ fn start_audio_stream(
     });
 
     // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
-    let overruns = Arc::new(AtomicU64::new(0));
     let capacity_hint = chunk_size as usize * device_channels as usize;
     let audio_stream = super::engine::capture::build_input_stream(
         &device,
@@ -1007,6 +999,7 @@ fn start_audio_stream(
             start_time: Instant::now(),
             is_running,
             overruns,
+            underruns,
         },
     ))
 }
