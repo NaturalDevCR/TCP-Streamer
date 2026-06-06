@@ -3,13 +3,11 @@
 use super::chunked::ChunkedWriter;
 use super::constants::*;
 use super::stats::{emit_log, BufferResizeEvent, QualityEvent, StatsEvent, StreamStats};
-use super::stream::StreamSocket;
 use super::wav_helper::create_wav_header;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use ringbuf::HeapRb;
 use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -133,33 +131,6 @@ impl AudioState {
         if let Ok(tx) = self.tx.lock() {
             let _ = tx.send(AudioCommand::Stop);
         }
-    }
-}
-
-/// Gracefully close a TCP stream, ensuring FIN is sent to prevent zombie connections
-fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
-    use std::net::Shutdown;
-
-    // Send TCP FIN to server (graceful shutdown)
-    if let Err(e) = stream.shutdown(Shutdown::Both) {
-        // May fail if already closed, which is fine
-        // Only log if it's NOT "Socket is not connected" (os error 57)
-        if e.kind() != std::io::ErrorKind::NotConnected {
-            emit_log(
-                app_handle,
-                "debug",
-                format!(
-                    "TCP shutdown {} ({}): socket may already be closed",
-                    context, e
-                ),
-            );
-        }
-    } else {
-        emit_log(
-            app_handle,
-            "debug",
-            format!("TCP connection closed gracefully ({})", context),
-        );
     }
 }
 
@@ -457,7 +428,7 @@ fn start_audio_stream(
             Duration::from_millis(ms.max(MIN_RETRY_DELAY_MS as i64) as u64)
         }
 
-        let mut current_stream: Option<StreamSocket> = None;
+        let mut current_stream: Option<Box<dyn super::transport::Connection>> = None;
         let mut disconnect_time: Option<Instant> = None;
 
         emit_log(
@@ -606,7 +577,7 @@ fn start_audio_stream(
                                 emit_log(&app_handle_net, "success", format!("Client connected from {} (Format: {})", addr, request_format));
                                 use_chunked = is_http;
                                 wav_header_sent = false;
-                                current_stream = Some(StreamSocket::Tcp(stream));
+                                current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
                                 disconnect_time = None;
                                 last_heartbeat = Instant::now();
                             }
@@ -623,7 +594,7 @@ fn start_audio_stream(
                     ) {
                         Ok(stream) => {
                             emit_log(&app_handle_net, "success", format!("Connected to {}:{}", ip_clone, port));
-                            current_stream = Some(StreamSocket::Tcp(stream));
+                            current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
                             disconnect_time = None;
                             retry_delay = Duration::from_secs(2);
                             last_heartbeat = Instant::now();
@@ -644,11 +615,11 @@ fn start_audio_stream(
                 // - "wav": Header + PCM (Browsers/VLC)
                 // - "pcm": Raw PCM (Snapserver)
                 if is_server_clone && format_clone == "wav" && !wav_header_sent {
-                     let StreamSocket::Tcp(ref mut stream) = stream_socket;
                      {
                          // Send header with 0 length (handled by helper) for unknown/stream
                          let header = create_wav_header(sample_rate_clone, device_channels_net, 16);
-                         
+                         let stream: &mut dyn super::transport::Connection = stream_socket.as_mut();
+
                          if use_chunked {
                              let mut writer = ChunkedWriter::new(stream);
                              if let Err(e) = writer.write_all(&header) {
@@ -697,29 +668,28 @@ fn start_audio_stream(
                     let mut write_success = false;
                     let mut would_block = false;
 
-                    match stream_socket {
-                        StreamSocket::Tcp(ref mut stream) => {
-                            if use_chunked {
-                                let mut writer = ChunkedWriter::new(stream);
-                                match writer.write_all(&payload) {
-                                     Ok(_) => write_success = true,
-                                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { would_block = true; },
-                                     Err(e) => {
-                                          emit_log(&app_handle_net, "error", format!("Write error (chunked): {}", e));
-                                     }
-                                }
-                            } else {
-                                match stream.write_all(&payload) {
-                                    Ok(_) => write_success = true,
-                                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { would_block = true; },
-                                    Err(e) => {
-                                         let (level, msg) = if e.kind() == std::io::ErrorKind::BrokenPipe {
-                                             ("info", "Client disconnected".to_string())
-                                         } else {
-                                             ("error", format!("Write error: {}", e))
-                                         };
-                                         emit_log(&app_handle_net, level, msg);
-                                    }
+                    {
+                        let stream: &mut dyn super::transport::Connection = stream_socket.as_mut();
+                        if use_chunked {
+                            let mut writer = ChunkedWriter::new(stream);
+                            match writer.write_all(&payload) {
+                                 Ok(_) => write_success = true,
+                                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { would_block = true; },
+                                 Err(e) => {
+                                      emit_log(&app_handle_net, "error", format!("Write error (chunked): {}", e));
+                                 }
+                            }
+                        } else {
+                            match stream.write_all(&payload) {
+                                Ok(_) => write_success = true,
+                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { would_block = true; },
+                                Err(e) => {
+                                     let (level, msg) = if e.kind() == std::io::ErrorKind::BrokenPipe {
+                                         ("info", "Client disconnected".to_string())
+                                     } else {
+                                         ("error", format!("Write error: {}", e))
+                                     };
+                                     emit_log(&app_handle_net, level, msg);
                                 }
                             }
                         }
@@ -733,10 +703,7 @@ fn start_audio_stream(
                         current_stream = Some(stream_socket);
                     } else {
                          // Write error — disconnect
-                         let StreamSocket::Tcp(s) = stream_socket;
-                         {
-                             close_tcp_stream(s, "write error", &app_handle_net);
-                         }
+                         stream_socket.close();
                          current_stream = None;
 
                          if !is_server_clone && !auto_reconnect_net {
@@ -784,10 +751,7 @@ fn start_audio_stream(
                 glitch_baseline = total_glitches;
 
                 // Best-effort RTT from the live socket, if connected.
-                let rtt = current_stream.as_ref().and_then(|s| {
-                    let StreamSocket::Tcp(tcp) = s;
-                    super::metrics::tcp_rtt(tcp)
-                });
+                let rtt = current_stream.as_ref().and_then(|s| s.rtt());
 
                 let score = super::metrics::quality_score(
                     glitches_delta,
