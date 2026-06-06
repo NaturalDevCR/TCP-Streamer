@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke, listen } from "../composables/useTauri";
 import { useSettingsStore } from "./settings";
-import type { LogEntry, Toast } from "../types/events";
+import type { LogEntry, Toast, QualityEvent } from "../types/events";
 
 export const useStreamStore = defineStore("stream", () => {
   const isStreaming = ref(false);
@@ -15,10 +15,11 @@ export const useStreamStore = defineStore("stream", () => {
 
   // Quality
   const qualityScore = ref(0);
-  const jitter = ref(0);
-  const avgLatency = ref(0);
+  const rttMs = ref<number | null>(null);
+  const rttVarMs = ref<number | null>(null);
+  const underruns = ref(0);
+  const dropped = ref(0);
   const bufferHealth = ref(0);
-  const errorCount = ref(0);
   const bufferMs = ref(0);
 
   // Logs
@@ -177,18 +178,18 @@ export const useStreamStore = defineStore("stream", () => {
       bitrateKbps.value = s.bitrate_kbps;
     });
 
-    await listen("quality-event", (event: { payload: { score: number; jitter: number; avg_latency: number; buffer_health: number; error_count: number } }) => {
+    await listen("quality-event", (event: { payload: QualityEvent }) => {
       const q = event.payload;
       qualityScore.value = q.score;
-      jitter.value = q.jitter;
-      avgLatency.value = q.avg_latency;
+      rttMs.value = q.rtt_ms;
+      rttVarMs.value = q.rtt_var_ms;
+      underruns.value = q.underruns;
+      dropped.value = q.dropped;
       bufferHealth.value = q.buffer_health;
-      errorCount.value = q.error_count;
 
       // Quality warnings
       if (q.score < 50 && !qualityWarningShown) {
-        const msg = `Network quality degraded to ${q.score}. Jitter: ${q.jitter.toFixed(1)}ms`;
-        addToast(msg, "warning");
+        addToast(`Network quality degraded to ${q.score}`, "warning");
         qualityWarningShown = true;
       } else if (q.score >= 70 && qualityWarningShown) {
         addToast(`Network quality recovered to ${q.score}`, "success");
@@ -215,10 +216,11 @@ export const useStreamStore = defineStore("stream", () => {
     bytesSent,
     bitrateKbps,
     qualityScore,
-    jitter,
-    avgLatency,
+    rttMs,
+    rttVarMs,
+    underruns,
+    dropped,
     bufferHealth,
-    errorCount,
     bufferMs,
     logs,
     logFilter,

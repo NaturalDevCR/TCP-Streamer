@@ -16,7 +16,9 @@ describe("useStreamStore", () => {
     expect(store.bytesSent).toBe(0);
     expect(store.bitrateKbps).toBe(0);
     expect(store.qualityScore).toBe(0);
-    expect(store.jitter).toBe(0);
+    expect(store.rttMs).toBeNull();
+    expect(store.underruns).toBe(0);
+    expect(store.dropped).toBe(0);
     expect(store.logs).toEqual([]);
     expect(store.toasts).toEqual([]);
   });

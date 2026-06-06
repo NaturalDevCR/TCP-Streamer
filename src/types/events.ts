@@ -5,13 +5,14 @@ export interface LogEvent {
   message: string;
 }
 
-/** Streaming quality metrics */
+/** Streaming quality metrics (honest signals) */
 export interface QualityEvent {
   score: number;
-  jitter: number;
-  avg_latency: number;
+  rtt_ms: number | null;
+  rtt_var_ms: number | null;
+  underruns: number;
+  dropped: number;
   buffer_health: number;
-  error_count: number;
 }
 
 /** Periodic streaming statistics */
