@@ -40,28 +40,6 @@ pub enum AudioCommand {
     Stop,
 }
 
-/// Stores stream parameters for reconnection
-#[derive(Clone)]
-struct StreamParams {
-    device_name: String,
-    ip: String,
-    port: u16,
-    sample_rate: u32,
-    buffer_size: u32,
-    ring_buffer_duration_ms: u32,
-    high_priority: bool,
-    dscp_strategy: String,
-    format: String,
-    chunk_size: u32,
-    is_loopback: bool,
-    is_server: bool,
-    auto_reconnect: bool,
-    enable_adaptive_buffer: bool,
-    min_buffer_ms: u32,
-    max_buffer_ms: u32,
-    app_handle: AppHandle,
-}
-
 pub struct AudioState {
     pub tx: Mutex<mpsc::SyncSender<AudioCommand>>,
 }
@@ -72,9 +50,6 @@ impl AudioState {
 
         thread::spawn(move || {
             let mut current_stream_handle: Option<(cpal::Stream, StreamStats)> = None;
-            let should_reconnect = Arc::new(AtomicBool::new(false));
-            #[allow(unused_assignments)]
-            let mut current_params: Option<StreamParams> = None;
 
             loop {
                 // Non-blocking command check — allows reconnection to run independently
@@ -106,28 +81,6 @@ impl AudioState {
                             drop(stats);
                         }
 
-                        let params = StreamParams {
-                            device_name: device_name.clone(),
-                            ip: ip.clone(),
-                            port,
-                            sample_rate,
-                            buffer_size,
-                            ring_buffer_duration_ms,
-                            high_priority,
-                            dscp_strategy: dscp_strategy.clone(),
-                            format: if is_server { format.clone() } else { "pcm".to_string() },
-                            chunk_size,
-                            is_loopback,
-                            is_server,
-                            auto_reconnect,
-                            enable_adaptive_buffer,
-                            min_buffer_ms,
-                            max_buffer_ms,
-                            app_handle: (*app_handle).clone(),
-                        };
-                        current_params = Some(params);
-                        should_reconnect.store(auto_reconnect, Ordering::Relaxed);
-
                         if is_server {
                             emit_log(&app_handle, "info", format!("Starting TCP Server on port {}", port));
                         } else {
@@ -155,55 +108,22 @@ impl AudioState {
                         }
                     }
                     Ok(AudioCommand::Stop) => {
-                        should_reconnect.store(false, Ordering::Relaxed);
                         if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
                             stream.pause().ok();
                             drop(stream);
                         }
                         current_stream_handle = None;
-                        current_params = None;
                     }
                     Err(mpsc::TryRecvError::Empty) => {
-                        // No command pending — continue to reconnection check
+                        thread::sleep(Duration::from_millis(200));
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        // Channel closed — exit the thread
                         break;
                     }
                 }
-
-                // Reconnection check — runs every iteration, not blocked by rx
-                if should_reconnect.load(Ordering::Relaxed) && current_stream_handle.is_none() {
-                    if let Some(p) = &current_params {
-                        thread::sleep(Duration::from_secs(2));
-                        emit_log(&p.app_handle, "info", "Attempting to reconnect...".to_string());
-
-                        match start_audio_stream(
-                            p.device_name.clone(), p.ip.clone(), p.port, p.sample_rate, p.buffer_size,
-                            p.ring_buffer_duration_ms, p.high_priority, p.dscp_strategy.clone(),
-                            p.format.clone(), p.chunk_size, p.is_loopback, p.is_server, p.auto_reconnect,
-                            p.enable_adaptive_buffer, p.min_buffer_ms, p.max_buffer_ms,
-                            p.app_handle.clone(),
-                        ) {
-                            Ok((stream, stats)) => {
-                                if let Err(e) = stream.play() {
-                                    emit_log(&p.app_handle, "error", format!("Failed to play stream (reconnect): {}", e));
-                                } else {
-                                    current_stream_handle = Some((stream, stats));
-                                    emit_log(&p.app_handle, "success", "Reconnected successfully".to_string());
-                                }
-                            }
-                            Err(e) => {
-                                emit_log(&p.app_handle, "warning", format!("Reconnection failed: {}", e));
-                            }
-                        }
-                    }
-                } else if current_stream_handle.is_some() || !should_reconnect.load(Ordering::Relaxed) {
-                    // Idle — sleep briefly to avoid busy-spinning
-                    thread::sleep(Duration::from_millis(200));
-                }
             }
+
         });
 
         Self { tx: Mutex::new(tx) }
