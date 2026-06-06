@@ -88,6 +88,30 @@ export const useStreamStore = defineStore("stream", () => {
     const device = settings.deviceName;
     const isServer = settings.isServer;
 
+    if (settings.role === "sink") {
+      if (!settings.outputDevice) {
+        statusText.value = "Select an output device";
+        return;
+      }
+      if (!settings.sourceAddr) {
+        statusText.value = "Enter the source address";
+        return;
+      }
+      await settings.saveSettings();
+      try {
+        await invoke("start_sink", {
+          outputDevice: settings.outputDevice,
+          sourceAddr: settings.sourceAddr,
+          latencyProfile: settings.latencyProfile,
+        });
+        isStreaming.value = true;
+        statusText.value = `Playing from ${settings.sourceAddr}`;
+      } catch (error) {
+        statusText.value = "Error: " + error;
+      }
+      return;
+    }
+
     if (!device) {
       statusText.value = "Select a device";
       return;
@@ -123,6 +147,7 @@ export const useStreamStore = defineStore("stream", () => {
         format: settings.format,
         latencyProfile: settings.latencyProfile,
         allowlist: settings.allowlist,
+        transport: settings.transport,
       });
 
       isStreaming.value = true;

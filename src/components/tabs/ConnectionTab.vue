@@ -1,7 +1,45 @@
 <template>
   <div class="animate-fade-in space-y-4">
-    <!-- Source -->
+    <!-- Role -->
     <section class="glass-card">
+      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">Role</h3>
+      <SelectField
+        id="role-select"
+        v-model="settings.role"
+        label="Role"
+        :disabled="stream.isStreaming"
+      >
+        <option value="source">Source (capture &amp; send)</option>
+        <option value="sink">Sink (receive &amp; play)</option>
+      </SelectField>
+    </section>
+
+    <!-- Sink -->
+    <section v-if="settings.role === 'sink'" class="glass-card">
+      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
+        Sink Settings
+      </h3>
+      <SelectField
+        id="output-device"
+        v-model="settings.outputDevice"
+        label="Output Device"
+        :disabled="stream.isStreaming"
+      >
+        <option v-if="settings.outputDevices.length === 0" disabled>No output devices found</option>
+        <option v-for="d in settings.outputDevices" :key="d" :value="d">{{ d }}</option>
+      </SelectField>
+      <InputField
+        id="source-addr"
+        v-model="settings.sourceAddr"
+        label="Source Address"
+        placeholder="192.168.1.50:4953"
+        :disabled="stream.isStreaming"
+        class="mt-3"
+      />
+    </section>
+
+    <!-- Source -->
+    <section v-if="settings.role === 'source'" class="glass-card">
       <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
         Source
       </h3>
@@ -29,10 +67,22 @@
           @update:model-value="onLoopbackChange"
         />
       </div>
+
+      <!-- Transport (Source only) -->
+      <SelectField
+        id="transport-select"
+        v-model="settings.transport"
+        label="Transport"
+        :disabled="stream.isStreaming"
+        class="mt-3"
+      >
+        <option value="tcp">TCP</option>
+        <option value="udp">Native UDP</option>
+      </SelectField>
     </section>
 
     <!-- Connection Mode -->
-    <section class="glass-card">
+    <section v-if="settings.role === 'source'" class="glass-card">
       <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
         Connection
       </h3>
@@ -47,7 +97,7 @@
     </section>
 
     <!-- Destination / Server Settings -->
-    <section class="glass-card">
+    <section v-if="settings.role === 'source'" class="glass-card">
       <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
         {{ settings.isServer ? "TCP Server Settings" : "TCP Destination" }}
       </h3>
@@ -83,6 +133,7 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from "vue";
 import { useSettingsStore } from "../../stores/settings.ts";
 import { useStreamStore } from "../../stores/stream.ts";
 import SelectField from "../ui/SelectField.vue";
@@ -91,6 +142,10 @@ import CheckboxField from "../ui/CheckboxField.vue";
 
 const settings = useSettingsStore();
 const stream = useStreamStore();
+
+onMounted(async () => {
+  await settings.loadOutputDevices();
+});
 
 async function onLoopbackChange() {
   await settings.loadDevices();

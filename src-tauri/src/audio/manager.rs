@@ -29,9 +29,16 @@ pub enum AudioCommand {
         max_buffer_ms: u32,
         latency_profile: String,
         allowlist: String,
+        transport: String,
         app_handle: Box<AppHandle>,
     },
     Stop,
+    StartSink {
+        output_device: String,
+        source_addr: String,
+        latency_profile: String,
+        app_handle: Box<AppHandle>,
+    },
 }
 
 pub struct AudioState {
@@ -66,6 +73,7 @@ impl AudioState {
                         max_buffer_ms,
                         latency_profile,
                         allowlist,
+                        transport,
                         app_handle,
                     }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
@@ -86,7 +94,7 @@ impl AudioState {
                             ring_buffer_duration_ms, high_priority, dscp_strategy,
                             format, chunk_size, is_loopback, is_server, auto_reconnect,
                             enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
-                            latency_profile, allowlist,
+                            latency_profile, allowlist, transport,
                             (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {
@@ -109,6 +117,38 @@ impl AudioState {
                             drop(stream);
                         }
                         current_stream_handle = None;
+                    }
+                    Ok(AudioCommand::StartSink {
+                        output_device,
+                        source_addr,
+                        latency_profile,
+                        app_handle,
+                    }) => {
+                        if let Some((stream, stats)) = current_stream_handle.take() {
+                            stats.is_running.store(false, Ordering::Relaxed);
+                            stream.pause().ok();
+                            drop(stream);
+                            drop(stats);
+                        }
+
+                        emit_log(&app_handle, "info", format!("Starting Sink: subscribing to {} for output {}", source_addr, output_device));
+
+                        match super::engine::sink::run_sink(
+                            output_device, source_addr, latency_profile,
+                            (*app_handle).clone(),
+                        ) {
+                            Ok((stream, stats)) => {
+                                if let Err(e) = stream.play() {
+                                    emit_log(&app_handle, "error", format!("Failed to play stream: {}", e));
+                                } else {
+                                    current_stream_handle = Some((stream, stats));
+                                    emit_log(&app_handle, "success", "Sink started successfully".to_string());
+                                }
+                            }
+                            Err(e) => {
+                                emit_log(&app_handle, "error", format!("Failed to start sink: {}", e));
+                            }
+                        }
                     }
                     Err(mpsc::TryRecvError::Empty) => {
                         thread::sleep(Duration::from_millis(200));

@@ -39,6 +39,7 @@ pub fn start_stream(
     max_buffer_ms: u32,
     latency_profile: String,
     allowlist: String,
+    transport: String,
 ) -> Result<(), AudioError> {
     let command = AudioCommand::Start {
         device_name,
@@ -59,6 +60,7 @@ pub fn start_stream(
         max_buffer_ms,
         latency_profile,
         allowlist,
+        transport,
         app_handle: Box::new(app_handle),
     };
 
@@ -78,6 +80,24 @@ pub fn stop_stream(state: State<'_, AudioState>) -> Result<(), AudioError> {
         .lock()
         .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
         .send(AudioCommand::Stop)
+        .map_err(|e| AudioError::ChannelError(e.to_string()))
+}
+
+/// Starts the sink: subscribes to a native UDP source and plays audio
+/// to the selected output device.
+#[tauri::command]
+pub fn start_sink(
+    state: State<'_, AudioState>,
+    app_handle: AppHandle,
+    output_device: String,
+    source_addr: String,
+    latency_profile: String,
+) -> Result<(), AudioError> {
+    state.tx.lock()
+        .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
+        .send(AudioCommand::StartSink {
+            output_device, source_addr, latency_profile, app_handle: Box::new(app_handle),
+        })
         .map_err(|e| AudioError::ChannelError(e.to_string()))
 }
 
@@ -144,6 +164,29 @@ pub fn get_input_devices(
     }
 
     Ok(all_devices)
+}
+
+// Stopping the sink reuses `stop_stream` (sends Stop to the manager,
+// which stops whatever is currently running).
+
+/// Enumerates available audio output devices across all CPAL hosts.
+#[tauri::command]
+pub fn get_output_devices() -> Result<Vec<String>, AudioError> {
+    let mut all = Vec::new();
+    for host_id in cpal::available_hosts() {
+        if let Ok(host) = cpal::host_from_id(host_id) {
+            if let Ok(devices) = host.output_devices() {
+                for dev in devices {
+                    if let Ok(name) = dev.name() {
+                        all.push(name);
+                    }
+                }
+            }
+        }
+    }
+    all.sort();
+    all.dedup();
+    Ok(all)
 }
 
 /// Returns the primary local IP address of the machine.

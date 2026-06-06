@@ -12,30 +12,32 @@
 **Depends on:** Phase 2A merged (latency profile, generic naming). **Anchor edits by quoted code.**
 
 **Wire format (used across this plan):**
+
 ```
 AUDIO       : magic[2]=b"TS" | ver[1]=1 | type[1]=0 | flags[1] | seq[8 BE] | ts_us[8 BE] | pcm...
 SUBSCRIBE   : magic[2]=b"TS" | ver[1]=1 | type[1]=1 | salt_b[8]
 STREAM_INFO : magic[2]=b"TS" | ver[1]=1 | type[1]=2 | sample_rate[4 BE] | channels[2 BE] | salt_a[8] | flags[1]
 ```
+
 `flags` bit0 = encrypted (always 0 in 2B-i; the field exists so 2B-ii adds crypto without a format change).
 
 ---
 
 ## File Structure
 
-| File | Responsibility | Status |
-|---|---|---|
-| `src-tauri/src/audio/engine/decoder.rs` | **(pure)** PCM i16 LE → f32 | Create |
-| `src-tauri/src/audio/transport/udp/mod.rs` | declares udp submodules | Create |
-| `src-tauri/src/audio/transport/udp/packet.rs` | **(pure)** wire format encode/decode | Create |
-| `src-tauri/src/audio/transport/udp/jitter.rs` | **(pure)** reorder/de-jitter buffer | Create |
-| `src-tauri/src/audio/engine/playback.rs` | RT-safe cpal output + `FrameSource` trait | Create |
-| `src-tauri/src/audio/transport/udp/sink.rs` | sink I/O: subscribe, recv→jitter, FrameSource impl | Create |
-| `src-tauri/src/audio/transport/udp/source.rs` | source I/O: accept subscribe, stream audio | Create |
-| `src-tauri/src/audio/engine/sink.rs` | sink orchestrator (output stream + recv thread) | Create |
-| `src-tauri/src/audio/{mod,engine/mod,transport/mod}.rs` | wire new modules | Modify |
+| File                                                        | Responsibility                                                        | Status |
+| ----------------------------------------------------------- | --------------------------------------------------------------------- | ------ |
+| `src-tauri/src/audio/engine/decoder.rs`                     | **(pure)** PCM i16 LE → f32                                           | Create |
+| `src-tauri/src/audio/transport/udp/mod.rs`                  | declares udp submodules                                               | Create |
+| `src-tauri/src/audio/transport/udp/packet.rs`               | **(pure)** wire format encode/decode                                  | Create |
+| `src-tauri/src/audio/transport/udp/jitter.rs`               | **(pure)** reorder/de-jitter buffer                                   | Create |
+| `src-tauri/src/audio/engine/playback.rs`                    | RT-safe cpal output + `FrameSource` trait                             | Create |
+| `src-tauri/src/audio/transport/udp/sink.rs`                 | sink I/O: subscribe, recv→jitter, FrameSource impl                    | Create |
+| `src-tauri/src/audio/transport/udp/source.rs`               | source I/O: accept subscribe, stream audio                            | Create |
+| `src-tauri/src/audio/engine/sink.rs`                        | sink orchestrator (output stream + recv thread)                       | Create |
+| `src-tauri/src/audio/{mod,engine/mod,transport/mod}.rs`     | wire new modules                                                      | Modify |
 | `src-tauri/src/audio/commands.rs` · `manager.rs` · `lib.rs` | `get_output_devices`, `start_sink`, `stop_sink`; native source option | Modify |
-| `src/stores/settings.ts` · `stream.ts` · components | role + sink UI (output device, source addr) | Modify |
+| `src/stores/settings.ts` · `stream.ts` · components         | role + sink UI (output device, source addr)                           | Modify |
 
 ---
 
@@ -129,6 +131,7 @@ git commit -m "feat(engine): add tested PCM i16 LE -> f32 decoder"
 - [ ] **Step 1: Declare the modules**
 
 In `src-tauri/src/audio/transport/mod.rs`, add `pub mod udp;`. Create `src-tauri/src/audio/transport/udp/mod.rs` with:
+
 ```rust
 //! Native low-latency UDP transport (Phase 2B).
 pub mod jitter;
@@ -965,6 +968,7 @@ git commit -m "feat(audio): start_sink command + manager wiring"
 - [ ] **Step 1: Add role + sink fields**
 
 In `settings.ts`:
+
 - Add `const role = ref("source");` (`"source"` | `"sink"`) and `const transport = ref("tcp");` (`"tcp"` | `"udp"`, source-side).
 - Add `const outputDevice = ref("");` and `const sourceAddr = ref("");` (sink-side) and `const outputDevices = ref<string[]>([]);`.
 - Persist them in `SettingsDict` (`role?`, `transport?`, `output_device?`, `source_addr?`) + load/save (same pattern as the other fields).
@@ -992,23 +996,29 @@ git commit -m "feat(ui): sink role state (output device, source address)"
 In `stream.ts` `startStream`, at the top branch on `settings.role`:
 
 ```ts
-    if (settings.role === "sink") {
-      if (!settings.outputDevice) { statusText.value = "Select an output device"; return; }
-      if (!settings.sourceAddr) { statusText.value = "Enter the source address"; return; }
-      await settings.saveSettings();
-      try {
-        await invoke("start_sink", {
-          outputDevice: settings.outputDevice,
-          sourceAddr: settings.sourceAddr,
-          latencyProfile: settings.latencyProfile,
-        });
-        isStreaming.value = true;
-        statusText.value = `Playing from ${settings.sourceAddr}`;
-      } catch (error) {
-        statusText.value = "Error: " + error;
-      }
-      return;
-    }
+if (settings.role === "sink") {
+  if (!settings.outputDevice) {
+    statusText.value = "Select an output device";
+    return;
+  }
+  if (!settings.sourceAddr) {
+    statusText.value = "Enter the source address";
+    return;
+  }
+  await settings.saveSettings();
+  try {
+    await invoke("start_sink", {
+      outputDevice: settings.outputDevice,
+      sourceAddr: settings.sourceAddr,
+      latencyProfile: settings.latencyProfile,
+    });
+    isStreaming.value = true;
+    statusText.value = `Playing from ${settings.sourceAddr}`;
+  } catch (error) {
+    statusText.value = "Error: " + error;
+  }
+  return;
+}
 ```
 
 Also add `transport: settings.transport,` to the source-mode `invoke("start_stream", {...})` object (so the native UDP source option reaches the backend). `stopStream` already calls `invoke("stop_stream")`, which stops the sink too — no change.
@@ -1034,18 +1044,30 @@ git commit -m "feat(ui): start sink playback from the stream store"
 At the top of `ConnectionTab.vue`'s template, add a role `SelectField` (`settings.role`: Source / Sink). When `settings.role === "sink"`, show an output-device `SelectField` (bound to `settings.outputDevice`, options from `settings.outputDevices`) and a source-address `InputField` (`settings.sourceAddr`, placeholder `192.168.1.50:4953`), and hide the source-only sections. When `settings.role === "source"`, additionally show a transport `SelectField` (`settings.transport`: TCP / Native UDP). On mount (in `<script setup>`), call `settings.loadOutputDevices()`.
 
 ```vue
-      <SelectField id="role-select" v-model="settings.role" label="Role" :disabled="stream.isStreaming">
+<SelectField id="role-select" v-model="settings.role" label="Role" :disabled="stream.isStreaming">
         <option value="source">Source (capture & send)</option>
         <option value="sink">Sink (receive & play)</option>
       </SelectField>
 ```
 
 (Sink fields, shown with `v-if="settings.role === 'sink'"`:)
+
 ```vue
-      <SelectField id="output-device" v-model="settings.outputDevice" label="Output Device" :disabled="stream.isStreaming">
+<SelectField
+  id="output-device"
+  v-model="settings.outputDevice"
+  label="Output Device"
+  :disabled="stream.isStreaming"
+>
         <option v-for="d in settings.outputDevices" :key="d" :value="d">{{ d }}</option>
       </SelectField>
-      <InputField id="source-addr" v-model="settings.sourceAddr" label="Source Address" placeholder="192.168.1.50:4953" :disabled="stream.isStreaming" />
+<InputField
+  id="source-addr"
+  v-model="settings.sourceAddr"
+  label="Source Address"
+  placeholder="192.168.1.50:4953"
+  :disabled="stream.isStreaming"
+/>
 ```
 
 - [ ] **Step 2: Verify**
@@ -1140,11 +1162,13 @@ git commit -m "test(udp): localhost source<->sink handshake + audio frame"
 - [ ] **Step 1: Complete check suite**
 
 Run:
+
 ```bash
 pnpm test && pnpm typecheck && pnpm lint && pnpm format:check && \
 cargo test --manifest-path src-tauri/Cargo.toml && \
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
 Expected: all green; Rust tests up by ~16 (decoder 3, packet 3, jitter 5, loopback 1, + existing).
 
 - [ ] **Step 2: Manual end-to-end (two instances)**

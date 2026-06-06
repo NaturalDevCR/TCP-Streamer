@@ -9,6 +9,7 @@ pub mod dscp;
 pub mod resolve;
 pub mod tcp_client;
 pub mod tcp_server;
+pub mod udp;
 
 use crate::audio::metrics::RttSample;
 use std::io::Write;

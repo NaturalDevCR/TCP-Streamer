@@ -2,9 +2,12 @@
 
 pub mod buffer;
 pub mod capture;
+pub mod decoder;
 pub mod device;
 pub mod encoder;
 pub mod latency;
+pub mod playback;
+pub mod sink;
 
 // ── Imports for the engine::run orchestrator ──
 use super::chunked::ChunkedWriter;
@@ -69,6 +72,7 @@ pub fn run(
     max_buffer_ms: u32,
     latency_profile: String,
     allowlist: String,
+    transport: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
 
@@ -76,8 +80,8 @@ pub fn run(
         &app_handle,
         "debug",
         format!(
-            "Init stream: Mode={} Protocol=TCP, Device='{}', Rate={}, RingMs={}, Priority={}, DSCP={}, Format={}, Chunk={}, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
-            if is_server { "SERVER" } else { "CLIENT" }, device_name, sample_rate, ring_buffer_duration_ms, high_priority, dscp_strategy, format, chunk_size, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
+            "Init stream: Mode={} Protocol={} Device='{}', Rate={}, RingMs={}, Priority={}, DSCP={}, Format={}, Chunk={}, Loopback={}, AdaptiveBuf={} ({}ms-{}ms)",
+            if is_server { "SERVER" } else { "CLIENT" }, transport, device_name, sample_rate, ring_buffer_duration_ms, high_priority, dscp_strategy, format, chunk_size, is_loopback, enable_adaptive_buffer, min_buffer_ms, max_buffer_ms
         ),
     );
 
@@ -275,6 +279,7 @@ pub fn run(
     let overruns_net = overruns.clone();
     let underruns_net = underruns.clone();
     let effective_chunk_net = effective_chunk;
+    let transport_net = transport.clone();
 
     let allow_rules = super::transport::allowlist::parse_rules(&allowlist);
 
@@ -381,6 +386,7 @@ pub fn run(
         let mut wav_header_sent = false;
         let mut prefill_debug_timer = Instant::now();
         let mut payload: Vec<u8> = Vec::new();
+        let mut udp_source: Option<super::transport::udp::source::UdpSource> = None;
 
         while is_running_clone.load(Ordering::Relaxed) {
             // 1. Hardware-Driven Pacing
@@ -444,6 +450,114 @@ pub fn run(
                     ),
                 );
                 last_heartbeat = Instant::now();
+            }
+
+            // Native UDP transport (Phase 2B)
+            if transport_net == "udp" {
+                // Lazily bind the UDP source on first iteration.
+                if udp_source.is_none() {
+                    match super::transport::udp::source::UdpSource::bind(port, sample_rate_clone, device_channels_net) {
+                        Ok(s) => { emit_log(&app_handle_net, "success", format!("Native UDP source on port {}", port)); udp_source = Some(s); }
+                        Err(e) => { emit_log(&app_handle_net, "error", format!("UDP bind failed: {}", e)); thread::sleep(Duration::from_millis(500)); }
+                    }
+                }
+                if let Some(src) = udp_source.as_mut() {
+                    src.poll_subscribe();
+                    if src.has_peer() {
+                        let count = cons.pop_slice(&mut temp_buffer);
+                        if count > 0 {
+                            self::encoder::encode_f32_to_pcm_i16_le(&temp_buffer[..count], &mut payload);
+                            src.send_audio(&payload);
+                            let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                        } else {
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                    } else {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                }
+            }
+
+            // Stats Logic
+            if last_stats_emit.elapsed() >= Duration::from_secs(2) {
+                let uptime = start_time.elapsed().as_secs();
+                let current_bytes = bytes_sent_clone.load(Ordering::Relaxed);
+                let bitrate = if uptime > 0 {
+                    (current_bytes as f64 * 8.0) / (uptime as f64 * 1000.0)
+                } else {
+                    0.0
+                };
+                let _ = app_handle_net.emit(
+                    "stats-event",
+                    StatsEvent {
+                        uptime_seconds: uptime,
+                        bytes_sent: current_bytes,
+                        bitrate_kbps: bitrate,
+                    },
+                );
+                last_stats_emit = Instant::now();
+            }
+
+            // Quality Logic (honest metrics)
+            if last_quality_emit.elapsed() >= Duration::from_secs(QUALITY_REPORT_INTERVAL_SECS) {
+                let occupied = cons.len();
+                let capacity = cons.capacity();
+                let buffer_health = 1.0 - (occupied as f32 / capacity as f32);
+                let occupancy_ratio = occupied as f32 / capacity as f32;
+
+                let total_glitches =
+                    underruns_net.load(Ordering::Relaxed) + overruns_net.load(Ordering::Relaxed);
+                let glitches_delta = total_glitches.saturating_sub(glitch_baseline);
+                glitch_baseline = total_glitches;
+
+                // Best-effort RTT from the live socket, if connected.
+                let rtt = current_stream.as_ref().and_then(|s| s.rtt());
+
+                let score = super::metrics::quality_score(
+                    glitches_delta,
+                    occupancy_ratio,
+                    rtt.map(|r| r.srtt_ms),
+                );
+
+                let _ = app_handle_net.emit(
+                    "quality-event",
+                    QualityEvent {
+                        score,
+                        rtt_ms: rtt.map(|r| r.srtt_ms),
+                        rtt_var_ms: rtt.map(|r| r.rttvar_ms),
+                        underruns: underruns_net.load(Ordering::Relaxed),
+                        dropped: overruns_net.load(Ordering::Relaxed),
+                        buffer_health,
+                    },
+                );
+                last_quality_emit = Instant::now();
+
+                // Real adaptive control: one tick per quality interval.
+                if enable_adaptive_buffer {
+                    if let Some(new_target) = adaptive.on_tick(glitches_delta > 0) {
+                        emit_log(
+                            &app_handle_net,
+                            "info",
+                            format!("Adaptive Buffer: target now {}ms", new_target),
+                        );
+                        let _ = app_handle_net.emit(
+                            "buffer-resize",
+                            BufferResizeEvent {
+                                new_size_ms: new_target,
+                                reason: if glitches_delta > 0 {
+                                    "Glitches detected"
+                                } else {
+                                    "Stable"
+                                }
+                                .to_string(),
+                            },
+                        );
+                    }
+                }
+            }
+
+            if transport_net == "udp" {
+                continue;
             }
 
             // 2. Connection Management
@@ -645,84 +759,6 @@ pub fn run(
                     }
                 } else {
                     current_stream = Some(stream_socket);
-                }
-            }
-
-            // Stats Logic
-            if last_stats_emit.elapsed() >= Duration::from_secs(2) {
-                let uptime = start_time.elapsed().as_secs();
-                let current_bytes = bytes_sent_clone.load(Ordering::Relaxed);
-                let bitrate = if uptime > 0 {
-                    (current_bytes as f64 * 8.0) / (uptime as f64 * 1000.0)
-                } else {
-                    0.0
-                };
-                let _ = app_handle_net.emit(
-                    "stats-event",
-                    StatsEvent {
-                        uptime_seconds: uptime,
-                        bytes_sent: current_bytes,
-                        bitrate_kbps: bitrate,
-                    },
-                );
-                last_stats_emit = Instant::now();
-            }
-
-            // Quality Logic (honest metrics)
-            if last_quality_emit.elapsed() >= Duration::from_secs(QUALITY_REPORT_INTERVAL_SECS) {
-                let occupied = cons.len();
-                let capacity = cons.capacity();
-                let buffer_health = 1.0 - (occupied as f32 / capacity as f32);
-                let occupancy_ratio = occupied as f32 / capacity as f32;
-
-                let total_glitches =
-                    underruns_net.load(Ordering::Relaxed) + overruns_net.load(Ordering::Relaxed);
-                let glitches_delta = total_glitches.saturating_sub(glitch_baseline);
-                glitch_baseline = total_glitches;
-
-                // Best-effort RTT from the live socket, if connected.
-                let rtt = current_stream.as_ref().and_then(|s| s.rtt());
-
-                let score = super::metrics::quality_score(
-                    glitches_delta,
-                    occupancy_ratio,
-                    rtt.map(|r| r.srtt_ms),
-                );
-
-                let _ = app_handle_net.emit(
-                    "quality-event",
-                    QualityEvent {
-                        score,
-                        rtt_ms: rtt.map(|r| r.srtt_ms),
-                        rtt_var_ms: rtt.map(|r| r.rttvar_ms),
-                        underruns: underruns_net.load(Ordering::Relaxed),
-                        dropped: overruns_net.load(Ordering::Relaxed),
-                        buffer_health,
-                    },
-                );
-                last_quality_emit = Instant::now();
-
-                // Real adaptive control: one tick per quality interval.
-                if enable_adaptive_buffer {
-                    if let Some(new_target) = adaptive.on_tick(glitches_delta > 0) {
-                        emit_log(
-                            &app_handle_net,
-                            "info",
-                            format!("Adaptive Buffer: target now {}ms", new_target),
-                        );
-                        let _ = app_handle_net.emit(
-                            "buffer-resize",
-                            BufferResizeEvent {
-                                new_size_ms: new_target,
-                                reason: if glitches_delta > 0 {
-                                    "Glitches detected"
-                                } else {
-                                    "Stable"
-                                }
-                                .to_string(),
-                            },
-                        );
-                    }
                 }
             }
         }

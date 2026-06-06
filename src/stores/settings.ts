@@ -25,6 +25,10 @@ interface SettingsDict {
   latency_profile?: string;
   allowlist?: string;
   mode?: string;
+  role?: string;
+  transport?: string;
+  output_device?: string;
+  source_addr?: string;
 }
 
 export const useSettingsStore = defineStore("settings", () => {
@@ -33,6 +37,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const osType = ref("unknown");
   const localIp = ref("127.0.0.1");
 
+  // Role & Transport
+  const role = ref("source"); // "source" | "sink"
+  const transport = ref("tcp"); // "tcp" | "udp"
+
   // Connection
   const deviceName = ref("");
   const mode = ref("client"); // "client" | "server"
@@ -40,6 +48,11 @@ export const useSettingsStore = defineStore("settings", () => {
   const port = ref(1704);
   const loopbackMode = ref(false);
   const allowlist = ref("");
+
+  // Sink
+  const outputDevice = ref("");
+  const sourceAddr = ref("");
+  const outputDevices = ref<string[]>([]);
 
   // Audio
   const sampleRate = ref(48000);
@@ -126,6 +139,20 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function loadOutputDevices() {
+    try {
+      const result = (await invoke("get_output_devices")) as string[];
+      outputDevices.value = result || [];
+      if (outputDevice.value && !outputDevices.value.includes(outputDevice.value)) {
+        outputDevice.value = outputDevices.value[0] || "";
+      } else if (!outputDevice.value && outputDevices.value.length > 0) {
+        outputDevice.value = outputDevices.value[0];
+      }
+    } catch {
+      outputDevices.value = [];
+    }
+  }
+
   async function loadSettings() {
     const store = await getStore();
     await loadProfiles();
@@ -153,6 +180,10 @@ export const useSettingsStore = defineStore("settings", () => {
     if (s.latency_profile) latencyProfile.value = s.latency_profile as string;
     if (s.allowlist) allowlist.value = s.allowlist as string;
     if (s.mode) mode.value = s.mode as string;
+    if (s.role) role.value = s.role as string;
+    if (s.transport) transport.value = s.transport as string;
+    if (s.output_device) outputDevice.value = s.output_device as string;
+    if (s.source_addr) sourceAddr.value = s.source_addr as string;
 
     // Load loopback mode
     const savedLoopback = (await store.get("loopback_mode")) as boolean | null;
@@ -183,6 +214,10 @@ export const useSettingsStore = defineStore("settings", () => {
       latency_profile: latencyProfile.value,
       allowlist: allowlist.value,
       mode: mode.value,
+      role: role.value,
+      transport: transport.value,
+      output_device: outputDevice.value,
+      source_addr: sourceAddr.value,
     };
 
     const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
@@ -287,6 +322,11 @@ export const useSettingsStore = defineStore("settings", () => {
     currentProfile,
     devicesLoading,
     devicesError,
+    role,
+    transport,
+    outputDevice,
+    sourceAddr,
+    outputDevices,
     // Computed
     isServer,
     isLoopback,
@@ -300,5 +340,6 @@ export const useSettingsStore = defineStore("settings", () => {
     createProfile,
     deleteProfile,
     toggleAutostart,
+    loadOutputDevices,
   };
 });
