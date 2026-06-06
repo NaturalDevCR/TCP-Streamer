@@ -417,6 +417,7 @@ fn start_audio_stream(
     let sample_rate_clone = sample_rate;
     let is_server_clone = is_server;
     let device_channels_net = device_channels;
+    let dscp_clone = dscp_strategy.clone();
 
     // 2. Spawn Network Thread (Consumer)
     let priority = if high_priority {
@@ -592,6 +593,15 @@ fn start_audio_stream(
                         match l.accept() {
                             Ok((mut stream, addr)) => {
                                 let _ = stream.set_nodelay(true);
+
+                                // Apply DSCP/QoS to the accepted client connection (parity with client mode).
+                                let tos_val = super::transport::dscp::dscp_to_tos(&dscp_clone);
+                                if tos_val > 0 {
+                                    let sref = socket2::SockRef::from(&stream);
+                                    if let Err(e) = sref.set_tos(u32::from(tos_val)) {
+                                        emit_log(&app_handle_net, "warning", format!("Failed to set server QoS/TOS: {}", e));
+                                    }
+                                }
                                 
                                 // Peek for HTTP
                                 let mut buf = [0u8; 4];
@@ -675,15 +685,10 @@ fn start_audio_stream(
                         .with_interval(Duration::from_secs(1));
                     let _ = socket.set_tcp_keepalive(&keepalive);
 
-                    let tos_val = match dscp_strategy.as_str() {
-                        "EF" => 0xB8,
-                        "CS5" => 0xA0,
-                        "LowDelay" => 0x10,
-                        _ => 0x00,
-                    };
+                    let tos_val = super::transport::dscp::dscp_to_tos(&dscp_clone);
 
                     if tos_val > 0 {
-                        if let Err(e) = socket.set_tos(tos_val) {
+                        if let Err(e) = socket.set_tos(u32::from(tos_val)) {
                             emit_log(
                                 &app_handle_net,
                                 "warning",
