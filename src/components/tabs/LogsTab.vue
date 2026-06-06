@@ -18,9 +18,11 @@
             <option value="trace">Trace</option>
           </select>
           <button
-            @click="stream.clearLogs"
             class="px-3 py-1 text-xs bg-white/10 border-0 rounded text-slate-300 hover:bg-white/20 cursor-pointer transition-colors"
-          >Clear</button>
+            @click="stream.clearLogs"
+          >
+            Clear
+          </button>
         </div>
       </div>
 
@@ -31,13 +33,16 @@
           :key="i"
           :class="[
             'px-2 py-1 rounded text-xs font-mono flex items-start gap-2',
-            logColors[log.level] || 'bg-white/5 text-slate-300'
+            logColors[log.level] || 'bg-white/5 text-slate-300',
           ]"
         >
           <span class="text-white/40 shrink-0">[{{ log.timestamp }}]</span>
           <span>{{ log.message }}</span>
         </div>
-        <div v-if="stream.filteredLogs.length === 0" class="flex items-center justify-center h-full text-slate-500 text-sm">
+        <div
+          v-if="stream.filteredLogs.length === 0"
+          class="flex items-center justify-center h-full text-slate-500 text-sm"
+        >
           No logs to display
         </div>
       </div>
@@ -45,14 +50,14 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
-import { useStreamStore } from "../../stores/stream.js";
+import { useStreamStore } from "../../stores/stream.ts";
 
 const stream = useStreamStore();
-const logContainer = ref(null);
+const logContainer = ref<HTMLElement | null>(null);
 
-const logColors = {
+const logColors: Record<string, string> = {
   info: "bg-blue-500/10 text-blue-300",
   success: "bg-emerald-500/10 text-emerald-300",
   warning: "bg-amber-500/10 text-amber-300",
@@ -69,6 +74,6 @@ watch(
     if (logContainer.value) {
       logContainer.value.scrollTop = logContainer.value.scrollHeight;
     }
-  }
+  },
 );
 </script>

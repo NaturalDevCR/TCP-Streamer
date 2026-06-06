@@ -1,4 +1,4 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+#![deny(clippy::all)]
 
 mod audio;
 use audio::AudioState;
@@ -52,18 +52,18 @@ pub fn run() {
                     }
                     _ => {}
                 })
-                .on_tray_icon_event(|tray, event| match event {
-                    TrayIconEvent::Click {
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         ..
-                    } => {
+                    } = event
+                    {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
                     }
-                    _ => {}
                 })
                 .build(app)?;
 
@@ -92,12 +92,11 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
             }
-            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             audio::get_input_devices,
@@ -108,12 +107,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri application")
-        .run(|app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { .. } => {
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<AudioState>();
                 state.shutdown();
-                // Allow the exit to proceed
             }
-            _ => {}
         });
 }

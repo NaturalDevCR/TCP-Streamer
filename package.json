@@ -1,5 +1,5 @@
 {
-  "name": "snap-streamer",
+  "name": "tcp-streamer",
   "private": true,
   "version": "2.0.6",
   "type": "module",
@@ -7,11 +7,32 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "vue-tsc --noEmit"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
-    "vite": "^7.2.4"
+    "@tsconfig/node22": "^22.0.5",
+    "@typescript-eslint/parser": "^8.59.2",
+    "@vue/test-utils": "^2.4.10",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.0",
+    "happy-dom": "^20.9.0",
+    "lefthook": "^2.1.6",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^7.2.4",
+    "vitest": "^4.1.5",
+    "vue-tsc": "^3.2.8"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",

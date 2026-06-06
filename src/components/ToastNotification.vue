@@ -7,10 +7,10 @@
           :key="toast.id"
           :class="[
             'pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg backdrop-blur-sm border',
-            toastStyles[toast.type] || toastStyles.info
+            toastStyles[toast.type] || toastStyles.info,
           ]"
         >
-          <span class="font-bold text-base">{{ icons[toast.type] || 'ℹ' }}</span>
+          <span class="font-bold text-base">{{ icons[toast.type] || "ℹ" }}</span>
           <span>{{ toast.message }}</span>
         </div>
       </TransitionGroup>
@@ -18,8 +18,8 @@
   </Teleport>
 </template>
 
-<script setup>
-import { useStreamStore } from "../stores/stream.js";
+<script setup lang="ts">
+import { useStreamStore } from "../stores/stream.ts";
 
 const stream = useStreamStore();
 

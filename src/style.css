@@ -88,18 +88,35 @@ select option {
 
 /* ── Toast Animations ── */
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(100%); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 @keyframes toast-out {
-  from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(100%); }
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
 }
 
 /* ── Quality Pulse ── */
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 .animate-pulse-slow {
   animation: pulse 2s ease-in-out infinite;
@@ -113,8 +130,14 @@ select option {
 
 /* ── Tab Fade & Scale ── */
 @keyframes fadeInScale {
-  from { opacity: 0; transform: translateY(6px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .animate-fade-in {
   animation: fadeInScale 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -131,9 +154,17 @@ select option {
 
 /* ── Checkbox Pop ── */
 @keyframes checkPop {
-  0% { transform: scale(0.8); opacity: 0; }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 .animate-check {
   animation: checkPop 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;

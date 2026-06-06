@@ -1,3 +1,7 @@
+#![deny(clippy::all)]
+
+use super::chunked::ChunkedWriter;
+use super::constants::*;
 use super::stats::{emit_log, BufferResizeEvent, QualityEvent, StatsEvent, StreamStats};
 use super::stream::StreamSocket;
 use super::wav_helper::create_wav_header;
@@ -16,32 +20,6 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 
-struct ChunkedWriter<W: Write> {
-    writer: W,
-}
-
-impl<W: Write> ChunkedWriter<W> {
-    fn new(writer: W) -> Self {
-        Self { writer }
-    }
-}
-
-impl<W: Write> Write for ChunkedWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        write!(self.writer, "{:X}\r\n", buf.len())?;
-        self.writer.write_all(buf)?;
-        write!(self.writer, "\r\n")?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.flush()
-    }
-}
-
 pub enum AudioCommand {
     Start {
         device_name: String,
@@ -59,7 +37,7 @@ pub enum AudioCommand {
         enable_adaptive_buffer: bool,
         min_buffer_ms: u32,
         max_buffer_ms: u32,
-        app_handle: AppHandle,
+        app_handle: Box<AppHandle>,
     },
     Stop,
 }
@@ -85,12 +63,12 @@ struct StreamParams {
 }
 
 pub struct AudioState {
-    pub tx: Mutex<mpsc::Sender<AudioCommand>>,
+    pub tx: Mutex<mpsc::SyncSender<AudioCommand>>,
 }
 
 impl AudioState {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(COMMAND_CHANNEL_CAPACITY);
 
         thread::spawn(move || {
             let mut current_stream_handle: Option<(cpal::Stream, StreamStats)> = None;
@@ -142,7 +120,7 @@ impl AudioState {
                             enable_adaptive_buffer,
                             min_buffer_ms,
                             max_buffer_ms,
-                            app_handle: app_handle.clone(),
+                            app_handle: (*app_handle).clone(),
                         };
                         current_params = Some(params);
                         should_reconnect.store(auto_reconnect, Ordering::Relaxed);
@@ -158,7 +136,7 @@ impl AudioState {
                             ring_buffer_duration_ms, high_priority, dscp_strategy,
                             format, chunk_size, is_loopback, is_server,
                             enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
-                            app_handle.clone(),
+                            (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {
                                 if let Err(e) = stream.play() {
@@ -262,6 +240,7 @@ fn close_tcp_stream(stream: TcpStream, context: &str, app_handle: &AppHandle) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_audio_stream(
     device_name: String,
     ip: String,
@@ -279,7 +258,6 @@ fn start_audio_stream(
     max_buffer_ms: u32,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
-    let sample_rate = sample_rate;
 
     emit_log(
         &app_handle,
@@ -358,12 +336,14 @@ fn start_audio_stream(
     for ch in [2u16, 1] {
         for fmt in [cpal::SampleFormat::F32, cpal::SampleFormat::I16, cpal::SampleFormat::U16] {
             for range in &supported_configs {
-                if range.sample_format() == fmt && range.channels() == ch {
-                    if range.min_sample_rate().0 <= sample_rate && range.max_sample_rate().0 >= sample_rate {
-                        best_config_range = Some(range.clone());
-                        selected_format = fmt;
-                        break;
-                    }
+                if range.sample_format() == fmt
+                    && range.channels() == ch
+                    && range.min_sample_rate().0 <= sample_rate
+                    && range.max_sample_rate().0 >= sample_rate
+                {
+                    best_config_range = Some(*range);
+                    selected_format = fmt;
+                    break;
                 }
             }
             if best_config_range.is_some() { break; }
@@ -373,9 +353,9 @@ fn start_audio_stream(
 
     // Fallback: use first available config
     if best_config_range.is_none() && !supported_configs.is_empty() {
-        let fallback = supported_configs.first().unwrap();
+        let fallback = supported_configs.first().expect("supported_configs non-empty");
         selected_format = fallback.sample_format();
-        best_config_range = Some(fallback.clone());
+        best_config_range = Some(*fallback);
         emit_log(&app_handle, "warn", format!("Requested Sample Rate {}Hz may not be natively supported. Relying on OS implicit resampler.", sample_rate));
     }
 
@@ -396,15 +376,15 @@ fn start_audio_stream(
 
     // 1. Setup Ring Buffer
     let adjusted_ring_buffer_duration_ms = if is_loopback {
-        8000.max(ring_buffer_duration_ms)
+        LOOPBACK_MIN_BUFFER_MS.max(ring_buffer_duration_ms)
     } else {
-        5000.max(ring_buffer_duration_ms)
+        DEFAULT_MIN_BUFFER_MS.max(ring_buffer_duration_ms)
     };
 
     let ring_buffer_size =
         (sample_rate as usize) * (device_channels as usize) * (adjusted_ring_buffer_duration_ms as usize) / 1000;
 
-    let adj_ms_u32 = adjusted_ring_buffer_duration_ms as u32;
+    let adj_ms_u32 = adjusted_ring_buffer_duration_ms;
     let buffer_size_mb = (ring_buffer_size * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
 
     emit_log(
@@ -455,14 +435,12 @@ fn start_audio_stream(
                 "warning",
                 format!("Failed to set thread priority: {:?}", e),
             );
-        } else {
-            if high_priority {
-                emit_log(
-                    &app_handle_net,
-                    "info",
-                    "Network thread priority set to Max".to_string(),
-                );
-            }
+        } else if high_priority {
+            emit_log(
+                &app_handle_net,
+                "info",
+                "Network thread priority set to Max".to_string(),
+            );
         }
 
         // Bind listener if in server mode
@@ -495,16 +473,14 @@ fn start_audio_stream(
         // Adaptive buffer tracking (display-only — ring buffer size is fixed at creation)
         let mut current_buffer_ms = adj_ms_u32;
         let mut last_buffer_check = Instant::now();
-        const BUFFER_CHECK_INTERVAL_SECS: u64 = 10;
 
         let adaptive_min_ms = if is_loopback {
-            4000.max(min_buffer_ms)
+            ADAPTIVE_MIN_LOOPBACK_MS.max(min_buffer_ms)
         } else {
-            2000.max(min_buffer_ms)
+            ADAPTIVE_MIN_DEFAULT_MS.max(min_buffer_ms)
         };
 
-        let mut retry_delay = Duration::from_secs(2);
-        const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
+        let mut retry_delay = Duration::from_secs(INITIAL_RETRY_DELAY_SECS);
 
         fn add_jitter(base: Duration) -> Duration {
             use std::time::SystemTime;
@@ -515,12 +491,11 @@ fn start_audio_stream(
                 % 1000) as i64
                 - 500;
             let ms = base.as_millis() as i64 + jitter_ms;
-            Duration::from_millis(ms.max(2000) as u64)
+            Duration::from_millis(ms.max(MIN_RETRY_DELAY_MS as i64) as u64)
         }
 
         let mut current_stream: Option<StreamSocket> = None;
         let mut disconnect_time: Option<Instant> = None;
-        const DISCONNECT_FLUSH_THRESHOLD: Duration = Duration::from_secs(3);
 
         emit_log(
             &app_handle_net,
@@ -529,10 +504,9 @@ fn start_audio_stream(
         );
 
         let mut last_heartbeat = Instant::now();
-        const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 
         let mut prefilled = false;
-        let prefill_samples = sample_rate as usize * device_channels_net as usize / 5; // 200ms prefill (channel-aware)
+        let prefill_samples = sample_rate as usize * device_channels_net as usize / PREFILL_FRACTION; // 200ms prefill (channel-aware)
         emit_log(
             &app_handle_net,
             "info",
@@ -557,7 +531,7 @@ fn start_audio_stream(
                     disconnect_time = Some(Instant::now());
                 }
 
-                let disconnected_for = disconnect_time.unwrap().elapsed();
+                let disconnected_for = disconnect_time.expect("disconnect_time set above").elapsed();
 
                 if disconnected_for >= DISCONNECT_FLUSH_THRESHOLD {
                     // Prolonged outage: flush entire buffer to avoid sending stale audio on reconnect
@@ -776,15 +750,13 @@ fn start_audio_stream(
                              } else {
                                  wav_header_sent = true;
                              }
-                         } else {
-                             if let Err(e) = stream.write_all(&header) {
+                          } else if let Err(e) = stream.write_all(&header) {
                                   let level = if e.kind() == std::io::ErrorKind::BrokenPipe { "info" } else { "error" };
                                   emit_log(&app_handle_net, level, format!("Failed to send WAV header: {}", e));
-                             } else {
-                                  wav_header_sent = true;
-                             }
-                         }
-                     }
+                          } else {
+                                   wav_header_sent = true;
+                              }
+                      }
                 }
 
                 // Check prefill status
@@ -814,8 +786,8 @@ fn start_audio_stream(
                 if count > 0 {
                     // Convert float samples to PCM i16 payload
                     let mut payload = Vec::with_capacity(count * 2);
-                    for i in 0..count {
-                        let sample = temp_buffer[i].clamp(-1.0, 1.0);
+                    for &sample_f32 in temp_buffer.iter().take(count) {
+                        let sample = sample_f32.clamp(-1.0, 1.0);
                         let sample_i16 = (sample * 32767.0) as i16;
                         payload.extend_from_slice(&sample_i16.to_le_bytes());
                     }
@@ -900,7 +872,7 @@ fn start_audio_stream(
             }
 
             // Quality Logic
-            if last_quality_emit.elapsed() >= Duration::from_secs(4) {
+            if last_quality_emit.elapsed() >= Duration::from_secs(QUALITY_REPORT_INTERVAL_SECS) {
                 let avg_latency = if !latency_samples.is_empty() {
                     latency_samples.iter().sum::<f32>() / latency_samples.len() as f32
                 } else {
@@ -945,10 +917,9 @@ fn start_audio_stream(
                         >= Duration::from_secs(BUFFER_CHECK_INTERVAL_SECS)
                 {
                     last_buffer_check = Instant::now();
-                    if buffer_health < 0.2 {
-                        if current_buffer_ms > adaptive_min_ms {
+                    if buffer_health < 0.2 && current_buffer_ms > adaptive_min_ms {
                             let new_size =
-                                current_buffer_ms.saturating_sub(500).max(adaptive_min_ms);
+                                current_buffer_ms.saturating_sub(ADAPTIVE_BUFFER_STEP_MS).max(adaptive_min_ms);
                             if new_size < current_buffer_ms {
                                 current_buffer_ms = new_size;
                                 emit_log(
@@ -966,7 +937,6 @@ fn start_audio_stream(
                                         reason: "High Latency".to_string(),
                                     },
                                 );
-                            }
                         }
                     }
                 }

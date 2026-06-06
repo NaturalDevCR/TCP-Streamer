@@ -1,9 +1,23 @@
+#![deny(clippy::all)]
+
+use super::error::AudioError;
 use super::manager::{AudioCommand, AudioState};
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::debug;
+use std::sync::Mutex;
+use std::time::Instant;
 use tauri::{AppHandle, State};
 
+static DEVICE_CACHE: Mutex<Option<(Vec<String>, Instant)>> = Mutex::new(None);
+const DEVICE_CACHE_TTL_SECS: u64 = 30;
+
+/// Starts streaming audio from the given device to the specified IP:port.
+///
+/// Supports both client mode (connects to a remote server) and server mode
+/// (listens for incoming connections). Audio is captured via CPAL and sent
+/// over TCP as raw PCM or WAV.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn start_stream(
     state: State<'_, AudioState>,
     app_handle: AppHandle,
@@ -23,7 +37,7 @@ pub fn start_stream(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
-) -> Result<(), String> {
+) -> Result<(), AudioError> {
     // buffer_size accepted from frontend for backward compatibility but not used internally
     let _ = buffer_size;
     let command = AudioCommand::Start {
@@ -42,36 +56,50 @@ pub fn start_stream(
         enable_adaptive_buffer,
         min_buffer_ms,
         max_buffer_ms,
-        app_handle,
+        app_handle: Box::new(app_handle),
     };
 
     state
         .tx
         .lock()
-        .map_err(|e| e.to_string())?
+        .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
         .send(command)
-        .map_err(|e| e.to_string())
+        .map_err(|e| AudioError::ChannelError(e.to_string()))
 }
 
+/// Stops the currently active audio stream.
 #[tauri::command]
-pub fn stop_stream(state: State<'_, AudioState>) -> Result<(), String> {
+pub fn stop_stream(state: State<'_, AudioState>) -> Result<(), AudioError> {
     state
         .tx
         .lock()
-        .map_err(|e| e.to_string())?
+        .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
         .send(AudioCommand::Stop)
-        .map_err(|e| e.to_string())
+        .map_err(|e| AudioError::ChannelError(e.to_string()))
 }
 
+/// Returns the operating system name (e.g. "macos", "linux", "windows").
 #[tauri::command]
 pub fn get_os_type() -> String {
     std::env::consts::OS.to_string()
 }
 
+/// Enumerates all available audio input devices across all CPAL hosts.
+///
+/// Results are cached for 30 seconds to reduce repeated system calls.
 #[tauri::command]
 pub fn get_input_devices(
     #[allow(unused_variables)] include_loopback: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, AudioError> {
+    // Check cache
+    if let Ok(cache) = DEVICE_CACHE.lock() {
+        if let Some((cached_devices, timestamp)) = cache.as_ref() {
+            if timestamp.elapsed().as_secs() < DEVICE_CACHE_TTL_SECS {
+                return Ok(cached_devices.clone());
+            }
+        }
+    }
+
     let mut all_devices = Vec::new();
 
     // Try all available hosts
@@ -107,14 +135,20 @@ pub fn get_input_devices(
     all_devices.sort();
     all_devices.dedup();
 
+    // Update cache
+    if let Ok(mut cache) = DEVICE_CACHE.lock() {
+        *cache = Some((all_devices.clone(), Instant::now()));
+    }
+
     Ok(all_devices)
 }
 
+/// Returns the primary local IP address of the machine.
 #[tauri::command]
-pub fn get_local_ip() -> Result<String, String> {
+pub fn get_local_ip() -> Result<String, AudioError> {
     use local_ip_address::local_ip;
     match local_ip() {
         Ok(ip) => Ok(ip.to_string()),
-        Err(e) => Err(format!("Failed to get local IP: {}", e)),
+        Err(e) => Err(AudioError::IpDetectionFailed(e.to_string())),
     }
 }

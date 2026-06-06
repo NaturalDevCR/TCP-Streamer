@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 use chrono::Local;
 use log::{debug, error, info, trace, warn};
 use serde::Serialize;

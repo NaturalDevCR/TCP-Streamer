@@ -2,18 +2,24 @@
   <div class="animate-fade-in space-y-4">
     <!-- Advanced Network -->
     <section class="glass-card">
-      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">Advanced Network</h3>
+      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
+        Advanced Network
+      </h3>
       <div class="space-y-4">
         <CheckboxField v-model="settings.highPriority" label="High Priority Thread" />
 
-        <SelectField v-model="settings.dscpStrategy" label="DSCP Strategy" id="dscp-select">
+        <SelectField id="dscp-select" v-model="settings.dscpStrategy" label="DSCP Strategy">
           <option value="voip">VoIP (EF - 0xB8)</option>
           <option value="lowdelay">Low Delay (0x10)</option>
           <option value="throughput">Throughput (0x08)</option>
           <option value="besteffort">Best Effort (0x00)</option>
         </SelectField>
 
-        <SelectField v-model.number="settings.chunkSize" label="Chunk Size (Samples)" id="chunk-size-select">
+        <SelectField
+          id="chunk-size-select"
+          v-model.number="settings.chunkSize"
+          label="Chunk Size (Samples)"
+        >
           <option :value="128">128 (Ultra Low Latency)</option>
           <option :value="256">256 (Very Low Latency)</option>
           <option :value="512">512 (Low Latency)</option>
@@ -26,12 +32,14 @@
 
     <!-- Network Presets -->
     <section class="glass-card">
-      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">Network Presets</h3>
+      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
+        Network Presets
+      </h3>
       <SelectField
+        id="network-preset"
         v-model="settings.networkPreset"
         label="Connection Type"
-        id="network-preset"
-        @update:modelValue="onPresetChange"
+        @update:model-value="onPresetChange"
       >
         <option value="custom">Custom</option>
         <option value="ethernet">Ethernet (Stable)</option>
@@ -43,19 +51,23 @@
   </div>
 </template>
 
-<script setup>
-import { useSettingsStore } from "../../stores/settings.js";
-import { useStreamStore } from "../../stores/stream.js";
+<script setup lang="ts">
+import { useSettingsStore } from "../../stores/settings.ts";
+import { useStreamStore } from "../../stores/stream.ts";
 import SelectField from "../ui/SelectField.vue";
 import CheckboxField from "../ui/CheckboxField.vue";
 
 const settings = useSettingsStore();
 const stream = useStreamStore();
 
-function onPresetChange(presetId) {
+function onPresetChange(presetId: string) {
   if (presetId !== "custom") {
     settings.applyPreset(presetId);
-    const names = { ethernet: "Ethernet (Stable)", wifi: "WiFi (Standard)", "wifi-poor": "WiFi (Poor Signal)" };
+    const names: Record<string, string> = {
+      ethernet: "Ethernet (Stable)",
+      wifi: "WiFi (Standard)",
+      "wifi-poor": "WiFi (Poor Signal)",
+    };
     stream.addToast(`Applied ${names[presetId]} preset`, "success");
   }
 }

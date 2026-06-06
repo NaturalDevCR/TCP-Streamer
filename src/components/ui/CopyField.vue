@@ -10,9 +10,9 @@
         class="flex-1 px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-sm font-mono transition-all"
       />
       <button
-        @click="copy"
         class="w-9 h-auto flex items-center justify-center bg-white/10 border border-white/10 rounded-lg text-white/80 hover:bg-white/20 transition-all cursor-pointer text-sm"
         title="Copy"
+        @click="copy"
       >
         📋
       </button>
@@ -20,9 +20,9 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from "vue";
-import { useStreamStore } from "../../stores/stream.js";
+import { useStreamStore } from "../../stores/stream.ts";
 
 const props = defineProps({
   modelValue: String,
@@ -35,7 +35,8 @@ const stream = useStreamStore();
 
 function copy() {
   if (props.modelValue) {
-    navigator.clipboard.writeText(props.modelValue)
+    navigator.clipboard
+      .writeText(props.modelValue)
       .then(() => stream.addToast("Copied to clipboard!", "success"))
       .catch(() => stream.addToast("Failed to copy", "error"));
   }

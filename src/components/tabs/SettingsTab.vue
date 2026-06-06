@@ -2,25 +2,31 @@
   <div class="animate-fade-in space-y-4">
     <!-- Profiles -->
     <section class="glass-card">
-      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">Configuration Profiles</h3>
+      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
+        Configuration Profiles
+      </h3>
 
       <SelectField
-        :modelValue="settings.currentProfile"
-        @update:modelValue="settings.switchProfile($event)"
-        label="Select Profile"
         id="profile-select"
+        :model-value="settings.currentProfile"
+        label="Select Profile"
+        @update:model-value="settings.switchProfile($event)"
       >
         <option v-for="(_, name) in settings.profiles" :key="name" :value="name">{{ name }}</option>
       </SelectField>
 
       <div class="flex gap-2 mt-3">
-        <button @click="saveProfile" class="btn-sm bg-white/10 hover:bg-white/20">💾 Save</button>
-        <button @click="showNewProfile = true" class="btn-sm bg-white/10 hover:bg-white/20">➕ New</button>
+        <button class="btn-sm bg-white/10 hover:bg-white/20" @click="saveProfile">💾 Save</button>
+        <button class="btn-sm bg-white/10 hover:bg-white/20" @click="showNewProfile = true">
+          ➕ New
+        </button>
         <button
-          @click="deleteProfile"
           class="btn-sm bg-red-500/20 text-red-300 hover:bg-red-500/30"
           :disabled="settings.currentProfile === 'Default'"
-        >🗑️ Delete</button>
+          @click="deleteProfile"
+        >
+          🗑️ Delete
+        </button>
       </div>
 
       <!-- New Profile Input -->
@@ -31,19 +37,34 @@
           class="flex-1 px-3 py-1.5 bg-black/20 border border-white/10 rounded-lg text-slate-50 text-sm outline-none focus:border-accent"
           @keyup.enter="confirmCreate"
         />
-        <button @click="confirmCreate" class="btn-sm bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30">✓ Create</button>
-        <button @click="showNewProfile = false; newName = ''" class="btn-sm bg-white/10 hover:bg-white/20">✕ Cancel</button>
+        <button
+          class="btn-sm bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+          @click="confirmCreate"
+        >
+          ✓ Create
+        </button>
+        <button
+          class="btn-sm bg-white/10 hover:bg-white/20"
+          @click="
+            showNewProfile = false;
+            newName = '';
+          "
+        >
+          ✕ Cancel
+        </button>
       </div>
     </section>
 
     <!-- Automation -->
     <section class="glass-card">
-      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">Automation</h3>
+      <h3 class="text-sm font-semibold text-slate-300 border-b border-white/10 pb-2 mb-4">
+        Automation
+      </h3>
       <div class="space-y-3">
         <CheckboxField
           v-model="settings.autostart"
           label="Auto-start on launch"
-          @update:modelValue="settings.toggleAutostart"
+          @update:model-value="settings.toggleAutostart"
         />
         <CheckboxField v-model="settings.autoStream" label="Auto-stream on load" />
         <div v-if="!settings.isServer">
@@ -54,10 +75,10 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from "vue";
-import { useSettingsStore } from "../../stores/settings.js";
-import { useStreamStore } from "../../stores/stream.js";
+import { useSettingsStore } from "../../stores/settings.ts";
+import { useStreamStore } from "../../stores/stream.ts";
 import SelectField from "../ui/SelectField.vue";
 import CheckboxField from "../ui/CheckboxField.vue";
 

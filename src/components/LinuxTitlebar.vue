@@ -9,38 +9,50 @@
       <img src="/assets/tcp-streamer-logo.svg" alt="Logo" class="w-4 h-4" />
       <span class="text-white/80 text-xs font-semibold tracking-wide">TCP Streamer</span>
     </div>
-    
+
     <div class="flex gap-1 items-center">
       <button
-        @click="minimize"
         class="w-8 h-7 border-0 bg-transparent text-white/60 text-sm cursor-pointer rounded flex items-center justify-center hover:bg-white/10 hover:text-white transition-all"
         title="Minimize"
-      >─</button>
+        @click="minimize"
+      >
+        ─
+      </button>
       <button
-        @click="maximize"
         class="w-8 h-7 border-0 bg-transparent text-white/60 text-sm cursor-pointer rounded flex items-center justify-center hover:bg-white/10 hover:text-white transition-all"
         title="Maximize"
-      >□</button>
+        @click="maximize"
+      >
+        □
+      </button>
       <button
-        @click="close"
         class="w-8 h-7 border-0 bg-transparent text-white/60 text-sm cursor-pointer rounded flex items-center justify-center hover:bg-red-500/80 hover:text-white transition-all"
         title="Close"
-      >✕</button>
+        @click="close"
+      >
+        ✕
+      </button>
     </div>
   </div>
 </template>
 
-<script setup>
-import { useSettingsStore } from "../stores/settings.js";
-import { getCurrentWindow } from '@tauri-apps/api/window';
+<script setup lang="ts">
+import { useSettingsStore } from "../stores/settings.ts";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const settings = useSettingsStore();
 const appWindow = getCurrentWindow();
 
-function startDrag(e) {
+function startDrag(e: MouseEvent) {
   if (e.button === 0) appWindow.startDragging();
 }
-function minimize() { appWindow.minimize(); }
-function maximize() { appWindow.toggleMaximize(); }
-function close() { appWindow.close(); }
+function minimize() {
+  appWindow.minimize();
+}
+function maximize() {
+  appWindow.toggleMaximize();
+}
+function close() {
+  appWindow.close();
+}
 </script>

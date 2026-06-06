@@ -1,0 +1,2 @@
+# Allow some lints that are too strict for this project
+allow-unwrap-in-tests = true

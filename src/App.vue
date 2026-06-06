@@ -10,8 +10,8 @@
     </div>
 
     <div
-      class="flex-1 overflow-y-auto overflow-x-hidden relative hide-scrollbar mt-4"
       ref="scrollContainer"
+      class="flex-1 overflow-y-auto overflow-x-hidden relative hide-scrollbar mt-4"
     >
       <div class="flex flex-col gap-4 min-h-full px-6 pb-6">
         <div class="flex-1 min-h-0">
@@ -34,19 +34,21 @@
     <!-- Scroll to Top -->
     <button
       v-if="showScrollTop"
-      @click="scrollToTop"
       class="absolute bottom-24 right-6 w-10 h-10 rounded-full bg-accent/80 text-white border-0 flex items-center justify-center cursor-pointer shadow-lg hover:bg-accent transition-all z-40"
       title="Back to top"
+      @click="scrollToTop"
     >
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <polyline points="18 15 12 9 6 15" />
+      </svg>
     </button>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import { useSettingsStore } from "./stores/settings.js";
-import { useStreamStore } from "./stores/stream.js";
+import { useSettingsStore } from "./stores/settings.ts";
+import { useStreamStore } from "./stores/stream.ts";
 
 import ToastNotification from "./components/ToastNotification.vue";
 import AppHeader from "./components/AppHeader.vue";
@@ -74,10 +76,10 @@ const activeTab = computed({
     document.startViewTransition(() => {
       _activeTab.value = val;
     });
-  }
+  },
 });
 
-const scrollContainer = ref(null);
+const scrollContainer = ref<HTMLElement | null>(null);
 const showScrollTop = ref(false);
 
 onMounted(async () => {
@@ -96,16 +98,27 @@ onMounted(async () => {
   if (scrollContainer.value) {
     scrollContainer.value.addEventListener("scroll", onScroll);
   }
+
+  // Keyboard shortcut: Ctrl/Cmd+S to toggle streaming
+  document.addEventListener("keydown", onKeyDown);
 });
 
 onUnmounted(() => {
   if (scrollContainer.value) {
     scrollContainer.value.removeEventListener("scroll", onScroll);
   }
+  document.removeEventListener("keydown", onKeyDown);
 });
 
+function onKeyDown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    stream.toggleStream();
+  }
+}
+
 function onScroll() {
-  showScrollTop.value = scrollContainer.value && scrollContainer.value.scrollTop > 200;
+  showScrollTop.value = Boolean(scrollContainer.value && scrollContainer.value.scrollTop > 200);
 }
 
 function scrollToTop() {
@@ -113,9 +126,17 @@ function scrollToTop() {
 }
 
 // Cleanup on window close
-window.addEventListener("beforeunload", async () => {
+window.addEventListener("beforeunload", (e) => {
   if (stream.isStreaming) {
-    await stream.stopStream();
+    e.preventDefault();
+    e.returnValue = "Streaming is active. Are you sure you want to close?";
+  }
+});
+
+// Stop stream on page unload
+window.addEventListener("unload", () => {
+  if (stream.isStreaming) {
+    stream.stopStream();
   }
 });
 </script>

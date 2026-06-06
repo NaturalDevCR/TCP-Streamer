@@ -6,7 +6,38 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint-and-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "lts/*"
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Frontend Tests
+        run: npm test
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust Tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Run Clippy
+        working-directory: src-tauri
+        run: cargo clippy -- -D warnings
+
   release:
+    needs: lint-and-test
     permissions:
       contents: write
     strategy:
@@ -40,7 +71,7 @@ jobs:
           cache: "npm"
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0

@@ -4576,6 +4576,7 @@ dependencies = [
 name = "tcp-streamer"
 version = "2.0.6"
 dependencies = [
+ "anyhow",
  "chrono",
  "cpal",
  "hostname",
@@ -4593,6 +4594,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-store",
+ "thiserror 2.0.17",
  "thread-priority",
 ]
 
