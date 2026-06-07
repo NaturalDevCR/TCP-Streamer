@@ -36,6 +36,35 @@
         :disabled="stream.isStreaming"
         class="mt-3"
       />
+
+      <!-- mDNS Scan -->
+      <div class="mt-3 flex gap-2">
+        <button
+          class="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/15 text-slate-200 rounded-lg border border-white/10 transition-colors"
+          :disabled="stream.isStreaming"
+          @click="settings.scanSources()"
+        >
+          Scan LAN
+        </button>
+        <span v-if="settings.discoveredSources.length" class="text-xs text-white/40 self-center">
+          {{ settings.discoveredSources.length }} found
+        </span>
+      </div>
+      <SelectField
+        v-if="settings.discoveredSources.length"
+        id="discovered-sources"
+        :model-value="settings.sourceAddr"
+        label="Discovered Sources"
+        :disabled="stream.isStreaming"
+        class="mt-2"
+        @update:model-value="(v: string) => (settings.sourceAddr = v)"
+      >
+        <option value="" disabled>Choose a source...</option>
+        <option v-for="s in settings.discoveredSources" :key="s.addr" :value="s.addr">
+          {{ s.name }} ({{ s.addr }}){{ s.encrypted ? " [encrypted]" : "" }}
+        </option>
+      </SelectField>
+
       <InputField
         id="psk-sink"
         v-model="settings.psk"

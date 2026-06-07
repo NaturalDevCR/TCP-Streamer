@@ -58,6 +58,9 @@ export const useSettingsStore = defineStore("settings", () => {
   // Encryption
   const psk = ref("");
 
+  // mDNS discovery
+  const discoveredSources = ref<{ name: string; addr: string; encrypted: boolean }[]>([]);
+
   // Audio
   const sampleRate = ref(48000);
   const bufferSize = ref(1024);
@@ -154,6 +157,18 @@ export const useSettingsStore = defineStore("settings", () => {
       }
     } catch {
       outputDevices.value = [];
+    }
+  }
+
+  async function scanSources() {
+    try {
+      discoveredSources.value = (await invoke("list_sources")) as {
+        name: string;
+        addr: string;
+        encrypted: boolean;
+      }[];
+    } catch {
+      discoveredSources.value = [];
     }
   }
 
@@ -334,6 +349,7 @@ export const useSettingsStore = defineStore("settings", () => {
     sourceAddr,
     outputDevices,
     psk,
+    discoveredSources,
     // Computed
     isServer,
     isLoopback,
@@ -348,5 +364,6 @@ export const useSettingsStore = defineStore("settings", () => {
     deleteProfile,
     toggleAutostart,
     loadOutputDevices,
+    scanSources,
   };
 });

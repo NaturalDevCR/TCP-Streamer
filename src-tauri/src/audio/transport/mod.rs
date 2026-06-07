@@ -5,6 +5,7 @@
 //! trait without touching the engine.
 
 pub mod allowlist;
+pub mod discovery;
 pub mod dscp;
 pub mod resolve;
 pub mod tcp_client;

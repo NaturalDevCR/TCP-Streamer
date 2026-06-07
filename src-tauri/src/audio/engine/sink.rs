@@ -66,9 +66,10 @@ pub fn run_sink(
     let socket = sub.socket;
     let running_net = is_running.clone();
     let lost_after = (lp.ring_ms / 5).max(2) as usize; // ~frames tolerance
+    let target_frames = ring_samples / 2;
     thread::spawn(move || {
         super::super::transport::udp::sink::receive_loop(
-            &socket, salt_b, lost_after, key, nonce_salt, prod, running_net,
+            &socket, salt_b, lost_after, key, nonce_salt, target_frames, prod, running_net,
         );
     });
 

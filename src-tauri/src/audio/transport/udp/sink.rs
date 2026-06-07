@@ -47,12 +47,15 @@ pub fn subscribe(source_addr: &str, salt_b: u64, timeout: Duration) -> std::io::
 
 /// Receives audio packets until `running` is cleared, decoding into `producer`.
 /// Resends SUBSCRIBE every ~1s as a heartbeat.
+/// `target_frames` is the target playback ring occupancy for drift correction.
+#[allow(clippy::too_many_arguments)]
 pub fn receive_loop(
     socket: &UdpSocket,
     salt_b: u64,
     lost_after: usize,
     key: Option<[u8; 32]>,
     nonce_salt: u32,
+    target_frames: usize,
     mut producer: HeapProducer<f32>,
     running: Arc<AtomicBool>,
 ) {
@@ -63,6 +66,13 @@ pub fn receive_loop(
     packet::encode_subscribe(salt_b, &mut sub);
     let mut last_hb = Instant::now();
     let mut replay = super::crypto::ReplayWindow::new();
+    let mut drift = super::drift::DriftController::new(
+        target_frames as f32,
+        (target_frames / 4) as f32,
+        200,
+    );
+    let mut skip_samples: usize = 0;
+    let mut insert_silence: usize = 0;
 
     while running.load(Ordering::Relaxed) {
         if last_hb.elapsed() >= Duration::from_secs(1) {
@@ -105,11 +115,35 @@ pub fn receive_loop(
             match jb.pop() {
                 Pop::Frame(pcm) => {
                     decode_pcm_i16_le_to_f32(&pcm, &mut decoded);
-                    let _ = producer.push_slice(&decoded);
+                    // Apply drift correction: skip or insert samples.
+                    if skip_samples > 0 {
+                        let skip = skip_samples.min(decoded.len());
+                        let remaining = &decoded[skip..];
+                        let _ = producer.push_slice(remaining);
+                        skip_samples -= skip;
+                    } else {
+                        let _ = producer.push_slice(&decoded);
+                    }
+                    if insert_silence > 0 {
+                        let silence = vec![0.0f32; insert_silence.min(decoded.len())];
+                        let _ = producer.push_slice(&silence);
+                        insert_silence = insert_silence.saturating_sub(silence.len());
+                    }
                 }
                 Pop::Gap => { /* silence handled by the output callback's underrun fill */ }
                 Pop::Starved => break,
             }
+        }
+        // Drift observation: once per loop iteration.
+        let drop_count = (target_frames / 20).max(8);
+        match drift.observe(producer.len() as f32) {
+            super::drift::DriftAction::DropChunk => {
+                skip_samples += drop_count;
+            }
+            super::drift::DriftAction::InsertSilence => {
+                insert_silence += drop_count;
+            }
+            super::drift::DriftAction::None => {}
         }
     }
 }

@@ -172,6 +172,12 @@ pub fn get_input_devices(
 // Stopping the sink reuses `stop_stream` (sends Stop to the manager,
 // which stops whatever is currently running).
 
+/// Lists native UDP sources discovered via mDNS on the LAN.
+#[tauri::command]
+pub fn list_sources() -> Vec<crate::audio::transport::discovery::DiscoveredSource> {
+    crate::audio::transport::discovery::browse(std::time::Duration::from_millis(1500))
+}
+
 /// Enumerates available audio output devices across all CPAL hosts.
 #[tauri::command]
 pub fn get_output_devices() -> Result<Vec<String>, AudioError> {

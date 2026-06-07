@@ -389,6 +389,7 @@ pub fn run(
         let mut prefill_debug_timer = Instant::now();
         let mut payload: Vec<u8> = Vec::new();
         let mut udp_source: Option<super::transport::udp::source::UdpSource> = None;
+        let mut advertiser: Option<super::transport::discovery::Advertiser> = None;
 
         while is_running_clone.load(Ordering::Relaxed) {
             // 1. Hardware-Driven Pacing
@@ -461,6 +462,13 @@ pub fn run(
                     match super::transport::udp::source::UdpSource::bind(port, sample_rate_clone, device_channels_net, psk_net.clone()) {
                         Ok(s) => { emit_log(&app_handle_net, "success", format!("Native UDP source on port {}", port)); udp_source = Some(s); }
                         Err(e) => { emit_log(&app_handle_net, "error", format!("UDP bind failed: {}", e)); thread::sleep(Duration::from_millis(500)); }
+                    }
+                }
+                if advertiser.is_none() {
+                    let name = format!("tcp-streamer-{}", port);
+                    match super::transport::discovery::advertise(&name, port, !psk_net.is_empty()) {
+                        Ok(a) => { advertiser = Some(a); emit_log(&app_handle_net, "info", "Advertised via mDNS".to_string()); }
+                        Err(e) => emit_log(&app_handle_net, "warning", format!("mDNS advertise failed: {}", e)),
                     }
                 }
                 if let Some(src) = udp_source.as_mut() {

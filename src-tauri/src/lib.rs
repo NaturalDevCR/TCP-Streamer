@@ -101,6 +101,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             audio::get_input_devices,
             audio::get_output_devices,
+            audio::list_sources,
             audio::start_stream,
             audio::start_sink,
             audio::stop_stream,
