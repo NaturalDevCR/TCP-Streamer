@@ -4,6 +4,23 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.2.0] - 2026-06-06
+
+### Added
+
+- **Sink / playback role**: tcp-streamer can now receive a stream and play it to a local output device — it is bidirectional (Source or Sink), with output-device selection.
+- **Native UDP mode** (tcp-streamer ↔ tcp-streamer): low-latency UDP transport with a de-jitter buffer (sequence/timestamp framing, loss concealment), Dante-inspired (no PTP clock sync).
+- **Optional encryption** for the native mode: per-packet ChaCha20-Poly1305 with a PSK-derived key (HKDF-SHA256), authenticated and replay-protected. Off by default.
+- **mDNS discovery**: native sources advertise on the LAN; sinks can scan and pick them (manual entry still available).
+- **Configurable latency profile** (Ultra-low / Balanced / Robust / Custom) replacing the old network presets and the hardcoded buffer floors.
+- **IPv6 and hostname** support (client connect via resolution; dual-stack server bind).
+- **IP/CIDR allowlist** for server mode.
+
+### Changed
+
+- Generic terminology throughout (works with any audio receiver such as Sonium; no vendor-specific naming).
+- Clock-drift handling on the sink (no PTP): occasional mini-chunk drop/insert to track long-run drift.
+
 ## [2.1.0] - 2026-06-06
 
 ### Added
