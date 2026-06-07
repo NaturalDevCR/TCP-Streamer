@@ -1,36 +1,35 @@
 <template>
   <div class="flex flex-col gap-1.5 w-full">
-    <label v-if="label" class="text-xs font-medium text-slate-400 ml-0.5">{{ label }}</label>
+    <label v-if="label" class="text-xs font-medium text-[var(--color-text-muted)] ml-0.5">
+      {{ label }}
+    </label>
     <div class="flex gap-2 items-stretch">
       <input
         ref="inputRef"
         :value="modelValue"
         readonly
         :class="inputClass"
-        class="flex-1 px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-sm font-mono transition-all"
+        class="flex-1 px-3 py-2 bg-[var(--color-surface-1)] border border-[var(--color-border)] rounded-[var(--radius)] text-sm font-mono"
       />
-      <button
-        class="w-9 h-auto flex items-center justify-center bg-white/10 border border-white/10 rounded-lg text-white/80 hover:bg-white/20 transition-all cursor-pointer text-sm"
-        title="Copy"
-        @click="copy"
-      >
-        📋
-      </button>
+      <Button size="sm" variant="ghost" @click="copy">
+        <IconCopy />
+      </Button>
     </div>
   </div>
 </template>
-
 <script setup lang="ts">
 import { ref } from "vue";
-import { useStreamStore } from "../../stores/stream.ts";
+import { useStreamStore } from "../../stores/stream";
+import { IconCopy } from "../icons";
+import Button from "./Button.vue";
 
-const props = defineProps({
-  modelValue: String,
-  label: String,
-  inputClass: { type: String, default: "text-slate-50" },
-});
+const props = defineProps<{
+  modelValue?: string;
+  label?: string;
+  inputClass?: string;
+}>();
 
-const inputRef = ref(null);
+const inputRef = ref<HTMLInputElement | null>(null);
 const stream = useStreamStore();
 
 function copy() {

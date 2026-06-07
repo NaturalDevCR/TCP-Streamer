@@ -33,23 +33,26 @@ mantienen**; el rediseño consume el mismo estado.
 ## 3. Alcance
 
 ### 3.1 En la Fase 3
+
 - Sistema de diseño dark enterprise (tokens, tipografía, espaciado, iconos SVG, primitivos).
 - Shell nuevo: ventana resizable, sidebar de navegación, header persistente con estado +
   Start/Stop + tema/idioma; se elimina el hack de tamaño de `main.rs` y el ancho fijo.
 - Rediseño de las secciones: **Dashboard**, **Conexión** (por rol Source/Sink), **Audio**, **Logs**,
   **Ajustes**.
 - Reescritura de los componentes UI (primitivos + tabs→secciones) sobre el nuevo sistema.
-- i18n en/es de todo el *chrome* de UI.
+- i18n en/es de todo el _chrome_ de UI.
 - Accesibilidad (contraste AA, foco visible, teclado).
 
 ### 3.2 Fuera de alcance
+
 - Features nuevas de producto, cambios de backend (salvo `main.rs`/`tauri.conf.json` para la
   ventana), tema claro, traducción del **contenido dinámico de logs** que emite el backend (queda
   en inglés técnico).
 
 ### 3.3 Limitaciones conocidas
+
 - El contenido de logs lo formatea el backend en Rust; traducirlo en runtime no vale la pena → el
-  *chrome* se traduce, los mensajes de log no.
+  _chrome_ se traduce, los mensajes de log no.
 - `<select>` nativo no se puede estilar de forma consistente entre SO → se reemplaza por el Select de
   Reka UI (esto quita el hack actual de `select option { background }`).
 
@@ -72,6 +75,7 @@ mantienen**; el rediseño consume el mismo estado.
   ≥32px; navegación completa por teclado (Reka UI lo aporta en los primitivos).
 
 ### 4.1 Primitivos (`components/ui/`)
+
 - **Hechos a mano (Tailwind):** `Button` (variantes primary/secondary/ghost/danger + tamaños),
   `Input`, `Textarea`, `Card`/`Panel` (título + contenido), `Badge`/`StatusDot`, `Field` (label +
   ayuda + error), `Stat` (label + valor mono), `CopyField`.
@@ -109,31 +113,36 @@ mantienen**; el rediseño consume el mismo estado.
 ## 6. Secciones — diseño
 
 ### 6.1 Dashboard
+
 Estado prominente + `Start/Stop`. Stat-cards en grilla (se ocultan/segregan métricas que no aplican
 al rol). Resumen de config (rol, modo, dispositivo, destino/origen, cifrado on/off, perfil de
 latencia). Peek de los últimos ~5 logs con enlace a la sección Logs.
 
 ### 6.2 Conexión (por rol)
+
 - **Source:** `Select` de modo (TCP Client · TCP Server · Native UDP). Campos condicionales:
-  - *Client:* dirección destino (host:puerto, acepta hostname/IPv6).
-  - *Server:* puerto de escucha + **Allowlist** (IP/CIDR) + card de **info de conexión** (URLs
+  - _Client:_ dirección destino (host:puerto, acepta hostname/IPv6).
+  - _Server:_ puerto de escucha + **Allowlist** (IP/CIDR) + card de **info de conexión** (URLs
     `tcp://`/`http://…/stream.wav`) cuando corre.
-  - *Native UDP:* puerto + **PSK** (`Input` password, vacío = sin cifrar) + toggle "anunciar por
+  - _Native UDP:_ puerto + **PSK** (`Input` password, vacío = sin cifrar) + toggle "anunciar por
     mDNS".
 - **Sink:** **Output device** (`Select`), **Source address** + botón **Scan** que abre la lista
   mDNS (`list_sources`) para elegir, y **PSK**.
 - Solo se muestran los campos del rol/modo activo; el resto se oculta (no se deshabilita en gris).
 
 ### 6.3 Audio
+
 Dispositivo (entrada para source, ya integrado con loopback en Windows; salida para sink), sample
 rate, formato (server), **perfil de latencia** (Ultra-low/Balanced/Robust/Custom) con los campos de
 buffer manuales visibles solo en Custom, y aviso cuando Ultra-low + loopback.
 
 ### 6.4 Logs
+
 Lista monoespaciada con colores por nivel (contenidos, sin neón), filtro por nivel (`Select`),
 **búsqueda**, **copiar** y **limpiar**, autoscroll con "pausar al hacer scroll arriba".
 
 ### 6.5 Ajustes
+
 Perfiles con un `Dialog` para crear (reemplaza el input inline + emojis), automatización con
 `Switch`es, selector de **idioma**, y un bloque "Acerca de" (versión, links) sobrio (el CTA de
 PayPal se mantiene pero discreto).
@@ -165,6 +174,7 @@ PayPal se mantiene pero discreto).
   `CheckboxField`/`SelectField`/`InputField` (reemplazados por los nuevos primitivos).
 
 ## 9. Estrategia de tests
+
 - **Vitest (stores):** mantener verdes los tests de `settings`/`stream`; agregar tests del estado
   `locale`/`theme` y de que `t()` resuelve claves base.
 - **Componentes:** smoke tests ligeros de los primitivos clave (Button, Select, Switch) con
@@ -173,6 +183,7 @@ PayPal se mantiene pero discreto).
 - Mantener verde todo el gate (pnpm test/typecheck/lint/format + cargo si toca `main.rs`/conf).
 
 ## 10. Riesgos y mitigaciones
+
 - **Reescritura amplia de componentes** → riesgo de regresión funcional. Mitigación: los stores
   (lógica) no cambian; los componentes solo cambian presentación + bindings; gate verde + smoke
   manual del flujo Start/Stop por cada rol.
@@ -181,6 +192,7 @@ PayPal se mantiene pero discreto).
 - **Ventana resizable** → asegurar que el layout no rompe en min-size; sidebar colapsable.
 
 ## 11. Criterios de aceptación
+
 - [ ] Sin glassmorphism/glows/emojis; paleta dark neutra; tokens nuevos en `style.css`.
 - [ ] Shell con sidebar + header persistente; ventana resizable; sin el hack de `main.rs`.
 - [ ] Conexión muestra solo los controles del rol/modo activo (Source/Sink).
@@ -191,5 +203,6 @@ PayPal se mantiene pero discreto).
 - [ ] La app sigue haciendo todo lo de Fases 1-2 sin regresiones (smoke por rol).
 
 ## 12. Fuera de alcance (recordatorio)
+
 Features nuevas, tema claro, traducción de logs dinámicos, cambios de backend más allá de la ventana.
 La Fase 3 cierra el ciclo del rediseño; el resto del proyecto ya está en `main`.
