@@ -1,13 +1,35 @@
 <template>
   <header
-    class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]"
+    class="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]"
   >
-    <div class="flex items-center gap-3">
-      <h2 class="text-sm font-semibold text-[var(--color-text)]">{{ sectionTitle }}</h2>
-      <StatusDot :tone="statusTone" :label="stream.statusText" />
+    <div class="flex items-center gap-1">
+      <div
+        class="w-6 h-6 rounded bg-[var(--color-accent)] flex items-center justify-center text-[10px] font-bold text-white mr-2 shrink-0"
+      >
+        TS
+      </div>
+
+      <nav class="flex items-center gap-0.5">
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          :class="[
+            'focus-ring flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors',
+            ui.section === item.id
+              ? 'bg-[var(--color-surface-3)] text-[var(--color-text)]'
+              : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]',
+          ]"
+          @click="ui.setSection(item.id)"
+        >
+          <component :is="item.icon" class="w-[15px] h-[15px] shrink-0" />
+          {{ item.label }}
+        </button>
+      </nav>
     </div>
 
     <div class="flex items-center gap-2">
+      <StatusDot :tone="statusTone" :label="stream.statusText" />
+
       <Button
         :variant="stream.isStreaming ? 'danger' : 'primary'"
         size="sm"
@@ -38,13 +60,28 @@ import Button from "./ui/Button.vue";
 import StatusDot from "./ui/StatusDot.vue";
 import Select from "./ui/Select.vue";
 import SelectOption from "./ui/SelectOption.vue";
-import { IconPlay, IconStop } from "./icons";
+import {
+  IconPlay,
+  IconStop,
+  IconDashboard,
+  IconConnection,
+  IconAudio,
+  IconLogs,
+  IconSettings,
+} from "./icons";
+import type { Section } from "../stores/ui";
 const { t } = useI18n();
 const stream = useStreamStore();
 const ui = useUiStore();
-const sectionTitle = computed(() => t(`nav.${ui.section}`));
 const statusTone = computed(() => {
   if (stream.isStreaming) return "success";
   return "neutral";
 });
+const navItems: { id: Section; label: string; icon: typeof IconDashboard }[] = [
+  { id: "dashboard", label: t("nav.dashboard"), icon: IconDashboard },
+  { id: "connection", label: t("nav.connection"), icon: IconConnection },
+  { id: "audio", label: t("nav.audio"), icon: IconAudio },
+  { id: "logs", label: t("nav.logs"), icon: IconLogs },
+  { id: "settings", label: t("nav.settings"), icon: IconSettings },
+];
 </script>
