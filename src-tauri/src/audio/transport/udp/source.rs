@@ -4,6 +4,12 @@ use super::packet::{self, AudioHeader, StreamInfo};
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Largest PCM payload per datagram. With the 21-byte header and the 16-byte
+/// AEAD tag the whole packet stays under a 1500-byte MTU (no IP
+/// fragmentation) and far below the sink's receive buffer. Must be a
+/// multiple of 4 so a split never lands inside an s16le stereo frame.
+pub const MAX_PAYLOAD_BYTES: usize = 1200;
+
 pub struct UdpSource {
     socket: UdpSocket,
     peer: Option<SocketAddr>,
@@ -71,13 +77,25 @@ impl UdpSource {
         self.peer.is_some() && self.last_seen.elapsed() < Duration::from_secs(5)
     }
 
-    /// Sends one audio frame (raw PCM payload) to the subscriber.
+    /// Sends one block of audio (raw PCM payload) to the subscriber, split
+    /// into datagrams of at most [`MAX_PAYLOAD_BYTES`] each (its own seq/ts),
+    /// so a large chunk — e.g. a resampled robust-profile chunk — can never
+    /// exceed the sink's receive buffer or the path MTU.
     pub fn send_audio(&mut self, payload: &[u8]) {
         if !self.has_peer() {
             self.peer = None;
             return;
         }
-        let peer = self.peer.expect("has_peer checked");
+        for piece in payload.chunks(MAX_PAYLOAD_BYTES) {
+            self.send_datagram(piece);
+        }
+    }
+
+    fn send_datagram(&mut self, payload: &[u8]) {
+        let peer = match self.peer {
+            Some(p) => p,
+            None => return,
+        };
         let ts_us = self.start.elapsed().as_micros() as u64;
         let h = AudioHeader {
             flags: if self.key.is_some() { 1 } else { 0 },

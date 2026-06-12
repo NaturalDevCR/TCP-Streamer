@@ -53,9 +53,12 @@ pub fn subscribe(source_addr: &str, salt_b: u64, timeout: Duration) -> std::io::
     }
 }
 
-/// Receives audio packets until `running` is cleared, decoding into `producer`.
-/// Resends SUBSCRIBE every ~1s as a heartbeat.
-/// `target_frames` is the target playback ring occupancy for drift correction.
+/// Receives audio packets until `running` is cleared, converting through
+/// `pipeline` (source format → device format) into `producer`. Resends
+/// SUBSCRIBE every ~1s as a heartbeat.
+/// `target_samples` is the target playback ring occupancy (device-unit
+/// samples) for drift correction; corrections are applied in whole device
+/// frames (`out_channels`) so interleaving can never shift.
 #[allow(clippy::too_many_arguments)]
 pub fn receive_loop(
     socket: &UdpSocket,
@@ -63,19 +66,25 @@ pub fn receive_loop(
     lost_after: usize,
     key: Option<[u8; 32]>,
     nonce_salt: u32,
-    target_frames: usize,
+    target_samples: usize,
+    out_channels: u16,
+    mut pipeline: crate::audio::engine::convert::SinkPipeline,
     mut producer: HeapProducer<f32>,
     running: Arc<AtomicBool>,
 ) {
+    let ch = out_channels.max(1) as usize;
     let mut jb = JitterBuffer::new(lost_after);
-    let mut buf = [0u8; 4096];
+    // Sized for the largest UDP datagram, not the typical one: a truncated
+    // recv silently corrupts a frame (and fails AEAD outright).
+    let mut buf = [0u8; 65535];
     let mut decoded: Vec<f32> = Vec::new();
+    let mut converted: Vec<f32> = Vec::new();
     let mut sub = Vec::new();
     packet::encode_subscribe(salt_b, &mut sub);
     let mut last_hb = Instant::now();
     let mut replay = super::crypto::ReplayWindow::new();
     let mut drift =
-        super::drift::DriftController::new(target_frames as f32, (target_frames / 4) as f32, 200);
+        super::drift::DriftController::new(target_samples as f32, (target_samples / 4) as f32, 200);
     let mut skip_samples: usize = 0;
     let mut insert_silence: usize = 0;
 
@@ -132,27 +141,29 @@ pub fn receive_loop(
             match jb.pop() {
                 Pop::Frame(pcm) => {
                     decode_pcm_i16_le_to_f32(&pcm, &mut decoded);
-                    // Apply drift correction: skip or insert samples.
+                    pipeline.process(&decoded, &mut converted);
+                    // Apply drift correction in whole device frames.
                     if skip_samples > 0 {
-                        let skip = skip_samples.min(decoded.len());
-                        let remaining = &decoded[skip..];
-                        let _ = producer.push_slice(remaining);
+                        let skip = skip_samples.min(converted.len()) / ch * ch;
+                        let _ = producer.push_slice(&converted[skip..]);
                         skip_samples -= skip;
                     } else {
-                        let _ = producer.push_slice(&decoded);
+                        let _ = producer.push_slice(&converted);
                     }
                     if insert_silence > 0 {
-                        let silence = vec![0.0f32; insert_silence.min(decoded.len())];
+                        let n = insert_silence.min(converted.len().max(ch)) / ch * ch;
+                        let silence = vec![0.0f32; n];
                         let _ = producer.push_slice(&silence);
-                        insert_silence = insert_silence.saturating_sub(silence.len());
+                        insert_silence = insert_silence.saturating_sub(n);
                     }
                 }
                 Pop::Gap => { /* silence handled by the output callback's underrun fill */ }
                 Pop::Starved => break,
             }
         }
-        // Drift observation: once per loop iteration.
-        let drop_count = (target_frames / 20).max(8);
+        // Drift observation: once per loop iteration. Corrections are
+        // requested in whole device frames so skips never shift channels.
+        let drop_count = ((target_samples / 20).max(8)).div_ceil(ch) * ch;
         match drift.observe(producer.len() as f32) {
             super::drift::DriftAction::DropChunk => {
                 skip_samples += drop_count;

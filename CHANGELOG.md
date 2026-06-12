@@ -4,6 +4,24 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [2.3.0] - 2026-06-12
+
+### Fixed
+
+- Fixed chipmunk and choppy audio introduced by the audio-engine refactor by preventing capture-device channel counts and sample rates from reaching the wire unchanged.
+- Buffer drops, skips, catch-up, and drift corrections are now frame-aligned, preventing left and right channels from swapping mid-stream.
+
+### Added
+
+- Added `i32` capture support alongside `f32`, `i16`, and `u16`.
+- Added a stateful Catmull-Rom resampler for converting the capture-device rate to the configured wire rate.
+- Added native support for mono, stereo, and multichannel capture devices; mono is duplicated to stereo and multichannel input uses the front left/right pair.
+- Added sink output-format negotiation and conversion for `f32`, `i16`, `u16`, and `i32` playback devices, including mono downmixing and sample-rate conversion.
+
+### Changed
+
+- The Sample Rate setting now controls the output/wire rate. Streams are always sent as `s16le`, stereo, at the configured rate.
+
 ## [2.2.0] - 2026-06-06
 
 ### Added

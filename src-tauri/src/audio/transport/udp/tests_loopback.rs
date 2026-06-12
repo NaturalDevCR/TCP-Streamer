@@ -40,6 +40,51 @@ fn subscribe_then_receive_one_audio_frame() {
 }
 
 #[test]
+fn large_chunks_are_split_into_bounded_sequential_datagrams() {
+    use super::source::MAX_PAYLOAD_BYTES;
+
+    let mut src = UdpSource::bind(0, 48000, 2, String::new()).expect("bind");
+    let src_addr = src.local_addr();
+
+    let sink = UdpSocket::bind("127.0.0.1:0").unwrap();
+    sink.connect(src_addr).unwrap();
+    sink.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+
+    let mut sub = Vec::new();
+    packet::encode_subscribe(7, &mut sub);
+    sink.send(&sub).unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    src.poll_subscribe();
+    let mut buf = [0u8; 65535];
+    let _ = sink.recv(&mut buf).unwrap(); // STREAM_INFO
+
+    // A robust-profile resampled chunk (~5000 bytes) must arrive complete,
+    // in order, with every datagram within the bound (this used to be one
+    // 5000-byte datagram that a 4096-byte receive buffer truncated).
+    let big: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+    src.send_audio(&big);
+
+    let mut reassembled = Vec::new();
+    let mut expected_seq = 0u64;
+    while reassembled.len() < big.len() {
+        let n = sink.recv(&mut buf).expect("datagram");
+        let (h, payload) = packet::decode_audio(&buf[..n]).expect("audio");
+        assert_eq!(h.seq, expected_seq, "datagrams must be sequential");
+        assert!(
+            payload.len() <= MAX_PAYLOAD_BYTES,
+            "datagram payload {} exceeds bound {}",
+            payload.len(),
+            MAX_PAYLOAD_BYTES
+        );
+        reassembled.extend_from_slice(payload);
+        expected_seq += 1;
+    }
+    assert_eq!(reassembled, big, "payload must reassemble exactly");
+    assert_eq!(expected_seq, 5, "5000 bytes at 1200/packet = 5 datagrams");
+    assert_eq!(MAX_PAYLOAD_BYTES % 4, 0, "split must stay frame-aligned");
+}
+
+#[test]
 fn encrypted_frame_roundtrips_and_wrong_psk_fails() {
     use super::crypto::{derive_key, nonce_salt, open, seal};
     let (sa, sb) = (0x1111_2222_3333_4444u64, 0xAAAA_BBBB_CCCC_DDDDu64);

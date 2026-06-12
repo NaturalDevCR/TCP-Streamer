@@ -90,6 +90,23 @@ It's perfect for integrating with multi-room audio systems, creating custom audi
 
 ---
 
+## Audio format & device compatibility
+
+- **Fixed wire format:** Audio is always sent as `s16le`, stereo, at the configured output rate. For Snapcast, use the default 48 kHz setting with `sampleformat = 48000:16:2`:
+
+  ```ini
+  source = tcp://0.0.0.0:4953?name=TCP-Streamer&mode=client&sampleformat=48000:16:2
+  ```
+
+  TCP Streamer can run as either a TCP client or server.
+
+- **Capture devices:** Mono, stereo, and multichannel devices are supported; multichannel input uses the front left/right pair. Devices may run at any sample rate because audio is resampled internally. Supported capture formats are `f32`, `i16`, `u16`, and `i32`.
+- **Windows system audio:** Use the built-in WASAPI `[Loopback]` devices; no extra software is required. VB-Audio Cable also works as a regular input.
+- **macOS system audio:** Install a virtual device such as BlackHole (`brew install blackhole-2ch`). BlackHole 2ch is recommended, while BlackHole 16ch also works by streaming its front pair. Create a Multi-Output Device in Audio MIDI Setup to keep hearing audio locally.
+- **Linux system audio:** Select the PulseAudio/PipeWire monitor source for your output, for example with `pavucontrol` or `pactl list sources | grep -i monitor`. See [LINUX_GUIDE.md](LINUX_GUIDE.md) for more Linux setup details.
+
+---
+
 ## Use Cases
 
 ### 1. **Multi-Room Audio**

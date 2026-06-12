@@ -5,9 +5,11 @@
 /// Samples to drop so ring occupancy returns to the standing-latency target.
 ///
 /// Returns 0 while `occupied` is within `target_ms + margin_ms`; above that
-/// threshold it returns exactly the samples in excess of `target_ms` (we drain
-/// back to the target, not to the threshold, so small jitter doesn't trigger
-/// a drop on every iteration).
+/// threshold it returns the samples in excess of `target_ms` (we drain back
+/// to the target, not to the threshold, so small jitter doesn't trigger a
+/// drop on every iteration), rounded DOWN to a whole frame so skipping never
+/// breaks channel interleaving (an odd skip would swap L/R for the rest of
+/// the stream).
 pub fn excess_samples(
     occupied: usize,
     target_ms: u32,
@@ -19,7 +21,8 @@ pub fn excess_samples(
     let target = per_sec * target_ms as usize / 1000;
     let threshold = per_sec * (target_ms + margin_ms) as usize / 1000;
     if occupied > threshold {
-        occupied - target
+        let raw = occupied - target;
+        raw - (raw % channels.max(1) as usize)
     } else {
         0
     }
@@ -88,6 +91,22 @@ mod tests {
             excess_samples(occupied, 300, 250, RATE, 2),
             occupied - target_samples
         );
+    }
+
+    #[test]
+    fn excess_is_always_frame_aligned() {
+        // An occupancy/target combination that would yield an odd raw excess
+        // must round down to a whole stereo frame, or cons.skip() would swap
+        // L/R permanently.
+        let occupied = 48000 * 2; // 1s stereo
+        for target_ms in [3, 5, 7, 333] {
+            let excess = excess_samples(occupied, target_ms, 0, 44100, 2);
+            assert_eq!(excess % 2, 0, "target_ms={target_ms} gave odd excess");
+            assert!(excess > 0);
+        }
+        // 6-channel ring: excess must be a multiple of 6.
+        let excess = excess_samples(100_003, 100, 0, 48000, 6);
+        assert_eq!(excess % 6, 0);
     }
 
     #[test]

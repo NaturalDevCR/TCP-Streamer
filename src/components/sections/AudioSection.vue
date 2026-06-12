@@ -22,7 +22,11 @@
             </Select>
           </Field>
 
-          <Field :label="t('audio.sampleRate')" class="w-[140px]">
+          <Field
+            :label="t('audio.sampleRate')"
+            :help="t('audio.sampleRateHint')"
+            class="w-[140px]"
+          >
             <Select v-model.number="settings.sampleRate" :disabled="stream.isStreaming">
               <SelectOption :value="48000" label="48 kHz" />
               <SelectOption :value="44100" label="44.1 kHz" />

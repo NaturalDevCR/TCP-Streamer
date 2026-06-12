@@ -4730,7 +4730,7 @@ dependencies = [
 
 [[package]]
 name = "tcp-streamer"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "chacha20poly1305",

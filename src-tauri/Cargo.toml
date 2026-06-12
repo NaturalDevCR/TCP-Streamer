@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "2.2.0"
+version = "2.3.0"
 description = "A TCP Audio Streamer"
 authors = ["you"]
 edition = "2021"
@@ -45,7 +45,6 @@ mdns-sd = "0.11"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
 
 
 

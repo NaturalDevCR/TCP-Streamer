@@ -2,6 +2,7 @@
 
 pub mod buffer;
 pub mod capture;
+pub mod convert;
 pub mod decoder;
 pub mod device;
 pub mod encoder;
@@ -9,6 +10,11 @@ pub mod latency;
 pub mod pacing;
 pub mod playback;
 pub mod sink;
+
+/// The wire format is always interleaved stereo (s16le at the configured
+/// output rate); the capture side normalizes channels in the callback and the
+/// send loop resamples, so the ring always holds stereo at the capture rate.
+const STEREO: u16 = 2;
 
 // ── Imports for the engine::run orchestrator ──
 use super::chunked::ChunkedWriter;
@@ -143,11 +149,14 @@ pub fn run(
         found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
     };
 
-    // 0.5. Note: We deliberately DO NOT override the requested sample rate natively anymore.
-    // If the user requests 48000Hz and the device natively captures at 44100Hz, we trust
-    // the OS audio stack (PipeWire, PulseAudio, CoreAudio, WASAPI shared mode) to perform
-    // the necessary resampling. Overriding this breaks protocol synchronization
-    // with the downstream audio receiver.
+    // 0.5. Format contract: `sample_rate` is the OUTPUT (wire) rate — what the
+    // receiver (e.g. Snapserver's `48000:16:2` source) expects. The device is
+    // opened at a rate IT actually supports (capture_rate, negotiated below)
+    // and at its native channel count; the capture callback mixes to stereo
+    // and the send loop resamples capture_rate → wire rate before encoding.
+    // We never rely on the OS to resample for us: that assumption only held
+    // on some backends (WASAPI shared mode, PulseAudio) and produced
+    // pitch-shifted "chipmunk" audio everywhere else.
 
     // Detect supported audio formats from device
     let supported_configs: Vec<_> = if is_loopback {
@@ -162,71 +171,78 @@ pub fn run(
             .collect()
     };
 
-    use self::device::{pick_best, ConfigCandidate, SampleFmt};
+    use self::device::{negotiate, ConfigCandidate, SampleFmt};
 
     let to_fmt = |f: cpal::SampleFormat| match f {
         cpal::SampleFormat::F32 => Some(SampleFmt::F32),
         cpal::SampleFormat::I16 => Some(SampleFmt::I16),
         cpal::SampleFormat::U16 => Some(SampleFmt::U16),
+        cpal::SampleFormat::I32 => Some(SampleFmt::I32),
         _ => None,
     };
 
-    let candidates: Vec<ConfigCandidate> = supported_configs
+    // Pair each usable cpal config with its simplified candidate view so the
+    // negotiated index maps straight back to the cpal range.
+    let usable: Vec<(ConfigCandidate, &cpal::SupportedStreamConfigRange)> = supported_configs
         .iter()
         .filter_map(|r| {
-            to_fmt(r.sample_format()).map(|format| ConfigCandidate {
-                channels: r.channels(),
-                format,
-                min_rate: r.min_sample_rate().0,
-                max_rate: r.max_sample_rate().0,
+            to_fmt(r.sample_format()).map(|format| {
+                (
+                    ConfigCandidate {
+                        channels: r.channels(),
+                        format,
+                        min_rate: r.min_sample_rate().0,
+                        max_rate: r.max_sample_rate().0,
+                    },
+                    r,
+                )
             })
         })
         .collect();
+    let candidates: Vec<ConfigCandidate> = usable.iter().map(|(c, _)| *c).collect();
 
-    let (config_range, selected_format) = match pick_best(&candidates, sample_rate) {
-        Some(i) => {
-            let cand = candidates[i];
-            let range = supported_configs
+    let negotiated = negotiate(&candidates, sample_rate).ok_or_else(|| {
+        format!(
+            "No usable capture config: device offers none of the supported \
+             sample formats (f32/i16/u16/i32). Available: {:?}",
+            supported_configs
                 .iter()
-                .find(|r| {
-                    to_fmt(r.sample_format()) == Some(cand.format)
-                        && r.channels() == cand.channels
-                        && r.min_sample_rate().0 == cand.min_rate
-                        && r.max_sample_rate().0 == cand.max_rate
-                })
-                .copied()
-                .expect("candidate originates from supported_configs");
-            (range, range.sample_format())
-        }
-        None => {
-            let fallback = *supported_configs
-                .first()
-                .ok_or_else(|| "No supported audio config found".to_string())?;
-            emit_log(
-                &app_handle,
-                "warn",
-                format!(
-                    "Requested Sample Rate {}Hz not natively supported. Relying on OS resampler.",
-                    sample_rate
-                ),
-            );
-            (fallback, fallback.sample_format())
-        }
-    };
+                .map(|r| r.sample_format())
+                .collect::<Vec<_>>()
+        )
+    })?;
+    let config_range = *usable[negotiated.index].1;
+    let selected_format = config_range.sample_format();
     let device_channels = config_range.channels();
 
+    // Wire format is FIXED: `sample_rate`:16:2 (s16le). Capture runs at
+    // whatever the device supports; the engine converts in between.
+    let wire_rate = sample_rate;
+    let capture_rate = negotiated.capture_rate;
+
+    if capture_rate != wire_rate {
+        emit_log(
+            &app_handle,
+            "info",
+            format!(
+                "Device does not support {}Hz natively; capturing at {}Hz \
+                 and resampling internally.",
+                wire_rate, capture_rate
+            ),
+        );
+    }
     emit_log(
         &app_handle,
         "info",
         format!(
-            "Audio Input: format={:?}, channels={}, rate={}Hz",
-            selected_format, device_channels, sample_rate
+            "Audio Input: format={:?}, {}ch @ {}Hz → wire: s16le 2ch @ {}Hz",
+            selected_format, device_channels, capture_rate, wire_rate
         ),
     );
 
     let stream_config = cpal::StreamConfig {
         channels: device_channels,
-        sample_rate: cpal::SampleRate(sample_rate),
+        sample_rate: cpal::SampleRate(capture_rate),
         buffer_size: cpal::BufferSize::Default,
     };
 
@@ -256,8 +272,10 @@ pub fn run(
     let effective_chunk = lp.chunk_size;
 
     let ring_capacity_ms = lp.adaptive_max_ms.max(lp.ring_ms);
+    // Ring holds interleaved STEREO at the capture rate. Capacity must stay
+    // even so a partial push/pop can never split a stereo frame.
     let ring_buffer_size =
-        (sample_rate as usize) * (device_channels as usize) * (ring_capacity_ms as usize) / 1000;
+        ((capture_rate as usize) * (STEREO as usize) * (ring_capacity_ms as usize) / 1000) & !1;
 
     let buffer_size_mb = (ring_buffer_size * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
 
@@ -295,10 +313,10 @@ pub fn run(
     let app_handle_net = app_handle.clone();
     let ip_clone = ip.clone();
     let format_clone = format.clone();
-    let sample_rate_clone = sample_rate;
+    let wire_rate_net = wire_rate;
+    let capture_rate_net = capture_rate;
     let is_server_clone = is_server;
     let auto_reconnect_net = auto_reconnect;
-    let device_channels_net = device_channels;
     let dscp_clone = dscp_strategy.clone();
     let overruns_net = overruns.clone();
     let underruns_net = underruns.clone();
@@ -351,7 +369,7 @@ pub fn run(
         };
 
 
-        let mut temp_buffer = vec![0.0f32; effective_chunk_net as usize * device_channels_net as usize];
+        let mut temp_buffer = vec![0.0f32; effective_chunk_net as usize * STEREO as usize];
         let start_time = Instant::now();
         let mut last_stats_emit = Instant::now();
 
@@ -399,7 +417,7 @@ pub fn run(
         let mut prefilled = false;
         let prefill_ms = lp.prefill_ms;
         let prefill_samples =
-            sample_rate as usize * device_channels_net as usize * prefill_ms as usize / 1000;
+            capture_rate_net as usize * STEREO as usize * prefill_ms as usize / 1000;
         emit_log(
             &app_handle_net,
             "info",
@@ -413,13 +431,17 @@ pub fn run(
         let mut wav_header_sent = false;
         let mut prefill_debug_timer = Instant::now();
         let mut payload: Vec<u8> = Vec::new();
+        // capture_rate → wire_rate conversion happens here, on the network
+        // thread, right before encoding (passthrough when rates match).
+        let mut resampler = self::convert::StereoResampler::new(capture_rate_net, wire_rate_net);
+        let mut resampled: Vec<f32> = Vec::new();
         let mut udp_source: Option<super::transport::udp::source::UdpSource> = None;
         let mut advertiser: Option<super::transport::discovery::Advertiser> = None;
 
         while is_running_clone.load(Ordering::Relaxed) {
             // 1. Hardware-Driven Pacing
             let current_buffered = cons.len();
-            let min_chunk_samples = effective_chunk_net as usize * device_channels_net as usize;
+            let min_chunk_samples = effective_chunk_net as usize * STEREO as usize;
 
             // Honest underrun detection: an instantaneously empty ring is the
             // normal steady state (we drain faster than capture fills); only
@@ -458,8 +480,10 @@ pub fn run(
                         ),
                     );
                 } else {
-                    // Short outage: drain gradually
-                    let drain_amount = (sample_rate as usize * device_channels_net as usize / 10).min(current_buffered);
+                    // Short outage: drain gradually (whole stereo frames only)
+                    let drain_amount = ((capture_rate_net as usize * STEREO as usize / 10)
+                        .min(current_buffered))
+                        & !1;
                     let mut drain_buffer = vec![0.0f32; drain_amount];
                     let _ = cons.pop_slice(&mut drain_buffer);
                 }
@@ -495,7 +519,7 @@ pub fn run(
             if transport_net == "udp" {
                 // Lazily bind the UDP source on first iteration.
                 if udp_source.is_none() {
-                    match super::transport::udp::source::UdpSource::bind(port, sample_rate_clone, device_channels_net, psk_net.clone()) {
+                    match super::transport::udp::source::UdpSource::bind(port, wire_rate_net, STEREO, psk_net.clone()) {
                         Ok(s) => { emit_log(&app_handle_net, "success", format!("Native UDP source on port {}", port)); udp_source = Some(s); }
                         Err(e) => { emit_log(&app_handle_net, "error", format!("UDP bind failed: {}", e)); thread::sleep(Duration::from_millis(500)); }
                     }
@@ -517,14 +541,14 @@ pub fn run(
                             cons.len(),
                             adaptive.target_ms(),
                             DRAIN_MARGIN_MS,
-                            sample_rate_clone,
-                            device_channels_net,
+                            capture_rate_net,
+                            STEREO,
                         );
                         if excess > 0 {
                             let skipped = cons.skip(excess);
                             overruns_net.fetch_add(skipped as u64, Ordering::Relaxed);
                             let dropped_ms = skipped * 1000
-                                / (sample_rate_clone as usize * device_channels_net as usize);
+                                / (capture_rate_net as usize * STEREO as usize);
                             emit_log(
                                 &app_handle_net,
                                 "warning",
@@ -537,7 +561,8 @@ pub fn run(
                         }
                         let count = cons.pop_slice(&mut temp_buffer);
                         if count > 0 {
-                            self::encoder::encode_f32_to_pcm_i16_le(&temp_buffer[..count], &mut payload);
+                            resampler.process(&temp_buffer[..count], &mut resampled);
+                            self::encoder::encode_f32_to_pcm_i16_le(&resampled, &mut payload);
                             src.send_audio(&payload);
                             let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
                         } else {
@@ -750,7 +775,7 @@ pub fn run(
                 if is_server_clone && (use_chunked || format_clone == "wav") && !wav_header_sent {
                      {
                          // Send header with 0 length (handled by helper) for unknown/stream
-                         let header = create_wav_header(sample_rate_clone, device_channels_net, 16);
+                         let header = create_wav_header(wire_rate_net, STEREO, 16);
                          let stream: &mut dyn super::transport::Connection = stream_socket.as_mut();
 
                          if use_chunked {
@@ -800,14 +825,14 @@ pub fn run(
                     cons.len(),
                     adaptive.target_ms(),
                     DRAIN_MARGIN_MS,
-                    sample_rate,
-                    device_channels_net,
+                    capture_rate_net,
+                    STEREO,
                 );
                 if excess > 0 {
                     let skipped = cons.skip(excess);
                     overruns_net.fetch_add(skipped as u64, Ordering::Relaxed);
                     let dropped_ms =
-                        skipped * 1000 / (sample_rate as usize * device_channels_net as usize);
+                        skipped * 1000 / (capture_rate_net as usize * STEREO as usize);
                     emit_log(
                         &app_handle_net,
                         "warning",
@@ -822,7 +847,8 @@ pub fn run(
                 let count = cons.pop_slice(&mut temp_buffer);
 
                 if count > 0 {
-                    self::encoder::encode_f32_to_pcm_i16_le(&temp_buffer[..count], &mut payload);
+                    resampler.process(&temp_buffer[..count], &mut resampled);
+                    self::encoder::encode_f32_to_pcm_i16_le(&resampled, &mut payload);
 
                     let _write_start = Instant::now();
                     let mut write_success = false;
@@ -892,11 +918,12 @@ pub fn run(
     });
 
     // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
-    let capacity_hint = effective_chunk as usize * device_channels as usize;
+    let capacity_hint = effective_chunk as usize * STEREO as usize;
     let audio_stream = self::capture::build_input_stream(
         &device,
         &stream_config,
         selected_format,
+        device_channels,
         prod,
         overruns.clone(),
         capacity_hint,
@@ -913,4 +940,119 @@ pub fn run(
             underruns,
         },
     ))
+}
+
+/// End-to-end pipeline test: a multichannel, non-48k "device" must come out
+/// the other side as stereo 48k s16le with pitch and channel polarity intact.
+/// This is the regression test for the post-refactor "chipmunk audio": the
+/// wire format is fixed, no matter what the capture device looks like.
+#[cfg(test)]
+mod pipeline_tests {
+    use super::*;
+
+    #[test]
+    fn multichannel_44k1_device_produces_stereo_48k_wire() {
+        const IN_RATE: u32 = 44_100;
+        const WIRE_RATE: u32 = 48_000;
+        const IN_CH: usize = 16;
+        const SECONDS: f32 = 2.0;
+        const FREQ: f32 = 440.0;
+
+        // Ring as the engine allocates it: stereo @ capture rate, even size.
+        let ring_size = ((IN_RATE as usize) * 2 * 4000 / 1000) & !1;
+        let rb = HeapRb::<f32>::new(ring_size);
+        let (mut prod, mut cons) = rb.split();
+        let overruns = Arc::new(AtomicU64::new(0));
+
+        let mut resampler = self::super::convert::StereoResampler::new(IN_RATE, WIRE_RATE);
+        let mut scratch: Vec<f32> = Vec::new();
+        let mut temp = vec![0.0f32; 512 * 2];
+        let mut resampled: Vec<f32> = Vec::new();
+        let mut payload: Vec<u8> = Vec::new();
+        let mut wire: Vec<u8> = Vec::new();
+
+        // Drive "callbacks" of 441 frames (10ms) of a 16ch device whose front
+        // pair carries L = sine, R = -sine; other channels carry garbage that
+        // must never reach the wire.
+        let total_frames = (IN_RATE as f32 * SECONDS) as usize;
+        let mut frame_idx = 0usize;
+        let mut callback = Vec::new();
+        while frame_idx < total_frames {
+            let n = 441.min(total_frames - frame_idx);
+            callback.clear();
+            for k in 0..n {
+                let t = (frame_idx + k) as f32 / IN_RATE as f32;
+                let s = (std::f32::consts::TAU * FREQ * t).sin();
+                callback.push(s); // FL
+                callback.push(-s); // FR
+                for c in 2..IN_CH {
+                    callback.push(c as f32); // junk in unused channels
+                }
+            }
+            self::super::capture::push_stereo(
+                &callback,
+                IN_CH,
+                |s| s,
+                &mut scratch,
+                &mut prod,
+                &overruns,
+            );
+            frame_idx += n;
+
+            // Network thread side: drain like the send loop does.
+            loop {
+                let count = cons.pop_slice(&mut temp);
+                if count == 0 {
+                    break;
+                }
+                resampler.process(&temp[..count], &mut resampled);
+                self::super::encoder::encode_f32_to_pcm_i16_le(&resampled, &mut payload);
+                wire.extend_from_slice(&payload);
+            }
+        }
+
+        assert_eq!(overruns.load(Ordering::Relaxed), 0, "ring overran");
+        assert_eq!(
+            wire.len() % 4,
+            0,
+            "wire must hold whole s16le stereo frames"
+        );
+
+        // Decode the wire as the receiver (Snapserver at 48000:16:2) would.
+        let mut decoded: Vec<f32> = Vec::new();
+        self::super::decoder::decode_pcm_i16_le_to_f32(&wire, &mut decoded);
+        let wire_frames = decoded.len() / 2;
+        let expected_frames = total_frames as f64 * WIRE_RATE as f64 / IN_RATE as f64;
+        let len_err = (wire_frames as f64 - expected_frames).abs() / expected_frames;
+        assert!(
+            len_err < 0.005,
+            "wire duration off: {wire_frames} frames vs ~{expected_frames}"
+        );
+
+        // Pitch check: zero crossings of L over the whole stream at 48k must
+        // still be ~440Hz (2 crossings per cycle). A chipmunk regression
+        // (channel/rate misinterpretation) blows way past the 2% tolerance.
+        let left: Vec<f32> = decoded.chunks_exact(2).map(|f| f[0]).collect();
+        let crossings = left
+            .windows(2)
+            .filter(|p| (p[0] <= 0.0 && p[1] > 0.0) || (p[0] >= 0.0 && p[1] < 0.0))
+            .count();
+        let expected_crossings = (2.0 * FREQ * SECONDS) as f64;
+        let pitch_err = (crossings as f64 - expected_crossings).abs() / expected_crossings;
+        assert!(
+            pitch_err < 0.02,
+            "pitch shifted: {crossings} crossings vs ~{expected_crossings}"
+        );
+
+        // Channel integrity: R must stay the negation of L (junk channels and
+        // interleave shifts would break this immediately).
+        for (i, f) in decoded.chunks_exact(2).enumerate().skip(8) {
+            assert!(
+                (f[0] + f[1]).abs() < 2e-2,
+                "frame {i}: L={} R={} not mirrored",
+                f[0],
+                f[1]
+            );
+        }
+    }
 }

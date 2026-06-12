@@ -61,7 +61,8 @@
   "audio": {
     "title": "Audio",
     "inputDevice": "Dispositivo de entrada",
-    "sampleRate": "Frecuencia de muestreo",
+    "sampleRate": "Frecuencia de salida",
+    "sampleRateHint": "Se envía al receptor — debe coincidir con el sampleformat de Snapserver",
     "bufferSize": "Buffer de captura (frames)",
     "format": "Formato de transmisión",
     "formatPcm": "PCM (Crudo)",

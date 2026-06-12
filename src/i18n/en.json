@@ -61,7 +61,8 @@
   "audio": {
     "title": "Audio",
     "inputDevice": "Input Device",
-    "sampleRate": "Sample Rate",
+    "sampleRate": "Output Sample Rate",
+    "sampleRateHint": "Sent to the receiver — must match e.g. Snapserver sampleformat",
     "bufferSize": "Capture Buffer (frames)",
     "format": "Stream Format",
     "formatPcm": "PCM (Raw)",
