@@ -7,6 +7,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Internal planning docs (not for public repo)
+docs/superpowers/
+
 node_modules
 dist
 dist-ssr
