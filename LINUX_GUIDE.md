@@ -34,6 +34,7 @@ sudo apt install ./tcp-streamer_*.deb
 TCP Streamer captures audio from ALSA/PulseAudio/PipeWire devices. To stream system audio output:
 
 1. Find your monitor source:
+
    ```bash
    pactl list sources | grep -i monitor
    ```

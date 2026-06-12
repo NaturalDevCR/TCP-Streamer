@@ -16,8 +16,6 @@
 <img width="964" height="650" alt="image" src="https://github.com/user-attachments/assets/700828bf-05b3-45c7-8a3b-598f1346ebcb" />
 <img width="960" height="648" alt="image" src="https://github.com/user-attachments/assets/2f180360-80ac-420a-b1f5-1bf9746d25e7" />
 
-
-
 ## Table of Contents
 
 - [Overview](#overview)
@@ -123,10 +121,10 @@ Both roles support **TCP** (max compatibility, HTTP/WAV streaming) and **Native 
 
 Best for universal compatibility. Works with Snapcast, Mopidy, VLC, browsers, and any TCP audio receiver.
 
-| Role   | Behavior |
-|--------|----------|
+| Role   | Behavior                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------- |
 | Source | Connects to a remote TCP server or listens for incoming TCP connections (client/server mode). |
-| Sink   | Connects to a TCP audio source and plays received audio. |
+| Sink   | Connects to a TCP audio source and plays received audio.                                      |
 
 In server mode, TCP Streamer auto-detects HTTP clients and serves a `.wav` stream for browser playback.
 
@@ -134,12 +132,12 @@ In server mode, TCP Streamer auto-detects HTTP clients and serves a `.wav` strea
 
 Best for low-latency streaming between two TCP Streamer instances or compatible receivers.
 
-| Feature          | Description |
-|------------------|-------------|
-| De-jitter buffer | Sequence/timestamp framing with configurable jitter tolerance. |
-| Loss concealment | Conceals missing packets to avoid audible gaps. |
-| Clock drift      | Inserts/drops mini-chunks to track long-run clock differences (no PTP required). |
-| Encryption       | Optional Chacha20-Poly1305 per-packet AEAD with PSK + HKDF-SHA256 key derivation. |
+| Feature          | Description                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| De-jitter buffer | Sequence/timestamp framing with configurable jitter tolerance.                             |
+| Loss concealment | Conceals missing packets to avoid audible gaps.                                            |
+| Clock drift      | Inserts/drops mini-chunks to track long-run clock differences (no PTP required).           |
+| Encryption       | Optional Chacha20-Poly1305 per-packet AEAD with PSK + HKDF-SHA256 key derivation.          |
 | mDNS             | Sources advertise via multicast DNS; sinks scan the LAN and auto-populate the source list. |
 
 ---
@@ -281,12 +279,12 @@ Click **Start**. The dashboard shows real-time stats — RTT, underruns, bitrate
 
 Controls coordinated ring buffer and chunk size presets. The adaptive controller adjusts the standing-latency target within the profile's min/max band based on observed glitches.
 
-| Profile     | Ring (ms) | Adaptive Band (ms) | Chunk  | Use Case |
-|-------------|-----------|---------------------|--------|----------|
-| **Ultra-low** | 2000 | 100 – 500 | 256 | Wired LAN, minimal latency |
-| **Balanced**  | 4000 | 200 – 1500 | 512 | Default; good trade-off for most networks |
-| **Robust**    | 8000 | 500 – 3000 | 1024 | Unstable/WiFi networks, high jitter tolerance |
-| **Custom**    | Manual | Manual (Min/Max Buffer sliders) | Manual | Full control over all parameters |
+| Profile       | Ring (ms) | Adaptive Band (ms)              | Chunk  | Use Case                                      |
+| ------------- | --------- | ------------------------------- | ------ | --------------------------------------------- |
+| **Ultra-low** | 2000      | 100 – 500                       | 256    | Wired LAN, minimal latency                    |
+| **Balanced**  | 4000      | 200 – 1500                      | 512    | Default; good trade-off for most networks     |
+| **Robust**    | 8000      | 500 – 3000                      | 1024   | Unstable/WiFi networks, high jitter tolerance |
+| **Custom**    | Manual    | Manual (Min/Max Buffer sliders) | Manual | Full control over all parameters              |
 
 Loopback (WASAPI) capture uses higher floors in each profile for extra stability.
 
@@ -320,15 +318,15 @@ Loopback (WASAPI) capture uses higher floors in each profile for extra stability
 
 ### Technology Stack
 
-| Layer     | Technology |
-|-----------|------------|
-| Frontend  | Vue 3 (Composition API), Pinia, Tailwind CSS 4, reka-ui, Vite 7 |
-| i18n      | vue-i18n (English + Spanish) |
-| Backend   | Rust (Tauri v2) |
-| Audio     | cpal (cross-platform audio), ringbuf (lock-free ring buffer) |
-| Network   | socket2, mdns-sd, chacha20poly1305, hkdf, sha2 |
-| Storage   | tauri-plugin-store (settings persistence) |
-| Testing   | Vitest (frontend), cargo test (backend) |
+| Layer    | Technology                                                      |
+| -------- | --------------------------------------------------------------- |
+| Frontend | Vue 3 (Composition API), Pinia, Tailwind CSS 4, reka-ui, Vite 7 |
+| i18n     | vue-i18n (English + Spanish)                                    |
+| Backend  | Rust (Tauri v2)                                                 |
+| Audio    | cpal (cross-platform audio), ringbuf (lock-free ring buffer)    |
+| Network  | socket2, mdns-sd, chacha20poly1305, hkdf, sha2                  |
+| Storage  | tauri-plugin-store (settings persistence)                       |
+| Testing  | Vitest (frontend), cargo test (backend)                         |
 
 ### Project Structure
 
@@ -386,6 +384,7 @@ src-tauri/src/           — Rust backend (Tauri v2)
 ### Audio Pipeline
 
 **Source (TCP/UDP):**
+
 ```
 Input Device → cpal capture (real-time-safe) → Ring Buffer (f32, stereo)
   → Catmull-Rom Resampler → f32→s16le Encoder
@@ -394,6 +393,7 @@ Input Device → cpal capture (real-time-safe) → Ring Buffer (f32, stereo)
 ```
 
 **Sink (TCP/UDP):**
+
 ```
 Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
   → s16le→f32 Decoder → Ring Buffer
@@ -415,6 +415,7 @@ Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
 ### WASAPI Loopback Stuttering (Windows)
 
 **Solutions:**
+
 - Enable **Adaptive Buffer**.
 - Ensure speakers/headphones are connected and active (WASAPI requires an active output).
 - Increase the latency profile to **Robust** or use manual buffer settings.
@@ -422,16 +423,19 @@ Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
 ### Connection Issues
 
 **Server Mode:**
+
 - Ensure the port (e.g., 1704) is allowed through your firewall.
 - Verify the client (audio receiver/browser) can reach your IP.
 - Check the allowlist does not block the client's IP.
 
 **Client Mode:**
+
 - Verify the target IP and port are correct.
 - Check if the target server is online.
 - Ensure DSCP/QoS settings match your network requirements.
 
 **Native UDP:**
+
 - Both endpoints must use the same PSK if encryption is enabled.
 - mDNS requires multicast to be allowed on the local network segment.
 - For manual addresses, verify `host:port` is reachable from the sink machine.
@@ -441,6 +445,7 @@ Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
 **Problem:** "App is damaged and can't be opened"
 
 **Solution:**
+
 ```bash
 xattr -cr /Applications/TCP\ Streamer.app
 ```

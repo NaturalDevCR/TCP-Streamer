@@ -28,19 +28,19 @@ This starts the Vite dev server on port 1420 and opens the Tauri window.
 
 ### Available Scripts
 
-| Command | Description |
-|---------|-------------|
-| `pnpm dev` | Start Vite dev server only (frontend) |
-| `pnpm build` | Build frontend for production |
-| `pnpm tauri dev` | Start full Tauri app in dev mode |
-| `pnpm tauri build` | Build distributable binaries |
-| `pnpm test` | Run Vitest (frontend) unit tests |
-| `pnpm test:watch` | Run Vitest in watch mode |
-| `pnpm lint` | Run ESLint |
-| `pnpm lint:fix` | Auto-fix ESLint issues |
-| `pnpm format` | Format with Prettier |
-| `pnpm format:check` | Check Prettier formatting |
-| `pnpm typecheck` | Run vue-tsc type checking |
+| Command             | Description                           |
+| ------------------- | ------------------------------------- |
+| `pnpm dev`          | Start Vite dev server only (frontend) |
+| `pnpm build`        | Build frontend for production         |
+| `pnpm tauri dev`    | Start full Tauri app in dev mode      |
+| `pnpm tauri build`  | Build distributable binaries          |
+| `pnpm test`         | Run Vitest (frontend) unit tests      |
+| `pnpm test:watch`   | Run Vitest in watch mode              |
+| `pnpm lint`         | Run ESLint                            |
+| `pnpm lint:fix`     | Auto-fix ESLint issues                |
+| `pnpm format`       | Format with Prettier                  |
+| `pnpm format:check` | Check Prettier formatting             |
+| `pnpm typecheck`    | Run vue-tsc type checking             |
 
 ### Backend (Rust)
 
