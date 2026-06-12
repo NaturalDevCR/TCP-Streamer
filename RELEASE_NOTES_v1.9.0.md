@@ -1,12 +1,14 @@
-# 🛡️ TCP Streamer v1.9.0 - Connection Resilience
+# TCP Streamer v1.9.0 — Connection Resilience
 
-This release fixes a critical issue that caused **connection storms** when the network briefly dropped, which crashed Snapserver on 2026-01-29.
+> **Archived historical release note.** For current changes, see [CHANGELOG.md](CHANGELOG.md).
 
-## 🔥 What Happened
+This release fixed a critical issue that caused **connection storms** when the network briefly dropped, which crashed Snapserver on 2026-01-29.
+
+## What Happened
 
 When the network dropped for "Otocuma-Bar", the app opened **10 simultaneous connections** in 2 minutes. This triggered the server's watchdog to send a fatal signal (SIGUSR1), killing the audio server and silencing the entire hotel.
 
-## ✅ What's Fixed
+## What Was Fixed
 
 ### 1. Enhanced Exponential Backoff
 
@@ -24,7 +26,7 @@ When the network dropped for "Otocuma-Bar", the app opened **10 simultaneous con
 - **Clears stale audio** so you get fresh sound when reconnecting
 - Prevents CPU spinning at 100% during network outages
 
-## 📊 Before vs After
+## Before vs After
 
 | Scenario          | v1.8.9                  | v1.9.0                  |
 | ----------------- | ----------------------- | ----------------------- |
@@ -32,12 +34,6 @@ When the network dropped for "Otocuma-Bar", the app opened **10 simultaneous con
 | Reconnect timing  | 1s initial delay        | 2s + jitter             |
 | Socket on error   | Silent drop             | Proper FIN + 100ms wait |
 | CPU during outage | 100% spin               | Normal pacing           |
-
-## 🚀 Upgrade
-
-Simply replace the old executable with this version on all hotel computers.
-
-> ⚠️ **IMPORTANT**: Deploy to all clients (Lobby, Bar, Restaurant, Pool) to prevent future incidents.
 
 ---
 

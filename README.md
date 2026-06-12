@@ -1,6 +1,6 @@
 # TCP Streamer
 
-> A lightweight, cross-platform audio streaming application built with Tauri. Stream system audio over TCP with minimal latency and robust architecture.
+> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture, send, receive, and play back audio over TCP or encrypted Native UDP with sub-second latency.
 
 ![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
@@ -16,10 +16,11 @@
 <img width="200" height="425" alt="image" src="https://github.com/user-attachments/assets/e9b700f4-4a1f-4ac7-bdbd-22e8aa1e423c" />
 <img width="200" height="425" alt="image" src="https://github.com/user-attachments/assets/8c54c4aa-dd60-4dd7-960f-52b0f3ef836c" />
 
-## 📖 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Features](#features)
+- [Transport Modes](#transport-modes)
 - [Use Cases](#use-cases)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -33,60 +34,111 @@
 
 ## Overview
 
-**TCP Streamer** is a desktop application designed to capture and stream audio from your computer. It can operate in two modes:
+**TCP Streamer** is a bidirectional audio streaming desktop application. It can operate as:
 
-1.  **Client Mode**: Connects to an audio receiver (or any TCP server) and pushes audio to it.
-2.  **Server Mode**: Acts as a TCP server, listening for incoming connections from audio receivers or media players.
+1. **Source** — Capture audio from an input device and send it over the network.
+2. **Sink** — Receive an audio stream from the network and play it through a local output device.
 
-It's perfect for integrating with multi-room audio systems, creating custom audio pipelines, or building distributed audio setups.
+Both roles support **TCP** (max compatibility, HTTP/WAV streaming) and **Native UDP** (low latency, encryption, mDNS discovery).
 
 ### How It Works
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
 │   Audio     │      │     TCP      │      │   Server    │
-│   Input     │─────▶│   Streamer   │─────▶│  (Audio    │
-│  (Device)   │      │              │      │ Receiver)  │
+│   Input     │─────>│   Streamer   │─────>│  (Audio     │
+│  (Device)   │      │   (Source)   │      │ Receiver)  │
+└─────────────┘      └──────────────┘      └─────────────┘
+
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+│  TCP/UDP    │      │     TCP      │      │   Audio     │
+│  Source     │─────>│   Streamer   │─────>│   Output    │
+│             │      │   (Sink)     │      │  (Device)   │
 └─────────────┘      └──────────────┘      └─────────────┘
 ```
 
-1.  **Capture**: Reads audio from a selected input device at a configurable sample rate (44.1kHz / 48kHz).
-2.  **Buffer**: Pushes audio into a lock-free **Ring Buffer** to absorb network jitter.
-3.  **Process**: Converts audio to raw PCM (16-bit signed, little-endian, stereo).
-4.  **Stream**: Sends data over TCP.
-    - **Client Mode**: Initiates connection to a target IP:Port.
-    - **Server Mode**: Binds to a local Port and waits for connections.
-    - **HTTP Stream**: In Server Mode, also provides a `.wav` stream for browser playback.
+1. **Capture** — Reads audio from a selected input device with real-time-safe ring buffer callback.
+2. **Resample & Encode** — Catmull-Rom resampler converts device rate to wire rate; f32 to s16le stereo encoding.
+3. **Buffer** — Lock-free ring buffer absorbs network jitter with adaptive target-occupancy control.
+4. **Send** — Transmits over TCP or encrypted Native UDP, with RTT measurement and quality scoring.
+5. **Receive (Sink)** — De-jitter buffer with sequence tracking, clock-drift compensation, and loss concealment.
+6. **Play** — Decodes received audio and plays through a selected output device.
 
 ---
 
 ## Features
 
-### Core Functionality
+### Roles & Transport
 
-- ✅ **Modern Tabbed UI** - Clean, intuitive interface powered by Vue 3 and Tailwind CSS with a premium dark glassmorphism design.
-- ✅ **Dual Operation Modes** - Run as a **Client** (push to server) or **Server** (listen for connections).
-- ✅ **Raw PCM Audio** - High-quality, uncompressed audio streaming (16-bit, stereo preserving full L/R separation).
-- ✅ **WAV Streaming** - Browser-compatible HTTP stream in Server Mode.
-- ✅ **Connection Reliability** - Auto-reconnection logic and deep sleep mode.
-- ✅ **Robust Audio Engine** - Native F32 internal architecture with safe PCM conversion.
-- ✅ **Adaptive Buffer Sizing** - Automatically adjusts buffer based on network jitter.
-- ✅ **Multi-Profile Support** - Save and switch between configurations for different environments.
-- ✅ **System Tray Integration** - Runs in background, accessible from tray.
-- ✅ **Windows Native Loopback** - Capture system audio without virtual cables (WASAPI).
+- **Source role** — Capture and send audio from any input device (microphone, loopback, virtual device).
+- **Sink / Playback role** — Receive and play audio to any output device (speakers, virtual output).
+- **TCP mode** — Universal compatibility with any TCP audio receiver; includes HTTP/WAV streaming.
+- **Native UDP mode** — Sub-second latency with de-jitter buffer, loss concealment, and clock-drift compensation.
+- **mDNS Discovery** — Native UDP sources automatically advertise on the LAN; sinks scan and pick them.
+- **AEAD/PSK Encryption** — Optional per-packet ChaCha20-Poly1305 encryption for Native UDP with HKDF key derivation.
+- **IPv4 & IPv6** — Dual-stack server bind with hostname resolution for client connections.
+- **IP/CIDR Allowlist** — Restrict TCP server access to specific IP addresses or networks.
 
-### Audio Configuration
+### Audio Quality
 
-- 📊 **Sample Rates**: 44.1 kHz or 48 kHz.
-- 🔧 **Buffer Sizes**: 256, 512, 1024, or 2048 samples.
-- 🎤 **Input Devices**: Scans all host APIs (WASAPI, MME, CoreAudio) to find all devices.
-- 🎚️ **Visual Volume Indicator**: Real-time RMS meter.
+- **Fixed wire format** — Always stereo s16le at the configured output rate; internal resampling handles any capture device.
+- **Mono, Stereo & Multichannel** — Mono duplicated to stereo; multichannel uses front left/right pair.
+- **i32 capture support** — In addition to f32, i16, and u16 capture formats.
+- **Catmull-Rom Resampler** — High-quality sample rate conversion between device and wire rates.
+- **Real-time-safe capture** — No mutex or per-callback heap allocation; overrun counter.
+- **CPAL buffer negotiation** — Hardware buffer size validated against device-supported range.
+- **DSCP/QoS** — Traffic marking applied in both client and server modes (tested strategy-to-TOS mapping).
+
+### Reliability
+
+- **Real adaptive buffer** — Target-occupancy controller grows latency when glitches occur, shrinks when stable.
+- **Honest metrics** — Real underrun/overrun counters, RTT via TCP_INFO, and quality scoring.
+- **Starvation detection** — Pre-fill cushion prevents cold-start stutter; catch-up logic maintains target latency.
+- **Frame-aligned corrections** — Buffer drops, skips, and drift corrections preserve L/R channel alignment.
+- **Auto-reconnect** — Single connection policy with exponential backoff and jitter (source mode, TCP).
+
+### User Interface
+
+- **Enterprise dark theme** — Premium glassmorphism design with Vue 3, Tailwind CSS 4, and reka-ui components.
+- **Bilingual (en/es)** — Full i18n with keyboard-accessible contextual tooltips on every configurable option.
+- **Top navigation** — Dashboard, Connection, Audio, Logs, and Settings sections.
+- **Dashboard** — Real-time streaming stats: uptime, bitrate, transferred, RTT, underruns, quality score.
+- **Configuration profiles** — Save and switch between named presets (connection, audio, and automation settings).
+- **Configurable latency profiles** — Ultra-low, Balanced, Robust, and Custom with tested buffer parameters.
+- **System tray** — Background operation with show/quit menu and autostart support.
 
 ### Automation
 
-- 🚀 **Auto-start on Boot** - Launch automatically when system starts.
-- 🔄 **Auto-stream** - Begin streaming immediately on startup.
-- 🔒 **Auto-reconnect** - Retry connection on failure.
+- **Auto-start on boot** — Launch when the OS session starts.
+- **Auto-stream** — Begin streaming immediately on startup using the selected profile.
+- **Auto-reconnect** — Retry TCP connections automatically on failure.
+
+---
+
+## Transport Modes
+
+### TCP Mode
+
+Best for universal compatibility. Works with Snapcast, Mopidy, VLC, browsers, and any TCP audio receiver.
+
+| Role   | Behavior |
+|--------|----------|
+| Source | Connects to a remote TCP server or listens for incoming TCP connections (client/server mode). |
+| Sink   | Connects to a TCP audio source and plays received audio. |
+
+In server mode, TCP Streamer auto-detects HTTP clients and serves a `.wav` stream for browser playback.
+
+### Native UDP Mode
+
+Best for low-latency streaming between two TCP Streamer instances or compatible receivers.
+
+| Feature          | Description |
+|------------------|-------------|
+| De-jitter buffer | Sequence/timestamp framing with configurable jitter tolerance. |
+| Loss concealment | Conceals missing packets to avoid audible gaps. |
+| Clock drift      | Inserts/drops mini-chunks to track long-run clock differences (no PTP required). |
+| Encryption       | Optional Chacha20-Poly1305 per-packet AEAD with PSK + HKDF-SHA256 key derivation. |
+| mDNS             | Sources advertise via multicast DNS; sinks scan the LAN and auto-populate the source list. |
 
 ---
 
@@ -100,7 +152,8 @@ It's perfect for integrating with multi-room audio systems, creating custom audi
 
   TCP Streamer can run as either a TCP client or server.
 
-- **Capture devices:** Mono, stereo, and multichannel devices are supported; multichannel input uses the front left/right pair. Devices may run at any sample rate because audio is resampled internally. Supported capture formats are `f32`, `i16`, `u16`, and `i32`.
+- **Capture devices:** Mono, stereo, and multichannel devices are supported; multichannel input uses the front left/right pair. Devices may run at any sample rate because audio is resampled internally via Catmull-Rom interpolation. Supported capture formats are `f32`, `i16`, `u16`, and `i32`.
+- **Output devices (sink mode):** f32, i16, u16, and i32 playback devices are supported with automatic format negotiation, including mono downmixing and sample-rate conversion.
 - **Windows system audio:** Use the built-in WASAPI `[Loopback]` devices; no extra software is required. VB-Audio Cable also works as a regular input.
 - **macOS system audio:** Install a virtual device such as BlackHole (`brew install blackhole-2ch`). BlackHole 2ch is recommended, while BlackHole 16ch also works by streaming its front pair. Create a Multi-Output Device in Audio MIDI Setup to keep hearing audio locally.
 - **Linux system audio:** Select the PulseAudio/PipeWire monitor source for your output, for example with `pavucontrol` or `pactl list sources | grep -i monitor`. See [LINUX_GUIDE.md](LINUX_GUIDE.md) for more Linux setup details.
@@ -109,29 +162,39 @@ It's perfect for integrating with multi-room audio systems, creating custom audi
 
 ## Use Cases
 
-### 1. **Multi-Room Audio**
+### 1. Multi-Room Audio
 
 Stream audio from your computer to an audio receiver such as Sonium, enabling synchronized playback across multiple rooms.
 
-**Client Mode**:
+**Source (TCP Client):**
 
 ```bash
-TCP Streamer (Client) → Audio Receiver (192.168.1.100:4953)
+TCP Streamer (Source) → Audio Receiver (192.168.1.100:4953)
 ```
 
-**Server Mode** (receiver connects to you):
+**Source (TCP Server)** — receiver connects to you:
 
 ```bash
-TCP Streamer (Server :1704) ← Audio Receiver
+TCP Streamer (Source :1704) ← Audio Receiver
 ```
 
-### 2. **Remote Audio Monitoring**
+### 2. Low-Latency Desktop-to-Desktop
+
+Use Native UDP for sub-second latency between two computers running TCP Streamer.
+
+```bash
+Computer A (Source, UDP) ──mDNS──▶ Computer B (Sink, UDP)
+```
+
+The sink discovers the source via mDNS, or you can enter the address manually. Enable encryption with a shared PSK for secure audio.
+
+### 3. Remote Audio Monitoring
 
 Send audio from a microphone or monitoring device to a central server for recording or analysis.
 
-### 3. **Browser Playback**
+### 4. Browser Playback
 
-In **Server Mode**, open the provided HTTP URL (e.g., `http://LAN_IP:1704/stream.wav`) in any web browser to listen to the live stream.
+In TCP Server mode, open the HTTP URL (e.g., `http://LAN_IP:1704/stream.wav`) in any web browser to listen to the live stream.
 
 ---
 
@@ -153,11 +216,12 @@ Download the latest release for your platform:
 
 #### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18 or later)
+- [Node.js](https://nodejs.org/) (v22 or later)
 - [pnpm](https://pnpm.io/) (v9 or later) — `npm i -g pnpm` or `corepack enable`
 - [Rust](https://www.rust-lang.org/) (latest stable)
 - **macOS**: Xcode Command Line Tools
 - **Windows**: Microsoft Visual Studio C++ Build Tools
+- **Linux**: `libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev`
 
 #### Steps
 
@@ -180,63 +244,73 @@ pnpm tauri build
 
 ## Quick Start
 
-### 1. **Select Input Device**
+### 1. Choose Your Role
 
-Choose the audio source you want to stream (microphone, virtual audio device, etc.).
+- **Source** — Capture audio from an input device (microphone, loopback, virtual device) and send it over the network.
+- **Sink** — Receive audio from a network source and play it through a local output device (speakers).
 
-> **Windows Loopback**: Check the **"Enable Loopback (Windows)"** box to capture system audio directly.
-> **macOS Loopback**: Use software like [BlackHole](https://github.com/ExistentialAudio/BlackHole) or [Loopback](https://rogueamoeba.com/loopback/) to capture system audio.
+### 2. Select Transport
 
-### 2. **Select Mode**
+- **TCP** — Maximum compatibility with any audio receiver (Snapcast, VLC, browsers). Choose Client or Server mode.
+- **Native UDP** — Low latency with optional mDNS discovery and encryption. Ideal for TCP Streamer-to-TCP Streamer links.
 
-- **Client Mode**: Select if you have an audio receiver running elsewhere. Enter its **Target IP** and **Port**.
-- **Server Mode**: Select if you want an audio receiver or browser to connect _to you_. Set a local **Port** (e.g., 1704).
+### 3. Configure Connection
 
-### 3. **Adjust Settings**
+**Source (TCP Client):** Enter the target IP and port (e.g., `192.168.1.100:4953`).
+**Source (TCP Server):** Set a listening port (e.g., `1704`) and optionally restrict access with the allowlist.
+**Source (UDP):** Set the port; the source will be advertised via mDNS.
+**Sink (UDP):** Scan discovered sources or enter a source address manually. Select an output device for playback.
 
-- **Sample Rate**: 48 kHz (recommended).
-- **Buffer Size**: 1024 (balanced).
+### 4. Adjust Audio Settings
 
-### 4. **Start Streaming**
+- **Output Sample Rate:** 48 kHz (recommended; must match receiver).
+- **Capture Buffer:** 1024 frames (balanced).
+- **Latency Profile:** Balanced for most networks; Ultra-low for wired LAN; Robust for unstable/WiFi networks.
 
-Click **Start Streaming**.
+### 5. Start Streaming
 
-- **Client Mode**: Attempting to connect to target...
-- **Server Mode**: Listening on port... (Use the "Server Running" card to copy connection URLs).
+Click **Start**. The dashboard shows real-time stats — RTT, underruns, bitrate, and quality score.
 
 ---
 
 ## Configuration
 
-### Server Mode Details
+### Latency Profiles
 
-When running in **Server Mode**, TCP Streamer provides:
+Controls coordinated ring buffer and chunk size presets. The adaptive controller adjusts the standing-latency target within the profile's min/max band based on observed glitches.
 
-1.  **TCP Stream**:
-    - URL: `tcp://<YOUR_IP>:<PORT>`
-    - Use this address as a TCP source in your audio receiver.
+| Profile     | Ring (ms) | Adaptive Band (ms) | Chunk  | Use Case |
+|-------------|-----------|---------------------|--------|----------|
+| **Ultra-low** | 2000 | 100 – 500 | 256 | Wired LAN, minimal latency |
+| **Balanced**  | 4000 | 200 – 1500 | 512 | Default; good trade-off for most networks |
+| **Robust**    | 8000 | 500 – 3000 | 1024 | Unstable/WiFi networks, high jitter tolerance |
+| **Custom**    | Manual | Manual (Min/Max Buffer sliders) | Manual | Full control over all parameters |
 
-2.  **Browser HTTP Stream**:
-    - URL: `http://<YOUR_IP>:<PORT>/stream.wav`
-    - Play directly in Chrome, Firefox, Safari, or VLC.
+Loopback (WASAPI) capture uses higher floors in each profile for extra stability.
 
-### Adaptive Buffer
+### Connection Settings
 
-Automatically resizes the ring buffer based on network conditions to prevent audio dropouts.
+- **Transport:** TCP (universal) or Native UDP (low-latency + discovery + encryption).
+- **Mode (TCP):** Client connects to a remote receiver; Server listens for incoming connections.
+- **Target Address:** Remote `host:port` for TCP client or Native UDP sink.
+- **Allowlist:** Comma-separated IP/CIDR entries to restrict server access (empty = allow all).
+- **Encryption Key (PSK):** Shared secret for Native UDP encryption. Leave empty for unencrypted transport.
+- **Output Device (Sink):** Speakers or virtual output for received audio playback.
 
-- **Enable**: Toggles the adaptive logic.
-- **Min/Max Buffer**: Sets the valid range for automatic adjustment.
+### Audio Settings
 
-### Latency Profile
+- **Input Device:** Microphone, monitor, loopback, or virtual capture device.
+- **Output Sample Rate:** Wire rate sent to the receiver; must match the receiver's expected format.
+- **Capture Buffer (frames):** CPAL hardware buffer size. Smaller = lower latency; larger = fewer glitches.
+- **Stream Format:** PCM (raw audio) or WAV (with header for browser/VLC playback in TCP Server mode).
+- **Adaptive Buffer:** Enables automatic buffer resizing within configured min/max limits.
+- **Loopback (Windows):** Captures system audio directly via WASAPI without virtual cables.
 
-Located in the **Advanced** tab:
+### Settings
 
-| Profile | Description |
-| ~ | ~ |
-| **Ultra-low** | Minimal latency for wired/quiet networks (100ms ring) |
-| **Balanced** | Default. Good trade-off for most networks (500ms ring) |
-| **Robust** | High jitter tolerance for unstable networks (3000ms ring) |
-| **Custom** | Use the manual buffer values from the Audio tab |
+- **Configuration Profiles:** Save and switch between named groups of connection, audio, and automation settings.
+- **Automation:** Auto-start on boot, auto-stream on launch, auto-reconnect on TCP connection loss.
+- **Language:** Switch between English and Spanish for all UI labels and tooltips.
 
 ---
 
@@ -244,20 +318,93 @@ Located in the **Advanced** tab:
 
 ### Technology Stack
 
-- **Frontend**: Vue 3 (Composition API), Pinia (State Management), Tailwind CSS 4, Vite
-- **Backend**: Rust (Tauri v2)
-- **Audio**: cpal (cross-platform audio library)
-- **Storage**: tauri-plugin-store (settings persistence)
+| Layer     | Technology |
+|-----------|------------|
+| Frontend  | Vue 3 (Composition API), Pinia, Tailwind CSS 4, reka-ui, Vite 7 |
+| i18n      | vue-i18n (English + Spanish) |
+| Backend   | Rust (Tauri v2) |
+| Audio     | cpal (cross-platform audio), ringbuf (lock-free ring buffer) |
+| Network   | socket2, mdns-sd, chacha20poly1305, hkdf, sha2 |
+| Storage   | tauri-plugin-store (settings persistence) |
+| Testing   | Vitest (frontend), cargo test (backend) |
+
+### Project Structure
+
+```
+src/                     — Vue 3 frontend (TypeScript + Tailwind CSS)
+  components/
+    sections/            — Audio, Connection, Dashboard, Logs, Settings
+    ui/                  — Badge, Button, Card, Dialog, Field, Input, Select,
+                           SegmentedControl, SettingLabel, Switch, Tooltip, etc.
+  composables/           — Tauri IPC bridge (useTauri)
+  i18n/                  — English and Spanish translation catalogs
+  stores/                — Pinia stores: settings, stream, ui
+  types/                 — TypeScript event type definitions
+
+src-tauri/src/           — Rust backend (Tauri v2)
+  audio/
+    commands.rs          — Tauri IPC command handlers
+    manager.rs           — AudioState: stream lifecycle management
+    engine/
+      mod.rs             — Core orchestrator (engine::run): 1058 lines
+      buffer.rs          — Real adaptive latency-target controller
+      capture.rs         — Real-time-safe audio capture (ring buffer producer)
+      device.rs          — Device format + rate negotiation
+      convert.rs         — Catmull-Rom stereo resampler
+      encoder.rs         — f32 → s16le PCM encoder
+      decoder.rs         — s16le PCM → f32 decoder
+      latency.rs         — Latency profiles (Ultra-low, Balanced, Robust, Custom)
+      pacing.rs          — Starvation detection + backlog catch-up
+      playback.rs        — Sink-mode output playback
+      sink.rs            — Sink output pipeline
+    transport/
+      mod.rs             — Connection trait + TcpConnection
+      tcp_client.rs      — TCP client (outbound connections)
+      tcp_server.rs      — TCP server (inbound connections, HTTP detection)
+      dscp.rs            — DSCP/QoS TOS mapping (tested)
+      resolve.rs         — DNS/hostname resolution
+      allowlist.rs       — IP/CIDR allowlist for server mode
+      discovery.rs       — mDNS service advertisement/discovery
+      udp/
+        mod.rs           — Native UDP transport root
+        source.rs        — UDP audio source (packetization + send)
+        sink.rs          — UDP audio sink (receive + de-jitter)
+        packet.rs        — UDP packet format (sequence/timestamp framing)
+        jitter.rs        — De-jitter buffer with loss concealment
+        crypto.rs        — ChaCha20-Poly1305 AEAD encryption + HKDF
+        drift.rs         — Clock-drift compensation
+    metrics.rs           — Quality scoring + TCP RTT measurement
+    stats.rs             — Streaming statistics and event types
+    constants.rs         — Retry delays, heartbeat intervals
+    wav_helper.rs        — WAV header generation
+    chunked.rs           — HTTP chunked transfer encoding
+    error.rs             — Error types
+```
 
 ### Audio Pipeline
 
-```rust
-Input Device → cpal → Producer → Ring Buffer → Consumer (Thread) → TCP/HTTP Stream
+**Source (TCP/UDP):**
+```
+Input Device → cpal capture (real-time-safe) → Ring Buffer (f32, stereo)
+  → Catmull-Rom Resampler → f32→s16le Encoder
+  → [TCP: Connection trait write] / [UDP: crypto + packetization]
+  → Network
 ```
 
-- **Format**: Raw PCM, 16-bit signed integers, little-endian
-- **Channels**: 2 (stereo)
-- **Buffering**: Lock-free Ring Buffer
+**Sink (TCP/UDP):**
+```
+Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
+  → s16le→f32 Decoder → Ring Buffer
+  → Playback (cpal output device with format negotiation)
+```
+
+### Key Design Decisions
+
+- **Lock-free ring buffer** completely decouples the real-time audio callback from the network thread.
+- **Connection trait** abstracts TCP/UDP behind a common `Write` + RTT interface, keeping the engine transport-agnostic.
+- **Adaptive buffer controller** adjusts the standing-latency target based on underrun/overrun signals — grows when glitching, shrinks when stable.
+- **Frame-aligned corrections** ensure buffer drops, catch-up, and drift adjustments never swap left/right channels.
+- **No PTP required** for Native UDP — clock drift is handled by occasional mini-chunk insert/drop on the sink side.
 
 ---
 
@@ -265,30 +412,33 @@ Input Device → cpal → Producer → Ring Buffer → Consumer (Thread) → TCP
 
 ### WASAPI Loopback Stuttering (Windows)
 
-**Solutions**:
-
+**Solutions:**
 - Enable **Adaptive Buffer**.
 - Ensure speakers/headphones are connected and active (WASAPI requires an active output).
-- Expect higher latency on WiFi (4-8 seconds).
+- Increase the latency profile to **Robust** or use manual buffer settings.
 
 ### Connection Issues
 
-**Server Mode**:
-
+**Server Mode:**
 - Ensure the port (e.g., 1704) is allowed through your firewall.
-- Ensure the client (audio receiver/browser) can reach your IP.
+- Verify the client (audio receiver/browser) can reach your IP.
+- Check the allowlist does not block the client's IP.
 
-**Client Mode**:
-
-- Verify the target IP and Port are correct.
+**Client Mode:**
+- Verify the target IP and port are correct.
 - Check if the target server is online.
+- Ensure DSCP/QoS settings match your network requirements.
+
+**Native UDP:**
+- Both endpoints must use the same PSK if encryption is enabled.
+- mDNS requires multicast to be allowed on the local network segment.
+- For manual addresses, verify `host:port` is reachable from the sink machine.
 
 ### Permission Errors (macOS)
 
-**Problem**: "App is damaged and can't be opened"
+**Problem:** "App is damaged and can't be opened"
 
-**Solution**:
-
+**Solution:**
 ```bash
 xattr -cr /Applications/TCP\ Streamer.app
 ```
@@ -297,7 +447,7 @@ xattr -cr /Applications/TCP\ Streamer.app
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
@@ -312,4 +462,4 @@ If you find TCP Streamer useful and would like to support its development, consi
 
 ---
 
-**Made with ❤️ for the audio streaming community**
+**Made with love for the audio streaming community**
