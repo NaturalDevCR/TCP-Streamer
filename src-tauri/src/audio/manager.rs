@@ -87,29 +87,64 @@ impl AudioState {
                         }
 
                         if is_server {
-                            emit_log(&app_handle, "info", format!("Starting TCP Server on port {}", port));
+                            emit_log(
+                                &app_handle,
+                                "info",
+                                format!("Starting TCP Server on port {}", port),
+                            );
                         } else {
-                            emit_log(&app_handle, "info", format!("Starting TCP stream to {}:{}", ip, port));
+                            emit_log(
+                                &app_handle,
+                                "info",
+                                format!("Starting TCP stream to {}:{}", ip, port),
+                            );
                         }
 
                         match super::engine::run(
-                            device_name, ip, port, sample_rate, buffer_size,
-                            ring_buffer_duration_ms, high_priority, dscp_strategy,
-                            format, chunk_size, is_loopback, is_server, auto_reconnect,
-                            enable_adaptive_buffer, min_buffer_ms, max_buffer_ms,
-                            latency_profile, allowlist, transport, psk,
+                            device_name,
+                            ip,
+                            port,
+                            sample_rate,
+                            buffer_size,
+                            ring_buffer_duration_ms,
+                            high_priority,
+                            dscp_strategy,
+                            format,
+                            chunk_size,
+                            is_loopback,
+                            is_server,
+                            auto_reconnect,
+                            enable_adaptive_buffer,
+                            min_buffer_ms,
+                            max_buffer_ms,
+                            latency_profile,
+                            allowlist,
+                            transport,
+                            psk,
                             (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {
                                 if let Err(e) = stream.play() {
-                                    emit_log(&app_handle, "error", format!("Failed to play stream: {}", e));
+                                    emit_log(
+                                        &app_handle,
+                                        "error",
+                                        format!("Failed to play stream: {}", e),
+                                    );
                                 } else {
                                     current_stream_handle = Some((stream, stats));
-                                    emit_log(&app_handle, "success", "Stream started successfully".to_string());
+                                    emit_log(
+                                        &app_handle,
+                                        "success",
+                                        "Stream started successfully".to_string(),
+                                    );
                                 }
                             }
                             Err(e) => {
-                                emit_log(&app_handle, "error", format!("Failed to start stream: {}", e));
+                                emit_log(
+                                    &app_handle,
+                                    "error",
+                                    format!("Failed to start stream: {}", e),
+                                );
                             }
                         }
                     }
@@ -135,22 +170,44 @@ impl AudioState {
                             drop(stats);
                         }
 
-                        emit_log(&app_handle, "info", format!("Starting Sink: subscribing to {} for output {}", source_addr, output_device));
+                        emit_log(
+                            &app_handle,
+                            "info",
+                            format!(
+                                "Starting Sink: subscribing to {} for output {}",
+                                source_addr, output_device
+                            ),
+                        );
 
                         match super::engine::sink::run_sink(
-                            output_device, source_addr, latency_profile, psk,
+                            output_device,
+                            source_addr,
+                            latency_profile,
+                            psk,
                             (*app_handle).clone(),
                         ) {
                             Ok((stream, stats)) => {
                                 if let Err(e) = stream.play() {
-                                    emit_log(&app_handle, "error", format!("Failed to play stream: {}", e));
+                                    emit_log(
+                                        &app_handle,
+                                        "error",
+                                        format!("Failed to play stream: {}", e),
+                                    );
                                 } else {
                                     current_stream_handle = Some((stream, stats));
-                                    emit_log(&app_handle, "success", "Sink started successfully".to_string());
+                                    emit_log(
+                                        &app_handle,
+                                        "success",
+                                        "Sink started successfully".to_string(),
+                                    );
                                 }
                             }
                             Err(e) => {
-                                emit_log(&app_handle, "error", format!("Failed to start sink: {}", e));
+                                emit_log(
+                                    &app_handle,
+                                    "error",
+                                    format!("Failed to start sink: {}", e),
+                                );
                             }
                         }
                     }

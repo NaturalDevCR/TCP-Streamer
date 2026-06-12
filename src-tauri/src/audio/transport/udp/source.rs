@@ -32,7 +32,12 @@ impl UdpSource {
             peer: None,
             seq: 0,
             start: Instant::now(),
-            info: StreamInfo { sample_rate, channels, salt_a, flags: 0 },
+            info: StreamInfo {
+                sample_rate,
+                channels,
+                salt_a,
+                flags: 0,
+            },
             last_seen: Instant::now(),
             out: Vec::new(),
             key: None,
@@ -74,11 +79,21 @@ impl UdpSource {
         }
         let peer = self.peer.expect("has_peer checked");
         let ts_us = self.start.elapsed().as_micros() as u64;
-        let h = AudioHeader { flags: if self.key.is_some() { 1 } else { 0 }, seq: self.seq, ts_us };
+        let h = AudioHeader {
+            flags: if self.key.is_some() { 1 } else { 0 },
+            seq: self.seq,
+            ts_us,
+        };
         if let Some(key) = &self.key {
             let mut hdr = Vec::new();
             packet::encode_audio(&h, &[], &mut hdr);
-            let ct = super::crypto::seal(key, self.nonce_salt, self.seq, &hdr[..packet::AUDIO_HEADER_LEN], payload);
+            let ct = super::crypto::seal(
+                key,
+                self.nonce_salt,
+                self.seq,
+                &hdr[..packet::AUDIO_HEADER_LEN],
+                payload,
+            );
             packet::encode_audio(&h, &ct, &mut self.out);
         } else {
             packet::encode_audio(&h, payload, &mut self.out);
@@ -89,6 +104,9 @@ impl UdpSource {
 
     #[allow(dead_code)]
     pub fn local_addr(&self) -> String {
-        self.socket.local_addr().map(|a| a.to_string()).unwrap_or_default()
+        self.socket
+            .local_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_default()
     }
 }

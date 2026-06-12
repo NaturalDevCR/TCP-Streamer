@@ -47,7 +47,10 @@ fn encrypted_frame_roundtrips_and_wrong_psk_fails() {
     let ns = nonce_salt(sa, sb);
     let aad = b"audio-header";
     let ct = seal(&k, ns, 7, aad, b"pcm-frame");
-    assert_eq!(open(&k, ns, 7, aad, &ct).as_deref(), Some(&b"pcm-frame"[..]));
+    assert_eq!(
+        open(&k, ns, 7, aad, &ct).as_deref(),
+        Some(&b"pcm-frame"[..])
+    );
     let kbad = derive_key("wrong", sa, sb);
     assert!(open(&kbad, ns, 7, aad, &ct).is_none());
 }

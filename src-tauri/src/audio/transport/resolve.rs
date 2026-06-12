@@ -24,13 +24,16 @@ mod tests {
     #[test]
     fn resolves_ipv4_literal() {
         let addrs = resolve_target("127.0.0.1", 4953).unwrap();
-        assert!(addrs.iter().any(|a| a.ip() == "127.0.0.1".parse::<IpAddr>().unwrap()
-            && a.port() == 4953));
+        assert!(addrs
+            .iter()
+            .any(|a| a.ip() == "127.0.0.1".parse::<IpAddr>().unwrap() && a.port() == 4953));
     }
 
     #[test]
     fn resolves_ipv6_literal() {
         let addrs = resolve_target("::1", 4953).unwrap();
-        assert!(addrs.iter().any(|a| a.ip() == "::1".parse::<IpAddr>().unwrap()));
+        assert!(addrs
+            .iter()
+            .any(|a| a.ip() == "::1".parse::<IpAddr>().unwrap()));
     }
 }

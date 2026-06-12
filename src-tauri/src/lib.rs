@@ -6,7 +6,7 @@ use audio::AudioState;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager
+    Manager,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -1,7 +1,10 @@
 //! UDP sink I/O: subscribe to a source, receive audio, de-jitter, decode, and
 //! feed the playback ring buffer.
 
-use super::{jitter::{JitterBuffer, Pop}, packet};
+use super::{
+    jitter::{JitterBuffer, Pop},
+    packet,
+};
 use crate::audio::engine::decoder::decode_pcm_i16_le_to_f32;
 use ringbuf::HeapProducer;
 use std::net::UdpSocket;
@@ -36,11 +39,16 @@ pub fn subscribe(source_addr: &str, salt_b: u64, timeout: Duration) -> std::io::
                     return Ok(Subscribed { socket, info });
                 }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) => return Err(e),
         }
         if Instant::now() >= deadline {
-            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "no STREAM_INFO from source"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "no STREAM_INFO from source",
+            ));
         }
     }
 }
@@ -66,11 +74,8 @@ pub fn receive_loop(
     packet::encode_subscribe(salt_b, &mut sub);
     let mut last_hb = Instant::now();
     let mut replay = super::crypto::ReplayWindow::new();
-    let mut drift = super::drift::DriftController::new(
-        target_frames as f32,
-        (target_frames / 4) as f32,
-        200,
-    );
+    let mut drift =
+        super::drift::DriftController::new(target_frames as f32, (target_frames / 4) as f32, 200);
     let mut skip_samples: usize = 0;
     let mut insert_silence: usize = 0;
 
@@ -90,11 +95,21 @@ pub fn receive_loop(
                                 }
                                 let mut hdr = Vec::new();
                                 super::packet::encode_audio(
-                                    &super::packet::AudioHeader { flags: h.flags, seq: h.seq, ts_us: h.ts_us },
+                                    &super::packet::AudioHeader {
+                                        flags: h.flags,
+                                        seq: h.seq,
+                                        ts_us: h.ts_us,
+                                    },
                                     &[],
                                     &mut hdr,
                                 );
-                                match super::crypto::open(k, nonce_salt, h.seq, &hdr[..super::packet::AUDIO_HEADER_LEN], payload) {
+                                match super::crypto::open(
+                                    k,
+                                    nonce_salt,
+                                    h.seq,
+                                    &hdr[..super::packet::AUDIO_HEADER_LEN],
+                                    payload,
+                                ) {
                                     Some(pt) => pt,
                                     None => continue, // forged/tampered
                                 }
@@ -107,7 +122,9 @@ pub fn receive_loop(
                     jb.push(h.seq, pcm);
                 }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(_) => break,
         }
         // Drain the jitter buffer into the playback ring.

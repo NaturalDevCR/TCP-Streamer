@@ -24,7 +24,15 @@ impl DriftController {
     /// `target`/`margin` are in the same unit you pass to `observe` (e.g. buffered
     /// frames). `cooldown` ticks must pass between corrections.
     pub fn new(target: f32, margin: f32, cooldown: u32) -> Self {
-        Self { target, margin, alpha: 0.05, ema: target, cooldown, since: 0, primed: false, }
+        Self {
+            target,
+            margin,
+            alpha: 0.05,
+            ema: target,
+            cooldown,
+            since: 0,
+            primed: false,
+        }
     }
 
     /// Feed the current buffered level; returns the correction to apply.

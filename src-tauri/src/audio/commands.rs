@@ -96,10 +96,16 @@ pub fn start_sink(
     latency_profile: String,
     psk: String,
 ) -> Result<(), AudioError> {
-    state.tx.lock()
+    state
+        .tx
+        .lock()
         .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
         .send(AudioCommand::StartSink {
-            output_device, source_addr, latency_profile, psk, app_handle: Box::new(app_handle),
+            output_device,
+            source_addr,
+            latency_profile,
+            psk,
+            app_handle: Box::new(app_handle),
         })
         .map_err(|e| AudioError::ChannelError(e.to_string()))
 }

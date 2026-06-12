@@ -1,8 +1,8 @@
 //! Sink orchestrator: subscribe to a native source, open a cpal output stream
 //! for the negotiated format, and pump received audio into it.
 
-use super::playback::build_output_stream;
 use super::super::stats::{emit_log, StreamStats};
+use super::playback::build_output_stream;
 use cpal::traits::{DeviceTrait, HostTrait};
 use ringbuf::HeapRb;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -21,22 +21,30 @@ pub fn run_sink(
 ) -> Result<(cpal::Stream, StreamStats), String> {
     // Subscribe (blocking, off the audio thread).
     let salt_b: u64 = Instant::now().elapsed().as_nanos() as u64 ^ 0x9E37_79B9_7F4A_7C15;
-    let sub = super::super::transport::udp::sink::subscribe(
-        &source_addr, salt_b, Duration::from_secs(2),
-    )
-    .map_err(|e| format!("subscribe failed: {e}"))?;
+    let sub =
+        super::super::transport::udp::sink::subscribe(&source_addr, salt_b, Duration::from_secs(2))
+            .map_err(|e| format!("subscribe failed: {e}"))?;
     let info = sub.info;
     let (key, nonce_salt) = if !psk.is_empty() {
         (
-            Some(super::super::transport::udp::crypto::derive_key(&psk, info.salt_a, salt_b)),
+            Some(super::super::transport::udp::crypto::derive_key(
+                &psk,
+                info.salt_a,
+                salt_b,
+            )),
             super::super::transport::udp::crypto::nonce_salt(info.salt_a, salt_b),
         )
     } else {
         (None, 0)
     };
-    emit_log(&app_handle, "success", format!(
-        "Subscribed to {} ({}Hz, {}ch)", source_addr, info.sample_rate, info.channels
-    ));
+    emit_log(
+        &app_handle,
+        "success",
+        format!(
+            "Subscribed to {} ({}Hz, {}ch)",
+            source_addr, info.sample_rate, info.channels
+        ),
+    );
 
     // Find the chosen output device.
     let host = cpal::default_host();
@@ -54,8 +62,10 @@ pub fn run_sink(
 
     // Playback ring sized from the latency profile.
     let lp = super::latency::params(&latency_profile, false);
-    let ring_samples = (info.sample_rate as usize) * (info.channels as usize)
-        * (lp.adaptive_max_ms.max(lp.ring_ms) as usize) / 1000;
+    let ring_samples = (info.sample_rate as usize)
+        * (info.channels as usize)
+        * (lp.adaptive_max_ms.max(lp.ring_ms) as usize)
+        / 1000;
     let rb = HeapRb::<f32>::new(ring_samples.max(1024));
     let (prod, cons) = rb.split();
 
@@ -69,7 +79,14 @@ pub fn run_sink(
     let target_frames = ring_samples / 2;
     thread::spawn(move || {
         super::super::transport::udp::sink::receive_loop(
-            &socket, salt_b, lost_after, key, nonce_salt, target_frames, prod, running_net,
+            &socket,
+            salt_b,
+            lost_after,
+            key,
+            nonce_salt,
+            target_frames,
+            prod,
+            running_net,
         );
     });
 

@@ -1,4 +1,4 @@
-use std::io::{Write, Result};
+use std::io::{Result, Write};
 
 /// Wraps a writer to apply HTTP chunked transfer encoding.
 pub(crate) struct ChunkedWriter<W: Write> {

@@ -39,7 +39,13 @@ fn nonce(salt: u32, seq: u64) -> [u8; 12] {
 pub fn seal(key: &[u8; 32], salt: u32, seq: u64, aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     cipher
-        .encrypt(Nonce::from_slice(&nonce(salt, seq)), Payload { msg: plaintext, aad })
+        .encrypt(
+            Nonce::from_slice(&nonce(salt, seq)),
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .expect("encryption is infallible for valid inputs")
 }
 
@@ -47,7 +53,13 @@ pub fn seal(key: &[u8; 32], salt: u32, seq: u64, aad: &[u8], plaintext: &[u8]) -
 pub fn open(key: &[u8; 32], salt: u32, seq: u64, aad: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     cipher
-        .decrypt(Nonce::from_slice(&nonce(salt, seq)), Payload { msg: ciphertext, aad })
+        .decrypt(
+            Nonce::from_slice(&nonce(salt, seq)),
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .ok()
 }
 
@@ -111,7 +123,10 @@ mod tests {
         let salt = nonce_salt(11, 22);
         let aad = b"header-bytes";
         let ct = seal(&k, salt, 5, aad, b"hello pcm");
-        assert_eq!(open(&k, salt, 5, aad, &ct).as_deref(), Some(&b"hello pcm"[..]));
+        assert_eq!(
+            open(&k, salt, 5, aad, &ct).as_deref(),
+            Some(&b"hello pcm"[..])
+        );
     }
 
     #[test]

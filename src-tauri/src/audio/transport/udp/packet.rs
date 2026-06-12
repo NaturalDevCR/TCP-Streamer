@@ -32,7 +32,10 @@ pub fn encode_audio(h: &AudioHeader, payload: &[u8], out: &mut Vec<u8>) {
 
 /// Parses an AUDIO datagram, returning the header and the payload slice.
 pub fn decode_audio(buf: &[u8]) -> Option<(AudioHeader, &[u8])> {
-    if buf.len() < AUDIO_HEADER_LEN || buf[0..2] != MAGIC || buf[2] != VERSION || buf[3] != TYPE_AUDIO
+    if buf.len() < AUDIO_HEADER_LEN
+        || buf[0..2] != MAGIC
+        || buf[2] != VERSION
+        || buf[3] != TYPE_AUDIO
     {
         return None;
     }
@@ -97,7 +100,11 @@ mod tests {
 
     #[test]
     fn audio_roundtrip() {
-        let h = AudioHeader { flags: 0, seq: 42, ts_us: 123456 };
+        let h = AudioHeader {
+            flags: 0,
+            seq: 42,
+            ts_us: 123456,
+        };
         let mut out = Vec::new();
         encode_audio(&h, &[1, 2, 3, 4], &mut out);
         let (got, payload) = decode_audio(&out).unwrap();
@@ -116,7 +123,12 @@ mod tests {
 
     #[test]
     fn stream_info_roundtrip() {
-        let info = StreamInfo { sample_rate: 48000, channels: 2, salt_a: 99, flags: 0 };
+        let info = StreamInfo {
+            sample_rate: 48000,
+            channels: 2,
+            salt_a: 99,
+            flags: 0,
+        };
         let mut out = Vec::new();
         encode_stream_info(&info, &mut out);
         assert_eq!(decode_stream_info(&out), Some(info));

@@ -27,7 +27,11 @@ impl JitterBuffer {
     /// `lost_after` = how many later frames must be buffered before a missing
     /// `next_seq` is treated as lost. The stream starts at seq 0.
     pub fn new(lost_after: usize) -> Self {
-        Self { next_seq: 0, buf: BTreeMap::new(), lost_after: lost_after.max(1) }
+        Self {
+            next_seq: 0,
+            buf: BTreeMap::new(),
+            lost_after: lost_after.max(1),
+        }
     }
 
     pub fn push(&mut self, seq: u64, frame: Vec<u8>) {

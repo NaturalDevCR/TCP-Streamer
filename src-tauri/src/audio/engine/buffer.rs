@@ -20,7 +20,13 @@ pub struct AdaptiveBuffer {
 impl AdaptiveBuffer {
     /// `stable_threshold` = consecutive glitch-free ticks required before the
     /// target is lowered one step. `initial_ms` is clamped into `[min, max]`.
-    pub fn new(min_ms: u32, max_ms: u32, step_ms: u32, initial_ms: u32, stable_threshold: u32) -> Self {
+    pub fn new(
+        min_ms: u32,
+        max_ms: u32,
+        step_ms: u32,
+        initial_ms: u32,
+        stable_threshold: u32,
+    ) -> Self {
         let max_ms = max_ms.max(min_ms);
         Self {
             min_ms,
@@ -61,9 +67,18 @@ mod tests {
 
     #[test]
     fn initial_target_is_clamped() {
-        assert_eq!(AdaptiveBuffer::new(2000, 8000, 500, 500, 3).target_ms(), 2000);
-        assert_eq!(AdaptiveBuffer::new(2000, 8000, 500, 99000, 3).target_ms(), 8000);
-        assert_eq!(AdaptiveBuffer::new(2000, 8000, 500, 4000, 3).target_ms(), 4000);
+        assert_eq!(
+            AdaptiveBuffer::new(2000, 8000, 500, 500, 3).target_ms(),
+            2000
+        );
+        assert_eq!(
+            AdaptiveBuffer::new(2000, 8000, 500, 99000, 3).target_ms(),
+            8000
+        );
+        assert_eq!(
+            AdaptiveBuffer::new(2000, 8000, 500, 4000, 3).target_ms(),
+            4000
+        );
     }
 
     #[test]

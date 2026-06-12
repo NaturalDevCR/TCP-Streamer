@@ -7,11 +7,11 @@
 /// Maps a DSCP strategy key to its IP TOS/DSCP byte value.
 pub fn dscp_to_tos(strategy: &str) -> u8 {
     match strategy.to_ascii_lowercase().as_str() {
-        "voip" | "ef" => 0xB8,      // Expedited Forwarding (DSCP 46)
-        "cs5" => 0xA0,              // Class Selector 5 (DSCP 40)
-        "lowdelay" => 0x10,         // Legacy "minimize delay"
-        "throughput" => 0x08,       // Legacy "maximize throughput"
-        "besteffort" | "" => 0x00,  // Best effort / default
+        "voip" | "ef" => 0xB8,     // Expedited Forwarding (DSCP 46)
+        "cs5" => 0xA0,             // Class Selector 5 (DSCP 40)
+        "lowdelay" => 0x10,        // Legacy "minimize delay"
+        "throughput" => 0x08,      // Legacy "maximize throughput"
+        "besteffort" | "" => 0x00, // Best effort / default
         _ => 0x00,
     }
 }

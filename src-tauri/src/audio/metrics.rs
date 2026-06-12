@@ -157,6 +157,10 @@ mod rtt_tests {
         let sample = tcp_rtt(&client);
         assert!(sample.is_some(), "expected an RTT sample on loopback");
         let s = sample.unwrap();
-        assert!(s.srtt_ms >= 0.0 && s.srtt_ms < 1000.0, "loopback srtt sane: {}", s.srtt_ms);
+        assert!(
+            s.srtt_ms >= 0.0 && s.srtt_ms < 1000.0,
+            "loopback srtt sane: {}",
+            s.srtt_ms
+        );
     }
 }

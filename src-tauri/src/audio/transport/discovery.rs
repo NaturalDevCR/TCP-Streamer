@@ -34,8 +34,12 @@ pub struct DiscoveredSource {
 
 /// Browses for native sources for `timeout`, returning what resolved.
 pub fn browse(timeout: Duration) -> Vec<DiscoveredSource> {
-    let Ok(daemon) = ServiceDaemon::new() else { return Vec::new(); };
-    let Ok(rx) = daemon.browse(SERVICE_TYPE) else { return Vec::new(); };
+    let Ok(daemon) = ServiceDaemon::new() else {
+        return Vec::new();
+    };
+    let Ok(rx) = daemon.browse(SERVICE_TYPE) else {
+        return Vec::new();
+    };
     let deadline = Instant::now() + timeout;
     let mut out = Vec::new();
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
