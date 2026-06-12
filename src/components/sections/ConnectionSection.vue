@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col gap-4">
     <Card>
-      <Field :label="t('connection.roleSource')">
+      <Field :label="t('connection.role')" :tooltip="t('connection.help.role')">
         <SegmentedControl
           v-model="settings.role"
           :options="roleOptions"
@@ -14,7 +14,7 @@
     <template v-if="settings.role === 'source'">
       <Card :title="t('nav.connection')">
         <div class="flex flex-col gap-4">
-          <Field :label="t('audio.inputDevice')">
+          <Field :label="t('audio.inputDevice')" :tooltip="t('connection.help.inputDevice')">
             <Select
               v-model="settings.deviceName"
               :disabled="stream.isStreaming || settings.devicesLoading"
@@ -39,22 +39,23 @@
 
           <template v-if="settings.showLoopback">
             <div class="flex items-center justify-between">
-              <div>
-                <p class="text-sm text-[var(--color-text)]">{{ t("audio.loopback") }}</p>
-                <p class="text-xs text-[var(--color-text-faint)]">{{ t("audio.loopbackDesc") }}</p>
-              </div>
+              <SettingLabel :label="t('audio.loopback')" :tooltip="t('connection.help.loopback')" />
               <Switch v-model="settings.loopbackMode" @update:model-value="onLoopbackChange" />
             </div>
           </template>
 
-          <Field label="Transport">
+          <Field :label="t('connection.transport')" :tooltip="t('connection.help.transport')">
             <Select v-model="settings.transport" :disabled="stream.isStreaming">
               <SelectOption value="tcp" :label="t('connection.transportTcp')" />
               <SelectOption value="udp" :label="t('connection.transportUdp')" />
             </Select>
           </Field>
 
-          <Field v-if="settings.transport === 'tcp'" label="Mode">
+          <Field
+            v-if="settings.transport === 'tcp'"
+            :label="t('connection.mode')"
+            :tooltip="t('connection.help.mode')"
+          >
             <Select v-model="settings.mode" :disabled="stream.isStreaming">
               <SelectOption value="client" :label="t('connection.modeClient')" />
               <SelectOption value="server" :label="t('connection.modeServer')" />
@@ -64,7 +65,7 @@
           <Field
             v-if="settings.transport === 'udp'"
             :label="t('connection.psk')"
-            :help="t('connection.pskHelp')"
+            :tooltip="t('connection.help.psk')"
           >
             <Input
               v-model="settings.psk"
@@ -80,7 +81,12 @@
       <Card v-if="settings.transport === 'tcp'">
         <div class="flex flex-col gap-4">
           <div class="flex gap-3">
-            <Field v-if="!settings.isServer" :label="t('connection.targetAddress')" class="flex-1">
+            <Field
+              v-if="!settings.isServer"
+              :label="t('connection.targetAddress')"
+              :tooltip="t('connection.help.targetAddress')"
+              class="flex-1"
+            >
               <Input
                 v-model="settings.ip"
                 :placeholder="t('connection.targetAddressPlaceholder')"
@@ -89,6 +95,7 @@
             </Field>
             <Field
               :label="settings.isServer ? t('connection.listeningPort') : t('connection.port')"
+              :tooltip="t('connection.help.port')"
               :class="settings.isServer ? 'flex-1' : 'w-[120px]'"
             >
               <Input v-model.number="settings.port" type="number" :disabled="stream.isStreaming" />
@@ -98,7 +105,7 @@
           <Field
             v-if="settings.isServer"
             :label="t('connection.allowlist')"
-            :help="t('connection.allowlistHelp')"
+            :tooltip="t('connection.help.allowlist')"
           >
             <Input
               v-model="settings.allowlist"
@@ -120,7 +127,7 @@
       <!-- Native UDP -->
       <Card v-if="settings.transport === 'udp'">
         <div class="flex flex-col gap-4">
-          <Field :label="t('connection.port')">
+          <Field :label="t('connection.port')" :tooltip="t('connection.help.port')">
             <Input v-model.number="settings.port" type="number" :disabled="stream.isStreaming" />
           </Field>
         </div>
@@ -131,7 +138,7 @@
     <template v-if="settings.role === 'sink'">
       <Card :title="t('connection.roleSink')">
         <div class="flex flex-col gap-4">
-          <Field :label="t('connection.outputDevice')">
+          <Field :label="t('connection.outputDevice')" :tooltip="t('connection.help.outputDevice')">
             <Select v-model="settings.outputDevice" :disabled="stream.isStreaming">
               <SelectOption
                 v-if="settings.outputDevices.length === 0"
@@ -142,7 +149,10 @@
             </Select>
           </Field>
 
-          <Field :label="t('connection.sourceAddress')">
+          <Field
+            :label="t('connection.sourceAddress')"
+            :tooltip="t('connection.help.sourceAddress')"
+          >
             <Input
               v-model="settings.sourceAddr"
               :placeholder="t('connection.sourceAddressPlaceholder')"
@@ -170,6 +180,7 @@
           <Field
             v-if="settings.discoveredSources.length"
             :label="t('connection.discoveredSources')"
+            :tooltip="t('connection.help.discoveredSources')"
           >
             <Select
               :model-value="settings.sourceAddr"
@@ -186,7 +197,7 @@
             </Select>
           </Field>
 
-          <Field :label="t('connection.psk')" :help="t('connection.pskHelp')">
+          <Field :label="t('connection.psk')" :tooltip="t('connection.help.psk')">
             <Input
               v-model="settings.psk"
               type="password"
@@ -214,6 +225,7 @@ import Switch from "../ui/Switch.vue";
 import Button from "../ui/Button.vue";
 import SegmentedControl from "../ui/SegmentedControl.vue";
 import CopyField from "../ui/CopyField.vue";
+import SettingLabel from "../ui/SettingLabel.vue";
 
 const { t } = useI18n();
 const settings = useSettingsStore();

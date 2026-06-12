@@ -1,5 +1,8 @@
 {
   "app": { "name": "TCP Streamer" },
+  "tooltip": {
+    "moreInfo": "Más información sobre {option}"
+  },
   "nav": {
     "dashboard": "Panel",
     "connection": "Conexión",
@@ -33,8 +36,11 @@
   },
   "connection": {
     "title": "Conexión",
+    "role": "Rol",
     "roleSource": "Fuente",
     "roleSink": "Receptor",
+    "transport": "Transporte",
+    "mode": "Modo",
     "transportTcp": "TCP",
     "transportUdp": "UDP Nativo",
     "modeClient": "Cliente (Enviar audio a IP)",
@@ -56,7 +62,21 @@
     "noOutputDevices": "No se encontraron dispositivos de salida",
     "noDevices": "No se encontraron dispositivos",
     "loadingDevices": "Cargando dispositivos...",
-    "info": "Info de Conexión"
+    "info": "Info de Conexión",
+    "help": {
+      "role": "Elige Fuente para capturar y enviar audio, o Receptor para recibir y reproducir una transmisión.",
+      "inputDevice": "Selecciona el micrófono, monitor, loopback o dispositivo virtual usado para capturar audio.",
+      "loopback": "En Windows, captura el dispositivo de salida seleccionado para transmitir directamente el audio del sistema.",
+      "transport": "TCP ofrece máxima compatibilidad; UDP Nativo añade descubrimiento, control de jitter y cifrado opcional.",
+      "mode": "Cliente se conecta a un receptor remoto; Servidor escucha localmente conexiones TCP entrantes.",
+      "psk": "Cifra el audio UDP Nativo con un secreto compartido. Ambos extremos deben usar exactamente la misma clave.",
+      "targetAddress": "Define el host y puerto remotos que recibirán el audio al iniciar el modo Cliente TCP.",
+      "port": "Define el puerto local de escucha o UDP Nativo. El mismo puerto debe ser accesible en la red.",
+      "allowlist": "Limita el acceso al Servidor TCP a las IP o redes CIDR indicadas. Vacío permite todas.",
+      "outputDevice": "Selecciona los altavoces o salida virtual donde se reproducirá el audio recibido.",
+      "sourceAddress": "Define la dirección de la fuente UDP Nativo que se recibirá, con formato host:puerto.",
+      "discoveredSources": "Elige una fuente encontrada automáticamente en la red local y completa su dirección."
+    }
   },
   "audio": {
     "title": "Audio",
@@ -80,7 +100,20 @@
     "adaptiveBufferDesc": "Ajustar automáticamente el buffer según el jitter de la red",
     "loopback": "Loopback (Windows)",
     "loopbackDesc": "Capturar audio del sistema directamente sin cables virtuales",
-    "ultraLowWarning": "Latencia ultra-baja + loopback puede causar tartamudeo"
+    "ultraLowWarning": "Latencia ultra-baja + loopback puede causar tartamudeo",
+    "help": {
+      "inputDevice": "Selecciona el micrófono, monitor, loopback o dispositivo virtual usado para capturar audio.",
+      "sampleRate": "Define la frecuencia estéreo s16le enviada por la red. Debe coincidir con el formato esperado por el receptor.",
+      "bufferSize": "Controla el tamaño del callback de captura en frames. Valores menores reducen latencia; valores mayores evitan cortes.",
+      "format": "PCM envía audio crudo; WAV añade una cabecera para navegadores y reproductores en modo Servidor TCP.",
+      "loopback": "En Windows, captura el dispositivo de salida seleccionado para transmitir directamente el audio del sistema.",
+      "latencyProfile": "Aplica ajustes coordinados de buffer. Usa Balanceado normalmente, Robusto en redes inestables o Personalizado para control manual.",
+      "ringBufferDuration": "Define cuánto audio capturado puede retener el buffer circular. Más tiempo tolera pausas pero usa más memoria.",
+      "chunkSize": "Define las muestras procesadas por escritura de red. Chunks menores reducen latencia pero aumentan el procesamiento.",
+      "adaptiveBuffer": "Ajusta automáticamente el buffer dentro de los límites configurados según cambia el jitter de la red.",
+      "minBuffer": "Define la menor duración que puede usar el controlador adaptativo cuando la red está estable.",
+      "maxBuffer": "Define la mayor duración que puede usar el controlador adaptativo durante inestabilidad de red."
+    }
   },
   "logs": {
     "title": "Registros",
@@ -107,7 +140,14 @@
     "about": "Acerca de",
     "version": "Versión",
     "madeBy": "Hecho por Josue O.A",
-    "donate": "Apoyar este proyecto"
+    "donate": "Apoyar este proyecto",
+    "help": {
+      "profile": "Carga un grupo guardado de ajustes de conexión, audio y automatización para reutilizarlo rápidamente.",
+      "autoStart": "Inicia TCP Streamer automáticamente al comenzar la sesión del sistema operativo.",
+      "autoStream": "Comienza a transmitir después de cargar la aplicación usando el perfil seleccionado.",
+      "autoReconnect": "Reintenta automáticamente una conexión Cliente TCP perdida hasta que el receptor vuelva a estar disponible.",
+      "language": "Cambia todas las etiquetas y ayudas contextuales de la interfaz entre inglés y español."
+    }
   },
   "stat": {
     "uptime": "Actividad",

@@ -1,5 +1,8 @@
 {
   "app": { "name": "TCP Streamer" },
+  "tooltip": {
+    "moreInfo": "More information about {option}"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "connection": "Connection",
@@ -33,8 +36,11 @@
   },
   "connection": {
     "title": "Connection",
+    "role": "Role",
     "roleSource": "Source",
     "roleSink": "Sink",
+    "transport": "Transport",
+    "mode": "Mode",
     "transportTcp": "TCP",
     "transportUdp": "Native UDP",
     "modeClient": "Client (Send Audio to IP)",
@@ -56,7 +62,21 @@
     "noOutputDevices": "No output devices found",
     "noDevices": "No devices found",
     "loadingDevices": "Loading devices...",
-    "info": "Connection Info"
+    "info": "Connection Info",
+    "help": {
+      "role": "Choose Source to capture and send audio, or Sink to receive and play a stream.",
+      "inputDevice": "Selects the microphone, monitor, loopback, or virtual device used to capture audio.",
+      "loopback": "On Windows, captures the selected output device so system audio can be streamed directly.",
+      "transport": "TCP maximizes compatibility; Native UDP adds discovery, jitter handling, and optional encryption.",
+      "mode": "Client connects to a remote receiver; Server listens locally for incoming TCP connections.",
+      "psk": "Encrypts Native UDP audio with a shared secret. Both endpoints must use the exact same key.",
+      "targetAddress": "Sets the remote host and port that will receive audio when TCP Client mode starts.",
+      "port": "Sets the local listening or Native UDP port. The same port must be reachable on the network.",
+      "allowlist": "Limits TCP Server access to listed IP addresses or CIDR networks. Leave empty to allow all.",
+      "outputDevice": "Selects the speakers or virtual output where received audio will be played.",
+      "sourceAddress": "Sets the Native UDP source address to receive, using host:port format.",
+      "discoveredSources": "Chooses a source found automatically on the local network and fills its address."
+    }
   },
   "audio": {
     "title": "Audio",
@@ -80,7 +100,20 @@
     "adaptiveBufferDesc": "Automatically adjust buffer size based on network jitter",
     "loopback": "Loopback (Windows)",
     "loopbackDesc": "Capture system audio directly without virtual cables",
-    "ultraLowWarning": "Ultra-low latency + loopback may cause stuttering"
+    "ultraLowWarning": "Ultra-low latency + loopback may cause stuttering",
+    "help": {
+      "inputDevice": "Selects the microphone, monitor, loopback, or virtual device used to capture audio.",
+      "sampleRate": "Sets the stereo s16le wire rate. It must match the format expected by the receiver.",
+      "bufferSize": "Controls the capture callback size in frames. Smaller values reduce latency; larger values resist glitches.",
+      "format": "PCM sends raw audio; WAV adds a stream header for browsers and media players in TCP Server mode.",
+      "loopback": "On Windows, captures the selected output device so system audio can be streamed directly.",
+      "latencyProfile": "Applies coordinated buffering presets. Use Balanced normally, Robust for unstable networks, or Custom for manual control.",
+      "ringBufferDuration": "Sets how much captured audio the ring can retain. More time tolerates stalls but uses more memory.",
+      "chunkSize": "Sets samples handled per network write. Smaller chunks can reduce latency but increase processing overhead.",
+      "adaptiveBuffer": "Automatically adjusts buffering within the configured limits as network jitter changes.",
+      "minBuffer": "Sets the lowest buffer duration the adaptive controller may use when the network is stable.",
+      "maxBuffer": "Sets the highest buffer duration the adaptive controller may use during network instability."
+    }
   },
   "logs": {
     "title": "Logs",
@@ -107,7 +140,14 @@
     "about": "About",
     "version": "Version",
     "madeBy": "Made by Josue O.A",
-    "donate": "Support this project"
+    "donate": "Support this project",
+    "help": {
+      "profile": "Loads a saved group of connection, audio, and automation settings for quick reuse.",
+      "autoStart": "Launches TCP Streamer automatically when your operating-system session starts.",
+      "autoStream": "Starts streaming after the application loads using the currently selected profile.",
+      "autoReconnect": "Retries a lost TCP Client connection automatically until the receiver is available again.",
+      "language": "Changes all interface labels and contextual help between English and Spanish."
+    }
   },
   "stat": {
     "uptime": "Uptime",

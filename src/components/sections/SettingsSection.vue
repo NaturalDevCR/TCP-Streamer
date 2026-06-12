@@ -3,7 +3,7 @@
     <!-- Profiles -->
     <Card :title="t('settings.profiles')">
       <div class="flex flex-col gap-3">
-        <Field :label="t('settings.selectProfile')">
+        <Field :label="t('settings.selectProfile')" :tooltip="t('settings.help.profile')">
           <Select
             :model-value="settings.currentProfile"
             @update:model-value="(v: string | number) => settings.switchProfile(String(v))"
@@ -62,18 +62,24 @@
     <Card :title="t('settings.automation')">
       <div class="flex flex-col gap-4">
         <div class="flex items-center justify-between">
-          <span class="text-sm text-[var(--color-text)]">{{ t("settings.autoStart") }}</span>
+          <SettingLabel :label="t('settings.autoStart')" :tooltip="t('settings.help.autoStart')" />
           <Switch v-model="settings.autostart" @update:model-value="settings.toggleAutostart()" />
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-sm text-[var(--color-text)]">{{ t("settings.autoStream") }}</span>
+          <SettingLabel
+            :label="t('settings.autoStream')"
+            :tooltip="t('settings.help.autoStream')"
+          />
           <Switch v-model="settings.autoStream" />
         </div>
         <div
           v-if="settings.role === 'source' && !settings.isServer"
           class="flex items-center justify-between"
         >
-          <span class="text-sm text-[var(--color-text)]">{{ t("settings.autoReconnect") }}</span>
+          <SettingLabel
+            :label="t('settings.autoReconnect')"
+            :tooltip="t('settings.help.autoReconnect')"
+          />
           <Switch v-model="settings.autoReconnect" />
         </div>
       </div>
@@ -82,7 +88,7 @@
     <!-- Preferences -->
     <Card :title="t('settings.preferences')">
       <div class="flex items-center justify-between">
-        <span class="text-sm text-[var(--color-text)]">{{ t("settings.language") }}</span>
+        <SettingLabel :label="t('settings.language')" :tooltip="t('settings.help.language')" />
         <Select
           :model-value="ui.locale"
           class="w-[120px]"
@@ -131,6 +137,7 @@ import Select from "../ui/Select.vue";
 import SelectOption from "../ui/SelectOption.vue";
 import Switch from "../ui/Switch.vue";
 import Dialog from "../ui/Dialog.vue";
+import SettingLabel from "../ui/SettingLabel.vue";
 
 const { t } = useI18n();
 const settings = useSettingsStore();
