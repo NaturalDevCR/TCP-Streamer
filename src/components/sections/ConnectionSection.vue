@@ -200,7 +200,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "../../stores/settings";
 import { useStreamStore } from "../../stores/stream";
@@ -219,10 +219,10 @@ const { t } = useI18n();
 const settings = useSettingsStore();
 const stream = useStreamStore();
 
-const roleOptions = [
+const roleOptions = computed(() => [
   { value: "source", label: t("connection.roleSource") },
   { value: "sink", label: t("connection.roleSink") },
-];
+]);
 
 onMounted(async () => {
   await settings.loadOutputDevices();

@@ -6,6 +6,7 @@ pub mod decoder;
 pub mod device;
 pub mod encoder;
 pub mod latency;
+pub mod pacing;
 pub mod playback;
 pub mod sink;
 
@@ -88,6 +89,15 @@ pub fn run(
 
     // Device selection logic
     let device = if is_loopback {
+        // WASAPI loopback exists only on Windows; elsewhere an input stream on
+        // an output device "builds" but never delivers a single sample.
+        if std::env::consts::OS != "windows" {
+            return Err(
+                "Loopback (system audio) capture is only supported on Windows. \
+                 Select a real input device."
+                    .to_string(),
+            );
+        }
         // Loopback mode: Search in OUTPUT devices
         let clean_name = device_name.replace("[Loopback] ", "");
         let mut found_device = None;
@@ -230,14 +240,15 @@ pub fn run(
     );
 
     // 1. Setup Ring Buffer (latency profile drives the sizes; "custom" uses the
-    // user's manual fields).
+    // user's manual fields). The ring is CAPACITY (stall absorption); the
+    // adaptive band is the standing-latency target enforced by the send loop.
     let lp = if latency_profile == "custom" {
         self::latency::LatencyParams {
             ring_ms: ring_buffer_duration_ms,
             adaptive_min_ms: min_buffer_ms,
             adaptive_max_ms: max_buffer_ms,
             chunk_size,
-            prefill_ms: ring_buffer_duration_ms,
+            prefill_ms: ring_buffer_duration_ms.min(200),
         }
     } else {
         self::latency::params(&latency_profile, is_loopback)
@@ -248,16 +259,20 @@ pub fn run(
     let ring_buffer_size =
         (sample_rate as usize) * (device_channels as usize) * (ring_capacity_ms as usize) / 1000;
 
-    let adj_ms_u32 = lp.ring_ms;
     let buffer_size_mb = (ring_buffer_size * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
 
     emit_log(
         &app_handle,
         "info",
         format!(
-            "Ring buffer: {}ms ({:.2}MB) - Device type: {}",
-            adj_ms_u32,
+            "Profile '{}': ring capacity {}ms ({:.2}MB), latency target {}-{}ms, chunk {}, prefill {}ms - Device type: {}",
+            latency_profile,
+            ring_capacity_ms,
             buffer_size_mb,
+            lp.adaptive_min_ms,
+            lp.adaptive_max_ms,
+            lp.chunk_size,
+            lp.prefill_ms,
             if is_loopback {
                 "WASAPI Loopback"
             } else {
@@ -345,14 +360,16 @@ pub fn run(
 
         let adaptive_min_ms = lp.adaptive_min_ms;
 
+        // Start at the floor: lowest standing latency; real glitches raise it.
         let mut adaptive = self::buffer::AdaptiveBuffer::new(
             adaptive_min_ms,
             lp.adaptive_max_ms.max(adaptive_min_ms),
             super::constants::ADAPTIVE_BUFFER_STEP_MS,
-            adj_ms_u32,
+            adaptive_min_ms,
             6,
         );
         let mut glitch_baseline: u64 = 0;
+        let mut starvation = self::pacing::StarvationGate::new(STARVATION_THRESHOLD_MS);
 
         let mut retry_delay = Duration::from_secs(INITIAL_RETRY_DELAY_SECS);
 
@@ -380,15 +397,15 @@ pub fn run(
         let mut last_heartbeat = Instant::now();
 
         let mut prefilled = false;
-        let prefill_ms = adaptive.target_ms();
+        let prefill_ms = lp.prefill_ms;
         let prefill_samples =
             sample_rate as usize * device_channels_net as usize * prefill_ms as usize / 1000;
         emit_log(
             &app_handle_net,
             "info",
             format!(
-                "Buffering... waiting for {} samples (200ms)",
-                prefill_samples
+                "Buffering... waiting for {} samples ({}ms)",
+                prefill_samples, prefill_ms
             ),
         );
 
@@ -404,7 +421,20 @@ pub fn run(
             let current_buffered = cons.len();
             let min_chunk_samples = effective_chunk_net as usize * device_channels_net as usize;
 
-            if current_stream.is_none() && current_buffered > 0 {
+            // Honest underrun detection: an instantaneously empty ring is the
+            // normal steady state (we drain faster than capture fills); only
+            // SUSTAINED emptiness while connected counts as a real glitch.
+            let starved = current_stream.is_some() && prefilled && current_buffered < min_chunk_samples;
+            if starvation.update(starved, start_time.elapsed().as_millis() as u64) {
+                underruns_net.fetch_add(1, Ordering::Relaxed);
+                emit_log(
+                    &app_handle_net,
+                    "warning",
+                    "Capture starvation: ring stayed empty while connected (device stalled?)".to_string(),
+                );
+            }
+
+            if transport_net != "udp" && current_stream.is_none() && current_buffered > 0 {
                 // Track how long we've been disconnected
                 if disconnect_time.is_none() {
                     disconnect_time = Some(Instant::now());
@@ -434,8 +464,7 @@ pub fn run(
                     let _ = cons.pop_slice(&mut drain_buffer);
                 }
                 thread::sleep(Duration::from_millis(10));
-            } else if current_stream.is_some() && current_buffered < min_chunk_samples && prefilled {
-                underruns_net.fetch_add(1, Ordering::Relaxed);
+            } else if starved {
                 // Hardware-driven synchronization: sleep until we have enough samples for a FULL chunk
                 thread::sleep(Duration::from_millis(2));
                 continue;
@@ -481,6 +510,31 @@ pub fn run(
                 if let Some(src) = udp_source.as_mut() {
                     src.poll_subscribe();
                     if src.has_peer() {
+                        // Standing-latency enforcement (same policy as TCP):
+                        // after a stall, drop backlog above the adaptive target
+                        // instead of letting it become permanent latency.
+                        let excess = self::pacing::excess_samples(
+                            cons.len(),
+                            adaptive.target_ms(),
+                            DRAIN_MARGIN_MS,
+                            sample_rate_clone,
+                            device_channels_net,
+                        );
+                        if excess > 0 {
+                            let skipped = cons.skip(excess);
+                            overruns_net.fetch_add(skipped as u64, Ordering::Relaxed);
+                            let dropped_ms = skipped * 1000
+                                / (sample_rate_clone as usize * device_channels_net as usize);
+                            emit_log(
+                                &app_handle_net,
+                                "warning",
+                                format!(
+                                    "Catch-up: dropped {}ms of backlog to hold latency near {}ms",
+                                    dropped_ms,
+                                    adaptive.target_ms()
+                                ),
+                            );
+                        }
                         let count = cons.pop_slice(&mut temp_buffer);
                         if count > 0 {
                             self::encoder::encode_f32_to_pcm_i16_le(&temp_buffer[..count], &mut payload);
@@ -490,6 +544,13 @@ pub fn run(
                             thread::sleep(Duration::from_millis(1));
                         }
                     } else {
+                        // No subscriber: keep the ring fresh so a new peer
+                        // starts live instead of receiving stale backlog, and
+                        // capture-side overruns don't pile up while idle.
+                        let stale = cons.len();
+                        if stale > 0 {
+                            let _ = cons.skip(stale);
+                        }
                         thread::sleep(Duration::from_millis(20));
                     }
                 }
@@ -662,6 +723,15 @@ pub fn run(
                         }
                         Err(e) => {
                             emit_log(&app_handle_net, "error", format!("Connection failed: {}", e));
+                            if !auto_reconnect_net {
+                                emit_log(
+                                    &app_handle_net,
+                                    "info",
+                                    "Auto-reconnect disabled; stopping stream.".to_string(),
+                                );
+                                is_running_clone.store(false, Ordering::Relaxed);
+                                continue;
+                            }
                             thread::sleep(add_jitter(retry_delay));
                             retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
                         }
@@ -673,9 +743,11 @@ pub fn run(
             if let Some(mut stream_socket) = current_stream.take() {
                 // Send WAV header if needed
                 // Server Mode:
-                // - "wav": Header + PCM (Browsers/VLC)
+                // - HTTP client (use_chunked): always WAV — we advertised
+                //   Content-Type: audio/wav in the response headers.
+                // - "wav": Header + PCM (Browsers/VLC over raw TCP)
                 // - "pcm": Raw PCM (audio receiver)
-                if is_server_clone && format_clone == "wav" && !wav_header_sent {
+                if is_server_clone && (use_chunked || format_clone == "wav") && !wav_header_sent {
                      {
                          // Send header with 0 length (handled by helper) for unknown/stream
                          let header = create_wav_header(sample_rate_clone, device_channels_net, 16);
@@ -718,6 +790,33 @@ pub fn run(
                         thread::sleep(Duration::from_millis(10)); // Prevent tight loop
                         continue;
                     }
+                }
+
+                // Standing-latency enforcement: a stall (slow socket, brief
+                // outage) leaves backlog that would otherwise persist as
+                // permanent end-to-end latency. Drop back to the adaptive
+                // target; the drop counts as a glitch so the target can grow.
+                let excess = self::pacing::excess_samples(
+                    cons.len(),
+                    adaptive.target_ms(),
+                    DRAIN_MARGIN_MS,
+                    sample_rate,
+                    device_channels_net,
+                );
+                if excess > 0 {
+                    let skipped = cons.skip(excess);
+                    overruns_net.fetch_add(skipped as u64, Ordering::Relaxed);
+                    let dropped_ms =
+                        skipped * 1000 / (sample_rate as usize * device_channels_net as usize);
+                    emit_log(
+                        &app_handle_net,
+                        "warning",
+                        format!(
+                            "Catch-up: dropped {}ms of backlog to hold latency near {}ms",
+                            dropped_ms,
+                            adaptive.target_ms()
+                        ),
+                    );
                 }
 
                 let count = cons.pop_slice(&mut temp_buffer);

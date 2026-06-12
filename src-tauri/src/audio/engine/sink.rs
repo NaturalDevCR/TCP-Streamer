@@ -19,8 +19,15 @@ pub fn run_sink(
     psk: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
-    // Subscribe (blocking, off the audio thread).
-    let salt_b: u64 = Instant::now().elapsed().as_nanos() as u64 ^ 0x9E37_79B9_7F4A_7C15;
+    // Subscribe (blocking, off the audio thread). `salt_b` must be unique per
+    // subscription: it feeds AEAD key/nonce derivation, and reuse across
+    // sessions with the same PSK would reuse nonces. Wall-clock nanoseconds
+    // give per-session uniqueness (the salt travels in plaintext anyway).
+    let salt_b: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+        ^ 0x9E37_79B9_7F4A_7C15;
     let sub =
         super::super::transport::udp::sink::subscribe(&source_addr, salt_b, Duration::from_secs(2))
             .map_err(|e| format!("subscribe failed: {e}"))?;
@@ -60,7 +67,9 @@ pub fn run_sink(
         buffer_size: cpal::BufferSize::Default,
     };
 
-    // Playback ring sized from the latency profile.
+    // Playback ring: capacity from the profile; the standing occupancy the
+    // drift controller maintains is the profile's latency FLOOR, not the
+    // capacity — otherwise the sink itself adds seconds of playback latency.
     let lp = super::latency::params(&latency_profile, false);
     let ring_samples = (info.sample_rate as usize)
         * (info.channels as usize)
@@ -75,8 +84,12 @@ pub fn run_sink(
     // Receive thread.
     let socket = sub.socket;
     let running_net = is_running.clone();
-    let lost_after = (lp.ring_ms / 5).max(2) as usize; // ~frames tolerance
-    let target_frames = ring_samples / 2;
+    // Declare a missing packet lost after a handful of later packets arrive
+    // (each packet is one chunk, ~5-25ms); waiting longer just plays silence.
+    let lost_after = (lp.adaptive_min_ms / 20).clamp(3, 25) as usize;
+    let target_frames =
+        (info.sample_rate as usize) * (info.channels as usize) * (lp.adaptive_min_ms as usize)
+            / 1000;
     thread::spawn(move || {
         super::super::transport::udp::sink::receive_loop(
             &socket,

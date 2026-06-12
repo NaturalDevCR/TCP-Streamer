@@ -1,8 +1,13 @@
 //! Latency profile → buffer parameters (pure, testable).
 //!
-//! Replaces the previous hardcoded buffer floors. Each named profile trades
-//! latency against jitter tolerance; loopback (WASAPI) capture gets higher
-//! floors because it needs more buffering. `prefill_ms` equals `ring_ms`.
+//! Model: `ring_ms` is the ring CAPACITY — how much audio we can hold without
+//! dropping capture data during a network stall. The adaptive band
+//! (`adaptive_min_ms`..`adaptive_max_ms`) is the STANDING-LATENCY target: the
+//! engine drops backlog above the current target to keep end-to-end latency
+//! bounded, and the AdaptiveBuffer controller moves the target inside this band
+//! based on observed glitches. `prefill_ms` is a small startup cushion before
+//! the first byte is sent — it must stay small or it becomes permanent latency.
+//! Loopback (WASAPI) capture gets higher floors because it needs more buffering.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LatencyParams {
@@ -17,21 +22,21 @@ pub struct LatencyParams {
 /// "balanced". Use this only for the named profiles; "custom" is handled by the
 /// caller, which passes the user's manual fields instead.
 pub fn params(profile: &str, is_loopback: bool) -> LatencyParams {
-    let (ring, amin, amax, chunk) = match (profile, is_loopback) {
-        ("ultra-low", false) => (500, 300, 2000, 256),
-        ("ultra-low", true) => (1500, 1000, 4000, 256),
-        ("robust", false) => (8000, 5000, 15000, 1024),
-        ("robust", true) => (12000, 8000, 20000, 1024),
+    let (ring, amin, amax, chunk, prefill) = match (profile, is_loopback) {
+        ("ultra-low", false) => (2000, 100, 500, 256, 100),
+        ("ultra-low", true) => (3000, 150, 800, 256, 150),
+        ("robust", false) => (8000, 500, 3000, 1024, 300),
+        ("robust", true) => (10000, 800, 4000, 1024, 400),
         // "balanced" and any unknown profile
-        (_, false) => (4000, 2000, 10000, 512),
-        (_, true) => (8000, 4000, 10000, 512),
+        (_, false) => (4000, 200, 1500, 512, 200),
+        (_, true) => (6000, 300, 2000, 512, 250),
     };
     LatencyParams {
         ring_ms: ring,
         adaptive_min_ms: amin,
         adaptive_max_ms: amax,
         chunk_size: chunk,
-        prefill_ms: ring,
+        prefill_ms: prefill,
     }
 }
 
@@ -70,8 +75,47 @@ mod tests {
     }
 
     #[test]
-    fn prefill_equals_ring() {
-        let lp = params("balanced", false);
-        assert_eq!(lp.prefill_ms, lp.ring_ms);
+    fn prefill_is_small_for_instant_start() {
+        for p in ["ultra-low", "balanced", "robust"] {
+            for lb in [false, true] {
+                let lp = params(p, lb);
+                assert!(
+                    lp.prefill_ms <= 400,
+                    "prefill for {p} (loopback={lb}) must be <=400ms for fast startup, got {}",
+                    lp.prefill_ms
+                );
+                assert!(
+                    lp.prefill_ms < lp.ring_ms,
+                    "prefill must be far below ring capacity for {p}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn target_ceiling_fits_inside_ring() {
+        for p in ["ultra-low", "balanced", "robust"] {
+            for lb in [false, true] {
+                let lp = params(p, lb);
+                assert!(
+                    lp.adaptive_max_ms <= lp.ring_ms,
+                    "adaptive target ceiling must fit in ring capacity for {p} (loopback={lb}): {} > {}",
+                    lp.adaptive_max_ms,
+                    lp.ring_ms
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn target_floor_keeps_latency_low() {
+        for p in ["ultra-low", "balanced", "robust"] {
+            let lp = params(p, false);
+            assert!(
+                lp.adaptive_min_ms <= 1000,
+                "standing-latency floor for {p} must be <=1000ms, got {}",
+                lp.adaptive_min_ms
+            );
+        }
     }
 }

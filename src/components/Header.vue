@@ -77,11 +77,11 @@ const statusTone = computed(() => {
   if (stream.isStreaming) return "success";
   return "neutral";
 });
-const navItems: { id: Section; label: string; icon: typeof IconDashboard }[] = [
+const navItems = computed<{ id: Section; label: string; icon: typeof IconDashboard }[]>(() => [
   { id: "dashboard", label: t("nav.dashboard"), icon: IconDashboard },
   { id: "connection", label: t("nav.connection"), icon: IconConnection },
   { id: "audio", label: t("nav.audio"), icon: IconAudio },
   { id: "logs", label: t("nav.logs"), icon: IconLogs },
   { id: "settings", label: t("nav.settings"), icon: IconSettings },
-];
+]);
 </script>

@@ -8,8 +8,16 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
 
-static DEVICE_CACHE: Mutex<Option<(Vec<String>, Instant)>> = Mutex::new(None);
+static DEVICE_CACHE: Mutex<Option<(bool, Vec<String>, Instant)>> = Mutex::new(None);
 const DEVICE_CACHE_TTL_SECS: u64 = 30;
+
+/// Whether "[Loopback] <output>" pseudo-devices should be offered. WASAPI
+/// loopback capture exists only on Windows; listing those entries elsewhere
+/// produces phantom devices that capture nothing (and, sorting first, they
+/// become the silent default when the saved device disappears).
+fn offer_loopback_devices(os: &str, include_loopback: bool) -> bool {
+    os == "windows" && include_loopback
+}
 
 /// Starts streaming audio from the given device to the specified IP:port.
 ///
@@ -120,13 +128,15 @@ pub fn get_os_type() -> String {
 ///
 /// Results are cached for 30 seconds to reduce repeated system calls.
 #[tauri::command]
-pub fn get_input_devices(
-    #[allow(unused_variables)] include_loopback: bool,
-) -> Result<Vec<String>, AudioError> {
-    // Check cache
+pub fn get_input_devices(include_loopback: bool) -> Result<Vec<String>, AudioError> {
+    let list_loopback = offer_loopback_devices(std::env::consts::OS, include_loopback);
+
+    // Check cache (keyed by the loopback flag so toggling refreshes the list)
     if let Ok(cache) = DEVICE_CACHE.lock() {
-        if let Some((cached_devices, timestamp)) = cache.as_ref() {
-            if timestamp.elapsed().as_secs() < DEVICE_CACHE_TTL_SECS {
+        if let Some((cached_flag, cached_devices, timestamp)) = cache.as_ref() {
+            if *cached_flag == list_loopback
+                && timestamp.elapsed().as_secs() < DEVICE_CACHE_TTL_SECS
+            {
                 return Ok(cached_devices.clone());
             }
         }
@@ -148,11 +158,13 @@ pub fn get_input_devices(
                     }
                 }
 
-                // 2. WASAPI Loopback (Windows-specific, usually)
-                if let Ok(output_devices) = host.output_devices() {
-                    for dev in output_devices {
-                        if let Ok(name) = dev.name() {
-                            all_devices.push(format!("[Loopback] {}", name));
+                // 2. WASAPI Loopback pseudo-devices (Windows only)
+                if list_loopback {
+                    if let Ok(output_devices) = host.output_devices() {
+                        for dev in output_devices {
+                            if let Ok(name) = dev.name() {
+                                all_devices.push(format!("[Loopback] {}", name));
+                            }
                         }
                     }
                 }
@@ -169,7 +181,7 @@ pub fn get_input_devices(
 
     // Update cache
     if let Ok(mut cache) = DEVICE_CACHE.lock() {
-        *cache = Some((all_devices.clone(), Instant::now()));
+        *cache = Some((list_loopback, all_devices.clone(), Instant::now()));
     }
 
     Ok(all_devices)
@@ -211,5 +223,24 @@ pub fn get_local_ip() -> Result<String, AudioError> {
     match local_ip() {
         Ok(ip) => Ok(ip.to_string()),
         Err(e) => Err(AudioError::IpDetectionFailed(e.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod loopback_gate_tests {
+    use super::offer_loopback_devices;
+
+    #[test]
+    fn never_on_macos_or_linux() {
+        for os in ["macos", "linux", "ios", "android"] {
+            assert!(!offer_loopback_devices(os, true), "os={os} include=true");
+            assert!(!offer_loopback_devices(os, false), "os={os} include=false");
+        }
+    }
+
+    #[test]
+    fn on_windows_only_when_enabled() {
+        assert!(offer_loopback_devices("windows", true));
+        assert!(!offer_loopback_devices("windows", false));
     }
 }

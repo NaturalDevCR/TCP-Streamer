@@ -22,6 +22,15 @@ pub(crate) const MIN_RETRY_DELAY_MS: u64 = 2000;
 /// Adaptive buffer adjustment step (ms)
 pub(crate) const ADAPTIVE_BUFFER_STEP_MS: u32 = 500;
 
+/// Slack above the standing-latency target before backlog is dropped (ms).
+/// Keeps normal jitter from triggering catch-up drops on every iteration.
+pub(crate) const DRAIN_MARGIN_MS: u32 = 250;
+
+/// How long the ring must stay empty (while connected and prefilled) before
+/// it counts as one real underrun. Instantaneous emptiness is the normal
+/// steady state of the send loop, not a glitch.
+pub(crate) const STARVATION_THRESHOLD_MS: u64 = 250;
+
 /// Quality reporting interval (seconds)
 pub(crate) const QUALITY_REPORT_INTERVAL_SECS: u64 = 5;
 
