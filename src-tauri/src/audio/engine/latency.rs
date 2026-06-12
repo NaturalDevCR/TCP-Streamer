@@ -18,13 +18,13 @@ pub struct LatencyParams {
 /// caller, which passes the user's manual fields instead.
 pub fn params(profile: &str, is_loopback: bool) -> LatencyParams {
     let (ring, amin, amax, chunk) = match (profile, is_loopback) {
-        ("ultra-low", false) => (100, 50, 300, 256),
-        ("ultra-low", true) => (600, 400, 1500, 256),
-        ("robust", false) => (3000, 2000, 8000, 1024),
-        ("robust", true) => (5000, 4000, 12000, 1024),
+        ("ultra-low", false) => (500, 300, 2000, 256),
+        ("ultra-low", true) => (1500, 1000, 4000, 256),
+        ("robust", false) => (8000, 5000, 15000, 1024),
+        ("robust", true) => (12000, 8000, 20000, 1024),
         // "balanced" and any unknown profile
-        (_, false) => (500, 300, 2000, 512),
-        (_, true) => (1500, 1000, 4000, 512),
+        (_, false) => (4000, 2000, 10000, 512),
+        (_, true) => (8000, 4000, 10000, 512),
     };
     LatencyParams {
         ring_ms: ring,
@@ -40,14 +40,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ultra_low_is_lowest_latency() {
-        assert_eq!(params("ultra-low", false).ring_ms, 100);
-        assert_eq!(params("ultra-low", false).chunk_size, 256);
+    fn ultra_low_has_lowest_latency() {
+        assert!(params("ultra-low", false).ring_ms < params("balanced", false).ring_ms);
+        assert!(params("ultra-low", false).chunk_size <= params("balanced", false).chunk_size);
     }
 
     #[test]
     fn robust_buffers_more_than_balanced() {
         assert!(params("robust", false).ring_ms > params("balanced", false).ring_ms);
+        assert!(
+            params("robust", false).adaptive_min_ms > params("balanced", false).adaptive_min_ms
+        );
     }
 
     #[test]

@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 
-
 /// Binds a listener that accepts both IPv6 and IPv4 (via an IPv6 dual-stack
 /// socket). Falls back to IPv4-only if the dual-stack bind fails (e.g. IPv6
 /// disabled). Returns the listener and a label describing what it bound to.
@@ -76,7 +75,6 @@ pub fn run(
     psk: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
-
     emit_log(
         &app_handle,
         "debug",
@@ -143,9 +141,15 @@ pub fn run(
 
     // Detect supported audio formats from device
     let supported_configs: Vec<_> = if is_loopback {
-        device.supported_output_configs().map_err(|e| e.to_string())?.collect()
+        device
+            .supported_output_configs()
+            .map_err(|e| e.to_string())?
+            .collect()
     } else {
-        device.supported_input_configs().map_err(|e| e.to_string())?.collect()
+        device
+            .supported_input_configs()
+            .map_err(|e| e.to_string())?
+            .collect()
     };
 
     use self::device::{pick_best, ConfigCandidate, SampleFmt};
@@ -204,22 +208,26 @@ pub fn run(
     emit_log(
         &app_handle,
         "info",
-        format!("Audio Input: format={:?}, channels={}, rate={}Hz", selected_format, device_channels, sample_rate),
+        format!(
+            "Audio Input: format={:?}, channels={}, rate={}Hz",
+            selected_format, device_channels, sample_rate
+        ),
     );
 
     let stream_config = cpal::StreamConfig {
         channels: device_channels,
         sample_rate: cpal::SampleRate(sample_rate),
-        buffer_size: self::capture::resolve_buffer_size(
-            buffer_size,
-            config_range.buffer_size(),
-        ),
+        buffer_size: cpal::BufferSize::Default,
     };
 
-    emit_log(&app_handle, "info", format!(
-        "Capture buffer: requested {} frames -> {:?}",
-        buffer_size, stream_config.buffer_size
-    ));
+    emit_log(
+        &app_handle,
+        "info",
+        format!(
+            "Capture buffer: Default (OS driver chooses optimal size, requested {} frames)",
+            buffer_size
+        ),
+    );
 
     // 1. Setup Ring Buffer (latency profile drives the sizes; "custom" uses the
     // user's manual fields).
@@ -426,7 +434,6 @@ pub fn run(
                     let _ = cons.pop_slice(&mut drain_buffer);
                 }
                 thread::sleep(Duration::from_millis(10));
-                
             } else if current_stream.is_some() && current_buffered < min_chunk_samples && prefilled {
                 underruns_net.fetch_add(1, Ordering::Relaxed);
                 // Hardware-driven synchronization: sleep until we have enough samples for a FULL chunk
@@ -593,7 +600,7 @@ pub fn run(
                                         emit_log(&app_handle_net, "warning", format!("Failed to set server QoS/TOS: {}", e));
                                     }
                                 }
-                                
+
                                 // Bounded, non-blocking handshake (no thread stall).
                                 stream.set_nonblocking(true).ok();
                                 let mut peekbuf = [0u8; 8];
