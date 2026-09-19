@@ -69,11 +69,11 @@ The default is 250 ms, which suits a quiet wired LAN. Raise it if the dashboard 
 
 ## Clock drift
 
-The Mac's capture clock and the Windows playback clock run independently — nothing synchronises them, and they will diverge slowly.
+The Mac's capture clock and the Windows playback clock are independent. Nothing synchronises them, and they will diverge slowly.
 
-TCP Streamer keeps the buffer at its target by occasionally dropping a small chunk of audio or inserting a small amount of silence. This bounds the latency, which is what keeps your A/V measurement valid, but each correction is a brief micro-glitch. Corrections are rare: the controller only acts when its smoothed buffer level strays past a quarter of the target, and it waits out a cooldown between corrections.
+TCP Streamer absorbs that divergence continuously, by adjusting its resampling ratio a few parts per million so the two clocks stay matched. The correction is gradual and inaudible — there is no dropped audio and no inserted silence while it works. You can watch it in the Logs view: a value settling near zero means your two machines happen to have well-matched clocks.
 
-TCP Streamer does not use an asynchronous sample-rate converter, which is how broadcast-grade equipment avoids these corrections entirely. If your programme material cannot tolerate any correction at all, use hardware with a shared clock.
+A coarse correction still exists for excursions too large for that to absorb — a network stall, or a device glitch. Those drop a small chunk or insert a brief silence, which is audible, but they fire only when the buffer has moved far from its target. On a wired link you should not hear one.
 
 ## Limits
 
