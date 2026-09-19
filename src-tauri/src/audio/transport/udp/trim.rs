@@ -53,16 +53,6 @@ impl TrimController {
         self.trim_ppm = (KP * error + KI * self.integral).clamp(-MAX_TRIM_PPM, MAX_TRIM_PPM);
         self.trim_ppm
     }
-
-    /// The trim most recently returned by [`update`](Self::update).
-    ///
-    /// Exposed for introspection (tests exercise convergence and clamping
-    /// through this getter); `receive_loop` only needs the return value of
-    /// `update` itself, so this has no production caller yet.
-    #[allow(dead_code)]
-    pub fn trim_ppm(&self) -> f64 {
-        self.trim_ppm
-    }
 }
 
 #[cfg(test)]
@@ -80,7 +70,7 @@ mod tests {
             let trim = c.update(occupancy);
             occupancy += ((disturbance_ppm - trim) * k) as f32;
         }
-        (c.trim_ppm(), occupancy)
+        (c.trim_ppm, occupancy)
     }
 
     #[test]
@@ -132,13 +122,13 @@ mod tests {
         for _ in 0..10_000 {
             c.update(50_000.0);
         }
-        assert_eq!(c.trim_ppm(), MAX_TRIM_PPM);
+        assert_eq!(c.trim_ppm, MAX_TRIM_PPM);
 
         let mut c = TrimController::new(1000.0);
         for _ in 0..10_000 {
             c.update(0.0);
         }
-        assert_eq!(c.trim_ppm(), -MAX_TRIM_PPM);
+        assert_eq!(c.trim_ppm, -MAX_TRIM_PPM);
     }
 
     #[test]
@@ -150,10 +140,10 @@ mod tests {
         for _ in 0..10_000 {
             c.update(50_000.0);
         }
-        assert_eq!(c.trim_ppm(), MAX_TRIM_PPM);
+        assert_eq!(c.trim_ppm, MAX_TRIM_PPM);
 
         let mut ticks = 0;
-        while c.trim_ppm() > 0.0 && ticks < 500 {
+        while c.trim_ppm > 0.0 && ticks < 500 {
             c.update(0.0);
             ticks += 1;
         }
