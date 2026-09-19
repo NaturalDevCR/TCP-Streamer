@@ -45,19 +45,12 @@ pub fn params(profile: &str, is_loopback: bool) -> LatencyParams {
 /// Bounds for the broadcast profile's fixed-latency override, in milliseconds.
 /// Values outside the range are clamped, never rejected: a bad number should
 /// degrade the stream, not refuse to start it.
-// Not yet called from production code: the source engine and sink are wired
-// to `resolve()` in a later task. `#[allow(dead_code)]` matches the existing
-// convention for pending-integration code in this crate (see
-// `engine::capture::resolve_buffer_size`).
-#[allow(dead_code)]
 pub const FIXED_LATENCY_MIN_MS: u32 = 50;
-#[allow(dead_code)]
 pub const FIXED_LATENCY_MAX_MS: u32 = 2000;
 
 /// Manual latency inputs supplied by the user. `None` means "use the named
 /// profile's built-in value", so a caller that knows nothing about a field can
 /// omit it.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LatencyOverrides {
@@ -77,7 +70,6 @@ pub struct LatencyOverrides {
 /// Overrides apply only to the profiles that define them: `custom` reads the
 /// manual buffer fields, `broadcast` reads `fixed_latency_ms`, and every named
 /// profile ignores all of them.
-#[allow(dead_code)]
 pub fn resolve(profile: &str, is_loopback: bool, overrides: LatencyOverrides) -> LatencyParams {
     match profile {
         "custom" => {

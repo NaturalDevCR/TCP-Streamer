@@ -76,6 +76,7 @@ pub fn run(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
+    fixed_latency_ms: u32,
     latency_profile: String,
     allowlist: String,
     transport: String,
@@ -258,17 +259,18 @@ pub fn run(
     // 1. Setup Ring Buffer (latency profile drives the sizes; "custom" uses the
     // user's manual fields). The ring is CAPACITY (stall absorption); the
     // adaptive band is the standing-latency target enforced by the send loop.
-    let lp = if latency_profile == "custom" {
-        self::latency::LatencyParams {
-            ring_ms: ring_buffer_duration_ms,
-            adaptive_min_ms: min_buffer_ms,
-            adaptive_max_ms: max_buffer_ms,
-            chunk_size,
-            prefill_ms: ring_buffer_duration_ms.min(200),
-        }
-    } else {
-        self::latency::params(&latency_profile, is_loopback)
-    };
+    // The sink resolves the same way through the same function.
+    let lp = self::latency::resolve(
+        &latency_profile,
+        is_loopback,
+        self::latency::LatencyOverrides {
+            ring_ms: Some(ring_buffer_duration_ms),
+            min_buffer_ms: Some(min_buffer_ms),
+            max_buffer_ms: Some(max_buffer_ms),
+            chunk_size: Some(chunk_size),
+            fixed_latency_ms: Some(fixed_latency_ms),
+        },
+    );
     let effective_chunk = lp.chunk_size;
 
     let ring_capacity_ms = lp.adaptive_max_ms.max(lp.ring_ms);
@@ -317,6 +319,17 @@ pub fn run(
     let capture_rate_net = capture_rate;
     let is_server_clone = is_server;
     let auto_reconnect_net = auto_reconnect;
+    // The broadcast profile exists to hold latency constant for A/V sync, so it
+    // overrides the user's adaptive toggle instead of trusting it — the stored
+    // value may still be true from a previous Custom session.
+    let adaptive_enabled_net = enable_adaptive_buffer && latency_profile != "broadcast";
+    if enable_adaptive_buffer && !adaptive_enabled_net {
+        emit_log(
+            &app_handle,
+            "info",
+            "Broadcast profile: adaptive buffer disabled to keep latency constant".to_string(),
+        );
+    }
     let dscp_clone = dscp_strategy.clone();
     let overruns_net = overruns.clone();
     let underruns_net = underruns.clone();
@@ -636,7 +649,7 @@ pub fn run(
                 last_quality_emit = Instant::now();
 
                 // Real adaptive control: one tick per quality interval.
-                if enable_adaptive_buffer {
+                if adaptive_enabled_net {
                     if let Some(new_target) = adaptive.on_tick(glitches_delta > 0) {
                         emit_log(
                             &app_handle_net,
