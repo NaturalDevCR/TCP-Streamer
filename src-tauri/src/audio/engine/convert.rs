@@ -36,9 +36,6 @@ pub fn mix_to_stereo(input: &[f32], in_channels: usize, out: &mut Vec<f32>) {
 /// Declared here because the resampler is what enforces it. `TrimController`
 /// imports this rather than declaring its own copy, so the controller's output
 /// clamp and the resampler's input clamp cannot drift apart.
-// Wired up in the receive loop by the task that adds the PI controller; the
-// crate denies clippy::all, so an unreferenced API fails the build until then.
-#[allow(dead_code)]
 pub const MAX_TRIM_PPM: f64 = 200.0;
 
 /// Stateful stereo sample-rate converter (Catmull-Rom cubic interpolation).
@@ -47,7 +44,6 @@ pub const MAX_TRIM_PPM: f64 = 200.0;
 pub struct StereoResampler {
     /// The untrimmed ratio, kept so `set_trim_ppm` is always relative to the
     /// device rates rather than compounding on the previous trim.
-    #[allow(dead_code)]
     base_step: f64,
     step: f64,
     pos: f64,
@@ -94,7 +90,6 @@ impl StereoResampler {
     /// ±[`MAX_TRIM_PPM`]. Interpolation state survives, so the change is
     /// seamless: a positive trim raises `step`, producing fewer output frames
     /// per input frame.
-    #[allow(dead_code)]
     pub fn set_trim_ppm(&mut self, ppm: f64) {
         let ppm = ppm.clamp(-MAX_TRIM_PPM, MAX_TRIM_PPM);
         self.step = self.base_step * (1.0 + ppm * 1e-6);
@@ -196,7 +191,6 @@ impl SinkPipeline {
 
     /// Adjusts the resampling ratio to track the source's clock. See
     /// [`StereoResampler::set_trim_ppm`].
-    #[allow(dead_code)]
     pub fn set_trim_ppm(&mut self, ppm: f64) {
         self.resampler.set_trim_ppm(ppm);
     }

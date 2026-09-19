@@ -20,9 +20,6 @@ const KP: f64 = 40.0;
 /// Integral gain. Accumulates the standing offset over tens of seconds.
 const KI: f64 = 2.0;
 
-// The receive loop wires this controller up in the next task; until then it
-// has no production caller.
-#[allow(dead_code)]
 pub struct TrimController {
     target: f32,
     integral: f64,
@@ -30,7 +27,6 @@ pub struct TrimController {
     trim_ppm: f64,
 }
 
-#[allow(dead_code)]
 impl TrimController {
     /// `target` is the standing occupancy to hold, in the same unit later
     /// passed to [`update`](Self::update) (device samples).
@@ -59,6 +55,11 @@ impl TrimController {
     }
 
     /// The trim most recently returned by [`update`](Self::update).
+    ///
+    /// Exposed for introspection (tests exercise convergence and clamping
+    /// through this getter); `receive_loop` only needs the return value of
+    /// `update` itself, so this has no production caller yet.
+    #[allow(dead_code)]
     pub fn trim_ppm(&self) -> f64 {
         self.trim_ppm
     }

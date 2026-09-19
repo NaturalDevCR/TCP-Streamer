@@ -83,8 +83,19 @@ pub fn receive_loop(
     packet::encode_subscribe(salt_b, &mut sub);
     let mut last_hb = Instant::now();
     let mut replay = super::crypto::ReplayWindow::new();
-    let mut drift =
-        super::drift::DriftController::new(target_samples as f32, (target_samples / 4) as f32, 200);
+    // The ASRC below absorbs ordinary clock drift continuously, so drop/insert
+    // is demoted to a safety net: a margin of three quarters of the target
+    // means it fires only above 1.75x or below 0.25x, which is a network stall
+    // or a device glitch, not drift. Those excursions are larger than a few
+    // ppm of trim can absorb in any reasonable time, and there a single
+    // audible correction beats minutes of wrong latency.
+    let mut drift = super::drift::DriftController::new(
+        target_samples as f32,
+        (target_samples * 3 / 4) as f32,
+        200,
+    );
+    let mut trim = super::trim::TrimController::new(target_samples as f32);
+    let mut last_trim_tick = Instant::now();
     let mut skip_samples: usize = 0;
     let mut insert_silence: usize = 0;
 
@@ -163,6 +174,13 @@ pub fn receive_loop(
         }
         // Drift observation: once per loop iteration. Corrections are
         // requested in whole device frames so skips never shift channels.
+        // Continuous correction, on a fixed cadence: this loop iterates at an
+        // irregular rate driven by packet arrival, so ticking per iteration
+        // would make the gains depend on network timing.
+        if last_trim_tick.elapsed() >= Duration::from_millis(100) {
+            pipeline.set_trim_ppm(trim.update(producer.len() as f32));
+            last_trim_tick = Instant::now();
+        }
         let drop_count = ((target_samples / 20).max(8)).div_ceil(ch) * ch;
         match drift.observe(producer.len() as f32) {
             super::drift::DriftAction::DropChunk => {
