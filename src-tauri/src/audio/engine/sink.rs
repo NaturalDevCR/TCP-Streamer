@@ -8,7 +8,7 @@ use super::device::{negotiate, ConfigCandidate, SampleFmt};
 use super::playback::build_output_stream;
 use cpal::traits::{DeviceTrait, HostTrait};
 use ringbuf::HeapRb;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -161,6 +161,8 @@ pub fn run_sink(
         out_rate,
         out_channels,
     );
+    let trim_ppm = Arc::new(AtomicI32::new(0));
+    let trim_ppm_net = trim_ppm.clone();
     thread::spawn(move || {
         super::super::transport::udp::sink::receive_loop(
             &socket,
@@ -173,7 +175,35 @@ pub fn run_sink(
             pipeline,
             prod,
             running_net,
+            trim_ppm_net,
         );
+    });
+
+    // The sink has no telemetry pipeline, and plumbing an AppHandle into the
+    // receive loop to log from it would be the wrong trade. This reports the
+    // trim occasionally instead: a value settling near zero means the two
+    // machines' clocks are well matched, and one pinned at the cap means the
+    // loop has railed and something else is wrong.
+    let trim_ppm_log = trim_ppm.clone();
+    let running_log = is_running.clone();
+    let app_log = app_handle.clone();
+    thread::spawn(move || {
+        let mut last_reported = 0i32;
+        while running_log.load(std::sync::atomic::Ordering::Relaxed) {
+            thread::sleep(Duration::from_secs(5));
+            if !running_log.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            let ppm = trim_ppm_log.load(std::sync::atomic::Ordering::Relaxed);
+            if (ppm - last_reported).abs() > 2 {
+                emit_log(
+                    &app_log,
+                    "info",
+                    format!("Clock drift correction: {ppm} ppm"),
+                );
+                last_reported = ppm;
+            }
+        }
     });
 
     let stream = build_output_stream(&device, &config, out_format, cons, underruns.clone())

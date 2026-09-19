@@ -8,7 +8,7 @@ use super::{
 use crate::audio::engine::decoder::decode_pcm_i16_le_to_f32;
 use ringbuf::HeapProducer;
 use std::net::UdpSocket;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -71,6 +71,7 @@ pub fn receive_loop(
     mut pipeline: crate::audio::engine::convert::SinkPipeline,
     mut producer: HeapProducer<f32>,
     running: Arc<AtomicBool>,
+    trim_ppm_out: Arc<AtomicI32>,
 ) {
     let ch = out_channels.max(1) as usize;
     let mut jb = JitterBuffer::new(lost_after);
@@ -172,15 +173,17 @@ pub fn receive_loop(
                 Pop::Starved => break,
             }
         }
-        // Drift observation: once per loop iteration. Corrections are
-        // requested in whole device frames so skips never shift channels.
         // Continuous correction, on a fixed cadence: this loop iterates at an
         // irregular rate driven by packet arrival, so ticking per iteration
         // would make the gains depend on network timing.
         if last_trim_tick.elapsed() >= Duration::from_millis(100) {
-            pipeline.set_trim_ppm(trim.update(producer.len() as f32));
+            let ppm = trim.update(producer.len() as f32);
+            pipeline.set_trim_ppm(ppm);
+            trim_ppm_out.store(ppm.round() as i32, Ordering::Relaxed);
             last_trim_tick = Instant::now();
         }
+        // Drift observation: once per loop iteration. Corrections are
+        // requested in whole device frames so skips never shift channels.
         let drop_count = ((target_samples / 20).max(8)).div_ceil(ch) * ch;
         match drift.observe(producer.len() as f32) {
             super::drift::DriftAction::DropChunk => {
