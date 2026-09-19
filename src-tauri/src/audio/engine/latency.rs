@@ -88,7 +88,13 @@ pub fn resolve(profile: &str, is_loopback: bool, overrides: LatencyOverrides) ->
             let base = params("broadcast", is_loopback);
             match overrides.fixed_latency_ms {
                 Some(f) => {
-                    let fixed = f.clamp(FIXED_LATENCY_MIN_MS, FIXED_LATENCY_MAX_MS);
+                    // Loopback capture needs more buffering, so the profile's own
+                    // floor still applies — otherwise a Broadcast loopback stream
+                    // runs below the stable minimum with no adaptation to save it.
+                    let mut fixed = f.clamp(FIXED_LATENCY_MIN_MS, FIXED_LATENCY_MAX_MS);
+                    if is_loopback {
+                        fixed = fixed.max(base.adaptive_min_ms);
+                    }
                     LatencyParams {
                         // Ring is stall-absorption capacity, not latency. Keep the
                         // profile's floor, and grow it for large fixed targets.
@@ -204,13 +210,24 @@ mod tests {
     fn resolve_matches_params_for_named_profiles() {
         // Snapcast regression guard: resolve() must be a no-op wrapper for every
         // profile that existed before the broadcast work.
-        for p in ["ultra-low", "balanced", "robust", "nonsense"] {
-            for lb in [false, true] {
-                assert_eq!(
-                    resolve(p, lb, LatencyOverrides::default()),
-                    params(p, lb),
-                    "resolve must equal params for {p} (loopback={lb})"
-                );
+        for ov in [
+            LatencyOverrides::default(),
+            LatencyOverrides {
+                ring_ms: Some(9999),
+                min_buffer_ms: Some(1),
+                max_buffer_ms: Some(2),
+                chunk_size: Some(4096),
+                fixed_latency_ms: Some(1234),
+            },
+        ] {
+            for p in ["ultra-low", "balanced", "robust", "nonsense"] {
+                for lb in [false, true] {
+                    assert_eq!(
+                        resolve(p, lb, ov),
+                        params(p, lb),
+                        "resolve must equal params for {p} (loopback={lb}, overrides={ov:?})"
+                    );
+                }
             }
         }
     }
@@ -304,6 +321,35 @@ mod tests {
         );
         assert_eq!(got.ring_ms, params("broadcast", true).ring_ms);
         assert!(got.ring_ms >= got.adaptive_max_ms);
+    }
+
+    #[test]
+    fn broadcast_loopback_override_respects_profile_floor() {
+        // A loopback capture cannot be driven below the profile's floor: with
+        // adaptation disabled there is nothing to recover from the underruns.
+        let got = resolve(
+            "broadcast",
+            true,
+            LatencyOverrides {
+                fixed_latency_ms: Some(100),
+                ..LatencyOverrides::default()
+            },
+        );
+        assert_eq!(
+            got.adaptive_min_ms,
+            params("broadcast", true).adaptive_min_ms
+        );
+        assert_eq!(got.adaptive_min_ms, got.adaptive_max_ms);
+        // Non-loopback capture keeps the full range.
+        let normal = resolve(
+            "broadcast",
+            false,
+            LatencyOverrides {
+                fixed_latency_ms: Some(100),
+                ..LatencyOverrides::default()
+            },
+        );
+        assert_eq!(normal.adaptive_min_ms, 100);
     }
 
     #[test]

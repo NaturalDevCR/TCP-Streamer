@@ -4,6 +4,25 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Broadcast latency profile** — A fixed latency target (250 ms default, 400 ms under loopback capture) that does not drift, for live production where a measured audio/video offset must stay valid for a whole show. It ignores the Adaptive Buffer setting by design. A **Fixed latency (ms)** field adjusts the target between 50 and 2000 ms.
+- **[BROADCAST_GUIDE.md](BROADCAST_GUIDE.md)** — Covers the two-machine DAW-to-switcher scenario end to end.
+
+### Fixed
+
+- Custom latency settings were silently ignored in sink mode — `start_sink` passed only the profile name, so the sink resolved through a function that falls back to Balanced for any unrecognized key, including `custom`. The de-jitter target and packet-loss window were both derived from the wrong parameters. Profile resolution now happens in one shared function used by both the source and the sink.
+
+### Changed
+
+- **This is a user-visible behavior change.** A sink set to the Custom profile previously ran with Balanced's 200 ms de-jitter target because of the bug above. It now honors the configured Minimum Buffer, which defaults to 2000 ms — so a sink on Custom may show substantially higher latency after upgrading than it did before. Lower the Minimum Buffer, or switch to Broadcast for a fixed target.
+
+### Fixed (documentation)
+
+- The README stated that the sink role connects to TCP audio sources. It does not; the sink subscribes over Native UDP only, and the UI already reflected this.
+
 ## [2.3.0] — 2026-06-12
 
 ### UI/UX — Phase 3 Redesign

@@ -17,7 +17,7 @@ vi.mock("@tauri-apps/plugin-store", () => ({
   },
 }));
 
-import { useSettingsStore } from "../settings";
+import { useSettingsStore, clampFixedLatency } from "../settings";
 
 describe("useSettingsStore", () => {
   beforeEach(() => {
@@ -112,5 +112,34 @@ describe("fixedLatencyMs", () => {
     const b = useSettingsStore();
     await b.loadSettings();
     expect(b.fixedLatencyMs).toBe(400);
+  });
+
+  it("clamps an empty-field 0 to the minimum instead of persisting 0", async () => {
+    const a = useSettingsStore();
+    a.fixedLatencyMs = 0;
+    await a.saveSettings();
+
+    setActivePinia(createPinia());
+    const b = useSettingsStore();
+    await b.loadSettings();
+    expect(b.fixedLatencyMs).toBe(50);
+  });
+});
+
+describe("clampFixedLatency", () => {
+  it("clamps an empty-field 0 up to the minimum", () => {
+    expect(clampFixedLatency(0)).toBe(50);
+  });
+
+  it("falls back to 250 for NaN (a stray '-' or 'e')", () => {
+    expect(clampFixedLatency(NaN)).toBe(250);
+  });
+
+  it("clamps a value above the maximum down to 2000", () => {
+    expect(clampFixedLatency(5000)).toBe(2000);
+  });
+
+  it("passes a valid value through unchanged", () => {
+    expect(clampFixedLatency(400)).toBe(400);
   });
 });

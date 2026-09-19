@@ -297,10 +297,10 @@ Controls coordinated ring buffer and chunk size presets. The adaptive controller
 | **Ultra-low** | 2000      | 100 – 500                       | 256    | Wired LAN, minimal latency                    |
 | **Balanced**  | 4000      | 200 – 1500                      | 512    | Default; good trade-off for most networks     |
 | **Robust**    | 8000      | 500 – 3000                      | 1024   | Unstable/WiFi networks, high jitter tolerance |
-| **Broadcast** | 3000      | Fixed (no adaptation)           | 512    | Live production; stable A/V offset            |
+| **Broadcast** | 3000+     | Fixed (no adaptation)           | 512    | Live production; stable A/V offset            |
 | **Custom**    | Manual    | Manual (Min/Max Buffer sliders) | Manual | Full control over all parameters              |
 
-The **Broadcast** profile holds its latency target at a constant 250 ms (400 ms for loopback capture), adjustable with the **Fixed latency (ms)** field. It ignores the Adaptive Buffer setting on purpose: a target that moves during a show breaks any audio/video offset the operator has compensated for. See [BROADCAST_GUIDE.md](BROADCAST_GUIDE.md).
+The **Broadcast** profile holds its latency target at a constant 250 ms (400 ms for loopback capture), adjustable with the **Fixed latency (ms)** field. It ignores the Adaptive Buffer setting on purpose: a target that moves during a show breaks any audio/video offset the operator has compensated for. Under loopback capture the target is floored at 400 ms regardless of the field, because loopback needs the extra buffering and the broadcast profile has no adaptation to fall back on. See [BROADCAST_GUIDE.md](BROADCAST_GUIDE.md).
 
 Loopback (WASAPI) capture uses higher floors in each profile for extra stability.
 
