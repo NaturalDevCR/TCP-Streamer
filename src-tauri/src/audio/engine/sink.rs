@@ -8,7 +8,7 @@ use super::device::{negotiate, ConfigCandidate, SampleFmt};
 use super::playback::build_output_stream;
 use cpal::traits::{DeviceTrait, HostTrait};
 use ringbuf::HeapRb;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -189,12 +189,16 @@ pub fn run_sink(
     let app_log = app_handle.clone();
     thread::spawn(move || {
         let mut last_reported = 0i32;
-        while running_log.load(std::sync::atomic::Ordering::Relaxed) {
-            thread::sleep(Duration::from_secs(5));
-            if !running_log.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
+        'outer: while running_log.load(Ordering::Relaxed) {
+            // Wait in slices rather than one 5s block, so shutdown is noticed
+            // about as fast as the receive thread notices it.
+            for _ in 0..10 {
+                thread::sleep(Duration::from_millis(500));
+                if !running_log.load(Ordering::Relaxed) {
+                    break 'outer;
+                }
             }
-            let ppm = trim_ppm_log.load(std::sync::atomic::Ordering::Relaxed);
+            let ppm = trim_ppm_log.load(Ordering::Relaxed);
             if (ppm - last_reported).abs() > 2 {
                 emit_log(
                     &app_log,
