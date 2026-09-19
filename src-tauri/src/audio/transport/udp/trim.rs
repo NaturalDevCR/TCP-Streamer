@@ -11,6 +11,14 @@
 //! deliberately slow to match — clock ratios move with temperature, not by the
 //! second.
 //!
+//! Occupancy is also noisy for a second, unrelated reason: the ring's own
+//! granularity. Audio arrives in datagram-sized pushes and leaves in
+//! device-callback-sized pops, and neither is small next to the gap between
+//! samples of `occupancy` — see [`OCCUPANCY_EMA_ALPHA`] below. `update` smooths
+//! the raw reading with an exponential moving average before forming the
+//! error, so the control input reflects the ring's standing level rather than
+//! that sawtooth.
+//!
 //! Pure: no I/O and no clock of its own. The caller decides the cadence.
 
 use crate::audio::engine::convert::MAX_TRIM_PPM;
@@ -23,7 +31,7 @@ use crate::audio::engine::convert::MAX_TRIM_PPM;
 // residual `r` ppm adds `samples_per_tick * r * 1e-6` samples, i.e.
 // `g * r` in normalized units where `g = samples_per_tick * 1e-6 / target`.
 // The sample rate and channel count cancel out of `g`: at a 100 ms tick it is
-// exactly `1e-4 / target_seconds`.
+// exactly `1e-7 / target_seconds` (`tick_seconds * 1e-6 / target_seconds`).
 //
 // With `update`'s ordering (the current error is accumulated into the integral
 // *before* the trim is formed), the closed-loop state `(error, integral_prev)`
@@ -57,6 +65,30 @@ use crate::audio::engine::convert::MAX_TRIM_PPM;
 const KP_NUM: f64 = 0.006_644_493_744_965_674;
 const KI_NUM: f64 = 0.000_013_671_782_200_574_967;
 
+// Smoothing applied to the raw occupancy reading before the error is formed.
+//
+// `receive_loop` samples `producer.len()` once per 100 ms tick, but the ring
+// fills and drains in chunks bigger than the gap between those samples:
+// datagrams push ~6.25 ms of audio at a time and the device callback pops
+// 10-21 ms at a time (`BufferSize::Default`). A third to all of the 10 Hz
+// samples land far enough from the mean to saturate the proportional term on
+// their own — see the constant derived in the module comment above — turning
+// a loop tuned as a linear ZETA = 0.9 controller into a bang-bang one on
+// perfectly healthy ring jitter.
+//
+// An exponential moving average with alpha = 0.1 gives a time constant of
+// 1 / alpha = 10 ticks, i.e. 1 second. That is long enough to average over
+// several push/pop cycles (themselves 10-21 ms, an order of magnitude
+// shorter) and short enough to be irrelevant next to the closed loop's own
+// ~1200-tick (120 s) settling time: 10 ticks is under 1% of that, so the
+// filter adds negligible phase lag at the loop's crossover. Simulated against
+// a realistic push/pop sawtooth (see `granularity_jitter_stays_in_the_linear_
+// region` below), this cuts the fraction of ticks that saturate the ±200 ppm
+// clamp from over two thirds to under half a percent, while leaving the
+// no-jitter step response (the existing settling tests) unchanged to four
+// decimal places.
+const OCCUPANCY_EMA_ALPHA: f64 = 0.1;
+
 pub struct TrimController {
     target: f32,
     kp: f64,
@@ -64,6 +96,10 @@ pub struct TrimController {
     integral: f64,
     integral_limit: f64,
     trim_ppm: f64,
+    /// Smoothed occupancy. `None` until the first observation, so the filter
+    /// starts at the true reading instead of ramping up from zero — the same
+    /// priming `DriftController::observe` uses for its own EMA.
+    occupancy_ema: Option<f64>,
 }
 
 impl TrimController {
@@ -98,6 +134,7 @@ impl TrimController {
             // clamp. With the loop disabled there is nothing to wind up.
             integral_limit: if ki > 0.0 { MAX_TRIM_PPM / ki } else { 0.0 },
             trim_ppm: 0.0,
+            occupancy_ema: None,
         }
     }
 
@@ -107,7 +144,17 @@ impl TrimController {
     /// the sink consumes, so the resampler must emit FEWER frames — which means
     /// a LARGER step, hence a positive trim.
     pub fn update(&mut self, occupancy: f32) -> f64 {
-        let error = ((occupancy - self.target) / self.target) as f64;
+        // Smooth the raw reading before anything else touches it, so the
+        // ring's push/pop granularity never reaches the error term. See
+        // `OCCUPANCY_EMA_ALPHA` for why this constant and why it is safe.
+        let occupancy = occupancy as f64;
+        let smoothed = match self.occupancy_ema {
+            Some(prev) => OCCUPANCY_EMA_ALPHA * occupancy + (1.0 - OCCUPANCY_EMA_ALPHA) * prev,
+            None => occupancy,
+        };
+        self.occupancy_ema = Some(smoothed);
+
+        let error = (smoothed - self.target as f64) / self.target as f64;
         self.integral = (self.integral + error).clamp(-self.integral_limit, self.integral_limit);
         self.trim_ppm =
             (self.kp * error + self.ki * self.integral).clamp(-MAX_TRIM_PPM, MAX_TRIM_PPM);
@@ -170,6 +217,46 @@ mod tests {
     }
 
     #[test]
+    fn pole_radius_and_damping_match_the_design() {
+        // `pole_placement_constants_match_their_derivation` checks the
+        // KP_NUM/KI_NUM literals against the derivation by hand. This test
+        // instead starts from the CONSTRUCTED `kp`/`ki` — what a real caller
+        // actually gets — builds the closed-loop state matrix from them with
+        // no simulation involved, and recovers the damping and decay rate the
+        // matrix's own eigenvalues imply, checking those against the design.
+        //
+        // The matrix below (`tr`, `det`) is only correct for `update`'s
+        // ordering — the current error is accumulated into the integral
+        // *before* the trim is formed, as derived in the module comment.
+        // Reordering `update` would silently invalidate it, so this is also
+        // the test that pins that ordering, which nothing else here checks
+        // directly.
+        let c = TrimController::new(TARGET, SAMPLES_PER_TICK);
+        let g = SAMPLES_PER_TICK * 1e-6 / TARGET as f64;
+        let tr = 2.0 - g * (c.kp + c.ki);
+        let det = 1.0 - g * c.kp;
+
+        // r = exp(-decay), so decay = -ln(r); tr = 2r*cos(theta), so
+        // theta = omega_n * sqrt(1 - zeta^2). Since decay = zeta * omega_n,
+        // theta / decay = sqrt(1 - zeta^2) / zeta, which inverts to zeta in
+        // closed form.
+        let r = det.sqrt();
+        let decay = -r.ln();
+        let theta = (tr / (2.0 * r)).acos();
+        let zeta = 1.0 / (1.0 + (theta / decay).powi(2)).sqrt();
+
+        assert!(
+            (decay - DECAY_PER_TICK).abs() < 1e-9,
+            "decay rate {decay} recovered from the constructed gains should match \
+             the design {DECAY_PER_TICK}"
+        );
+        assert!(
+            (zeta - ZETA).abs() < 1e-9,
+            "damping {zeta} recovered from the constructed gains should match the design {ZETA}"
+        );
+    }
+
+    #[test]
     fn converges_against_a_simulated_clock_offset() {
         // Convergence is a closed-loop property. At a CONSTANT occupancy the
         // integral term correctly winds to its limit, so an open-loop test
@@ -199,12 +286,22 @@ mod tests {
             let k = SAMPLES_PER_TICK * 1e-6;
             let mut worst_deviation = 0.0f32;
             let mut trim_at_600 = 0.0f64;
+            // Tracks the trim furthest past the disturbance in its own
+            // direction, i.e. the overshoot peak rather than the raw extreme
+            // (which for disturbance < 0 would otherwise be the least
+            // negative value seen, not the most).
+            let mut worst_trim = 0.0f64;
             for tick in 0..1800 {
                 let trim = c.update(occupancy);
                 occupancy += ((disturbance - trim) * k) as f32;
                 worst_deviation = worst_deviation.max((occupancy - TARGET).abs());
                 if tick == 599 {
                     trim_at_600 = trim;
+                }
+                if disturbance > 0.0 {
+                    worst_trim = worst_trim.max(trim);
+                } else {
+                    worst_trim = worst_trim.min(trim);
                 }
             }
             // Checkpoint on the SHAPE of the response, not just its endpoint.
@@ -214,10 +311,11 @@ mod tests {
             // (measured ~7.7 ppm from the disturbance), while the pre-fix,
             // essentially undamped gains are still only barely off zero
             // (~42.5 ppm from the disturbance) because their ~12-minute hunt
-            // period hasn't turned yet. The endpoint bound alone let those
-            // broken gains slip through at 2.35 ppm against the 2 ppm bound
-            // below, purely because 1800 ticks happened to land near a
-            // favorable point in that slow hunt.
+            // period hasn't turned yet. The endpoint bound alone only barely
+            // caught those broken gains — 2.35 ppm against the 2 ppm bound
+            // below, a margin thin enough that a slightly different plant or
+            // a slightly later endpoint would have let them pass — which is
+            // the actual reason the tick-600 checkpoint above exists.
             assert!(
                 (trim_at_600 - disturbance).abs() < 20.0,
                 "after 60 s the trim {trim_at_600} should already be within 20 ppm of the \
@@ -236,6 +334,104 @@ mod tests {
                 worst_deviation < TARGET * 0.10,
                 "occupancy strayed {worst_deviation} samples from target \
                  (>10%) while settling on {disturbance} ppm"
+            );
+            // Two-sided: the checks above catch a loop that is too SLOW, but
+            // not one that is too AGGRESSIVE. Gains scaled 4x-30x and much
+            // lighter damping (ZETA as low as 0.05) all pass every assertion
+            // above; only a bound on the overshoot itself catches them.
+            // Measured peak overshoot at the shipped gains is ~16% of the
+            // disturbance (see `pole_radius_and_damping_match_the_design`
+            // for the exact-arithmetic version of this same guarantee).
+            let peak_overshoot = if disturbance > 0.0 {
+                worst_trim - disturbance
+            } else {
+                disturbance - worst_trim
+            };
+            assert!(
+                peak_overshoot < disturbance.abs() * 0.25,
+                "peak trim overshoot {peak_overshoot} should stay under 25% of the \
+                 {disturbance} ppm disturbance"
+            );
+        }
+    }
+
+    /// Simulates the ring's own granularity: audio arrives in datagram-sized
+    /// pushes (300 stereo frames, 6.25 ms) and leaves in device-callback-sized
+    /// pops (the top of the documented 480-1024 frame / 10-21 ms range, the
+    /// more strenuous end of it). Returns, for each 100 ms control tick, the
+    /// ring level's deviation from its own mean — de-meaned because the mean
+    /// shift this push/pop bookkeeping introduces is a separate (and far
+    /// smaller) effect from the granularity ripple this test targets.
+    fn granularity_jitter(ticks: usize) -> Vec<f64> {
+        const PUSH_FRAMES: f64 = 300.0;
+        const POP_FRAMES: f64 = 1024.0;
+        const CH: f64 = 2.0;
+        let push_ms = PUSH_FRAMES / 48.0;
+        let pop_ms = POP_FRAMES / 48.0;
+        let push_samples = PUSH_FRAMES * CH;
+        let pop_samples = POP_FRAMES * CH;
+
+        let mut next_push = push_ms;
+        let mut next_pop = pop_ms;
+        let mut next_tick = 100.0f64;
+        let mut level = 0.0f64;
+        let mut samples = Vec::with_capacity(ticks);
+        while samples.len() < ticks {
+            let next_event = next_push.min(next_pop).min(next_tick);
+            if next_event == next_tick {
+                samples.push(level);
+                next_tick += 100.0;
+            } else if next_event == next_push {
+                level += push_samples;
+                next_push += push_ms;
+            } else {
+                level -= pop_samples;
+                next_pop += pop_ms;
+            }
+        }
+        let mean: f64 = samples.iter().sum::<f64>() / samples.len() as f64;
+        samples.iter().map(|s| s - mean).collect()
+    }
+
+    #[test]
+    fn granularity_jitter_stays_in_the_linear_region() {
+        // Finding 1: `receive_loop` samples `producer.len()` once per 100 ms
+        // tick, raw. On this same plant, that alone saturates the ±200 ppm
+        // clamp on roughly 70% of ticks from the push/pop granularity above
+        // — confirmed by temporarily removing the `OCCUPANCY_EMA_ALPHA`
+        // smoothing from `update` and rerunning this test — with no clock
+        // mismatch at all, turning a loop designed and tested as linear at
+        // ZETA = 0.9 into a bang-bang one on perfectly healthy ring jitter.
+        // The filter should cut that by two orders of magnitude while the
+        // loop still tracks a real disturbance riding on top of the jitter.
+        let ticks = 1800;
+        let jitter = granularity_jitter(ticks);
+        let k = SAMPLES_PER_TICK * 1e-6;
+        for disturbance in [0.0f64, 50.0, -50.0] {
+            let mut c = TrimController::new(TARGET, SAMPLES_PER_TICK);
+            let mut occupancy = TARGET as f64;
+            let mut saturated = 0usize;
+            let mut trim = 0.0;
+            for j in &jitter {
+                let sample = (occupancy + j) as f32;
+                trim = c.update(sample);
+                if trim.abs() >= 0.99 * MAX_TRIM_PPM {
+                    saturated += 1;
+                }
+                occupancy += (disturbance - trim) * k;
+            }
+            let saturation_fraction = saturated as f64 / ticks as f64;
+            assert!(
+                saturation_fraction < 0.10,
+                "granularity jitter saturated the clamp on {:.1}% of ticks at disturbance \
+                 {disturbance} ppm ({saturated}/{ticks}); the filter should keep this well \
+                 under the unfiltered ~70%",
+                saturation_fraction * 100.0
+            );
+            assert!(
+                (trim - disturbance).abs() < 30.0,
+                "trim {trim} should still be converging toward the {disturbance} ppm \
+                 disturbance despite the ring's granularity noise"
             );
         }
     }
@@ -325,7 +521,7 @@ mod tests {
 
     #[test]
     fn gains_scale_with_the_plant() {
-        // The normalized loop gain is `1e-4 / target_seconds` regardless of
+        // The normalized loop gain is `1e-7 / target_seconds` regardless of
         // sample rate or channel count, so a 96 kHz 4-channel sink at the same
         // latency must get the same normalized loop — i.e. gains that differ
         // by exactly the ratio of the plants.

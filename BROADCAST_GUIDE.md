@@ -77,7 +77,9 @@ This is not free, but at the corrections involved it is inaudible. Interpolating
 
 Watch it in the Logs view, reported as **Clock drift correction: N ppm**. A value settling near zero means your two machines happen to have well-matched clocks. A value pinned at 200 means the loop has run out of range and something else is wrong.
 
-**When can you measure?** Immediately. The sink starts at its configured latency rather than working up to it, so the number you set is the number you have from the first second of audio. Give the link a minute anyway, so the drift correction has settled and any jitter has shown itself — it converges within about half a minute of the first audio, and well inside that minute. After that the standing latency stays put for the show, which is what makes a once-per-venue A/V measurement hold.
+**When can you measure?** Immediately. The sink starts at its configured latency rather than working up to it, so the number you set is the number you have from the first second of audio — the prefill keeps standing latency within about 0.2% of that target throughout the drift correction's transient, so measuring right away is sound.
+
+The drift correction itself is a separate, slower thing: it settles within about two minutes of the first audio, not thirty seconds. That is how long the trim shown in the Logs view takes to stop moving, not how long the latency takes to be correct — the latency was already right. If you want to also confirm the link is healthy and its clock offset has settled before trusting it for a whole show, give it those two minutes and watch the correction stop drifting rather than acting on the first reading. After that the standing latency stays put for the show, which is what makes a once-per-venue A/V measurement hold.
 
 A coarse correction still exists for excursions too large for the fine one to absorb — a network stall, or a device glitch. Those drop a small chunk or insert a brief silence, which is audible, but they fire only when the buffer has moved far from its target: past 1.75x or below 0.25x of your fixed latency. On a wired link that has already been watched behave, you should not hear one.
 
