@@ -7,3 +7,4 @@ pub mod sink;
 pub mod source;
 #[cfg(test)]
 mod tests_loopback;
+pub mod trim;

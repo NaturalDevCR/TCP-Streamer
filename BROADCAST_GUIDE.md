@@ -69,11 +69,19 @@ The default is 250 ms, which suits a quiet wired LAN. Raise it if the dashboard 
 
 ## Clock drift
 
-The Mac's capture clock and the Windows playback clock run independently — nothing synchronises them, and they will diverge slowly.
+The Mac's capture clock and the Windows playback clock are independent. Nothing synchronises them, and they will diverge slowly.
 
-TCP Streamer keeps the buffer at its target by occasionally dropping a small chunk of audio or inserting a small amount of silence. This bounds the latency, which is what keeps your A/V measurement valid, but each correction is a brief micro-glitch. Corrections are rare: the controller only acts when its smoothed buffer level strays past a quarter of the target, and it waits out a cooldown between corrections.
+TCP Streamer absorbs that divergence continuously, by adjusting its resampling ratio a few parts per million so the two clocks stay matched. Nothing is dropped and no silence is inserted while it works.
 
-TCP Streamer does not use an asynchronous sample-rate converter, which is how broadcast-grade equipment avoids these corrections entirely. If your programme material cannot tolerate any correction at all, use hardware with a shared clock.
+This is not free, but at the corrections involved it is inaudible. Interpolating between samples costs a little high-frequency energy, and the amount varies as the correction varies — in principle a very slow, very shallow wobble on the top octave. The size of it scales with the size of the correction, and two ordinary crystals sit a few parts per million apart, which is nothing. A correction sitting at tens of ppm and climbing is the case to look at, and it means one of the two machines has a clock worth investigating.
+
+Watch it in the Logs view, reported as **Clock drift correction: N ppm**. Expect it to wander, not to freeze on one number: real push/pop timing is never perfectly even, so even a well-matched pair keeps drifting a bit sample to sample, and a reading anywhere in the tens of ppm around zero is normal and does not need a second look. The log line itself only appears when the reported value has moved enough to be worth a line, so you will see it far less often than the trim actually updates internally. A reading at the ±200 ppm cap is a different thing entirely: it is reported the moment it happens, and it means the loop has run out of range and something else — likely one machine's clock, or the network — is worth investigating.
+
+**When can you measure?** Immediately. The sink starts at its configured latency rather than working up to it, so the number you set is the number you have from the first second of audio — the prefill keeps standing latency well under 1% of that target throughout the drift correction's transient, so measuring right away is sound.
+
+The drift correction itself is a separate, slower thing: give it about two minutes from the first audio before you judge it. That is how long the underlying correction takes to find its working range, not how long the latency takes to be correct — the latency was already right. If you want to also confirm the link is healthy before trusting it for a whole show, watch that two-minute window and confirm the reported value has settled into its normal wandering range around zero, rather than climbing or sitting at the ±200 cap. After that the standing latency stays put for the show, which is what makes a once-per-venue A/V measurement hold.
+
+A coarse correction still exists for excursions too large for the fine one to absorb — a network stall, or a device glitch. Those drop a small chunk or insert a brief silence, which is audible, but they fire only when the buffer has moved far from its target: past 1.75x or below 0.25x of your fixed latency. On a wired link that has already been watched behave, you should not hear one.
 
 ## Limits
 

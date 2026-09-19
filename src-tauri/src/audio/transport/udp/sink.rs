@@ -8,9 +8,14 @@ use super::{
 use crate::audio::engine::decoder::decode_pcm_i16_le_to_f32;
 use ringbuf::HeapProducer;
 use std::net::UdpSocket;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Cadence of the continuous drift correction. The controller is pure and
+/// takes no clock of its own, so this is both the caller's tick interval and
+/// the timebase its gains are derived against — they must not diverge.
+const TRIM_TICK: Duration = Duration::from_millis(100);
 
 /// Result of the subscribe handshake.
 pub struct Subscribed {
@@ -59,6 +64,8 @@ pub fn subscribe(source_addr: &str, salt_b: u64, timeout: Duration) -> std::io::
 /// `target_samples` is the target playback ring occupancy (device-unit
 /// samples) for drift correction; corrections are applied in whole device
 /// frames (`out_channels`) so interleaving can never shift.
+/// `out_rate` is the device sample rate; with `out_channels` and the trim
+/// cadence below it defines the plant the trim controller is tuned against.
 #[allow(clippy::too_many_arguments)]
 pub fn receive_loop(
     socket: &UdpSocket,
@@ -67,10 +74,12 @@ pub fn receive_loop(
     key: Option<[u8; 32]>,
     nonce_salt: u32,
     target_samples: usize,
+    out_rate: u32,
     out_channels: u16,
     mut pipeline: crate::audio::engine::convert::SinkPipeline,
     mut producer: HeapProducer<f32>,
     running: Arc<AtomicBool>,
+    trim_ppm_out: Arc<AtomicI32>,
 ) {
     let ch = out_channels.max(1) as usize;
     let mut jb = JitterBuffer::new(lost_after);
@@ -83,10 +92,39 @@ pub fn receive_loop(
     packet::encode_subscribe(salt_b, &mut sub);
     let mut last_hb = Instant::now();
     let mut replay = super::crypto::ReplayWindow::new();
-    let mut drift =
-        super::drift::DriftController::new(target_samples as f32, (target_samples / 4) as f32, 200);
+    // The ASRC below absorbs ordinary clock drift continuously, so drop/insert
+    // is demoted to a safety net: a margin of three quarters of the target
+    // means it fires only above 1.75x or below 0.25x, which is a network stall
+    // or a device glitch, not drift. Those excursions are larger than a few
+    // ppm of trim can absorb in any reasonable time, and there a single
+    // audible correction beats minutes of wrong latency.
+    let mut drift = super::drift::DriftController::new(
+        target_samples as f32,
+        (target_samples * 3 / 4) as f32,
+        200,
+    );
+    // The controller's gains are derived from the plant, so it needs the same
+    // cadence the loop below ticks it at, expressed as samples of flow.
+    let samples_per_tick = out_rate as f64 * ch as f64 * TRIM_TICK.as_secs_f64();
+    let mut trim = super::trim::TrimController::new(target_samples as f32, samples_per_tick);
+    let mut last_trim_tick = Instant::now();
     let mut skip_samples: usize = 0;
     let mut insert_silence: usize = 0;
+
+    // Prefill the playback ring so the standing latency STARTS at its
+    // configured value instead of climbing to it. Nothing else ever fills it:
+    // the sink would otherwise begin at zero occupancy and the ASRC — capped at
+    // MAX_TRIM_PPM — can only reposition 0.2 ms of audio per second, a quarter
+    // of an hour to reach a 250 ms target. The Broadcast profile's promise is a
+    // latency an operator measures once, so it has to be right from the first
+    // second. Whole device frames only, so channel interleaving cannot shift —
+    // clamped to the free space, because a short push of a partial frame would
+    // shift it for the life of the stream.
+    let prefill = target_samples.min(producer.free_len()) / ch * ch;
+    if prefill > 0 {
+        let silence = vec![0.0f32; prefill];
+        let _ = producer.push_slice(&silence);
+    }
 
     while running.load(Ordering::Relaxed) {
         if last_hb.elapsed() >= Duration::from_secs(1) {
@@ -160,6 +198,15 @@ pub fn receive_loop(
                 Pop::Gap => { /* silence handled by the output callback's underrun fill */ }
                 Pop::Starved => break,
             }
+        }
+        // Continuous correction, on a fixed cadence: this loop iterates at an
+        // irregular rate driven by packet arrival, so ticking per iteration
+        // would make the gains depend on network timing.
+        if last_trim_tick.elapsed() >= TRIM_TICK {
+            let ppm = trim.update(producer.len() as f32);
+            pipeline.set_trim_ppm(ppm);
+            trim_ppm_out.store(ppm.round() as i32, Ordering::Relaxed);
+            last_trim_tick = Instant::now();
         }
         // Drift observation: once per loop iteration. Corrections are
         // requested in whole device frames so skips never shift channels.

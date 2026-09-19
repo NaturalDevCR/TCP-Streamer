@@ -3,12 +3,12 @@
 //! through the conversion pipeline (channel mix + resample).
 
 use super::super::stats::{emit_log, StreamStats};
-use super::convert::SinkPipeline;
+use super::convert::{SinkPipeline, MAX_TRIM_PPM};
 use super::device::{negotiate, ConfigCandidate, SampleFmt};
 use super::playback::build_output_stream;
 use cpal::traits::{DeviceTrait, HostTrait};
 use ringbuf::HeapRb;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -161,6 +161,8 @@ pub fn run_sink(
         out_rate,
         out_channels,
     );
+    let trim_ppm = Arc::new(AtomicI32::new(0));
+    let trim_ppm_net = trim_ppm.clone();
     thread::spawn(move || {
         super::super::transport::udp::sink::receive_loop(
             &socket,
@@ -169,15 +171,120 @@ pub fn run_sink(
             key,
             nonce_salt,
             target_samples,
+            out_rate,
             out_channels,
             pipeline,
             prod,
             running_net,
+            trim_ppm_net,
         );
     });
 
-    let stream = build_output_stream(&device, &config, out_format, cons, underruns.clone())
-        .map_err(|e| e.to_string())?;
+    // The sink has no telemetry pipeline, and plumbing an AppHandle into the
+    // receive loop to log from it would be the wrong trade. This reports the
+    // trim occasionally instead: a value settling near zero means the two
+    // machines' clocks are well matched, and one pinned at the cap means the
+    // loop has railed and something else is wrong.
+    //
+    // Under a push/pop pattern close to exactly periodic, sampling the trim
+    // at a fixed 10 Hz step aliases a real, sustained oscillation into the
+    // reading — roughly 100 ppm peak-to-peak on a ~40 s period in the case
+    // that motivated this. The control loop itself is fine (occupancy and
+    // therefore standing latency hold; see the EMA at the occupancy input in
+    // trim.rs and BROADCAST_GUIDE.md's Clock drift section) — this is purely
+    // a reporting artifact created by sampling, and no controller filter
+    // constant removes it. So the fix lives here, not in the loop: smooth
+    // the *sampled* trim before deciding whether to log, and size the
+    // reporting threshold for a signal that legitimately wanders by tens of
+    // ppm rather than one that settles on a single number.
+    let trim_ppm_log = trim_ppm.clone();
+    let running_log = is_running.clone();
+    let app_log = app_handle.clone();
+    thread::spawn(move || {
+        // alpha = 0.1 on the 5 s samples gives a ~50 s EMA time constant:
+        // long enough to knock the ~40 s aliased oscillation down by about
+        // 7x in amplitude (simulated against the reviewer's push/pop case),
+        // short enough to still track a genuine drift trend within the ~2
+        // minutes the guide already documents for the loop to settle. This
+        // EMA only decides when to log — it is not fed back into the trim.
+        const REPORT_EMA_ALPHA: f64 = 0.1;
+        // ppm of change in the smoothed value since the last routine report.
+        const REPORT_THRESHOLD_PPM: f64 = 10.0;
+        // Floor on how often routine (non-clamp) reports can fire.
+        const MIN_REPORT_INTERVAL: Duration = Duration::from_secs(30);
+
+        let mut smoothed: Option<f64> = None;
+        let mut last_reported = 0.0f64;
+        let mut last_report_at: Option<Instant> = None;
+        let mut was_clamped = false;
+        'outer: while running_log.load(Ordering::Relaxed) {
+            // Wait in slices rather than one 5s block, so shutdown is noticed
+            // about as fast as the receive thread notices it.
+            for _ in 0..10 {
+                thread::sleep(Duration::from_millis(500));
+                if !running_log.load(Ordering::Relaxed) {
+                    break 'outer;
+                }
+            }
+            let ppm = trim_ppm_log.load(Ordering::Relaxed);
+
+            // The clamp is the "something else is wrong" signal, and it must
+            // reach the operator promptly regardless of smoothing or the
+            // routine rate limit: check the raw sample, not the EMA, and
+            // report once per entry into the railed state rather than once
+            // per sample while it persists.
+            let is_clamped = (ppm as f64).abs() >= MAX_TRIM_PPM;
+            if is_clamped {
+                if !was_clamped {
+                    emit_log(
+                        &app_log,
+                        "warning",
+                        format!(
+                            "Clock drift correction: {ppm} ppm (at limit — check clocks/network)"
+                        ),
+                    );
+                    last_reported = ppm as f64;
+                    last_report_at = Some(Instant::now());
+                }
+                was_clamped = true;
+                smoothed = Some(ppm as f64);
+                continue;
+            }
+            was_clamped = false;
+
+            let s = match smoothed {
+                Some(prev) => REPORT_EMA_ALPHA * (ppm as f64) + (1.0 - REPORT_EMA_ALPHA) * prev,
+                None => ppm as f64,
+            };
+            smoothed = Some(s);
+
+            let interval_elapsed = last_report_at
+                .map(|t| t.elapsed() >= MIN_REPORT_INTERVAL)
+                .unwrap_or(true);
+            if (s - last_reported).abs() > REPORT_THRESHOLD_PPM && interval_elapsed {
+                emit_log(
+                    &app_log,
+                    "info",
+                    format!("Clock drift correction: {:.0} ppm", s),
+                );
+                last_reported = s;
+                last_report_at = Some(Instant::now());
+            }
+        }
+    });
+
+    // Both threads above are already running. If the stream fails to open we
+    // return without ever handing `is_running` to a caller who could clear it,
+    // so they would run for the life of the process — and the monitor would
+    // keep writing "Clock drift correction" into the Logs view every 5 s for a
+    // sink that never started, once per retry. Clear it on the way out.
+    let stream = match build_output_stream(&device, &config, out_format, cons, underruns.clone()) {
+        Ok(stream) => stream,
+        Err(e) => {
+            is_running.store(false, Ordering::Relaxed);
+            return Err(e.to_string());
+        }
+    };
 
     Ok((
         stream,
