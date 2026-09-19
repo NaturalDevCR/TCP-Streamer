@@ -95,7 +95,16 @@ impl StereoResampler {
         self.step = self.base_step * (1.0 + ppm * 1e-6);
     }
 
-    /// True when in_rate == out_rate (process() copies verbatim).
+    /// True when `process()` copies its input verbatim instead of
+    /// interpolating.
+    ///
+    /// This is a property of the CONSTRUCTOR, not of the rates: only
+    /// [`new`](Self::new) sets it, and only when `in_rate == out_rate`.
+    /// [`new_adaptive`](Self::new_adaptive) always returns `false`, equal
+    /// rates included, because a trimmable resampler must never have an
+    /// unprimed fast path to fall out of. Since `SinkPipeline` builds with
+    /// `new_adaptive`, its own `is_passthrough` shortcut is unreachable today
+    /// — read this before concluding otherwise.
     pub fn is_passthrough(&self) -> bool {
         self.passthrough
     }
@@ -679,9 +688,43 @@ mod tests {
             "new_adaptive() must never short-circuit"
         );
 
+        // Output pinned to literals rather than compared against
+        // `new_adaptive`: a change that regressed BOTH constructors identically
+        // would satisfy a sibling comparison and still have moved Snapcast.
+        // These were generated from the current implementation and stand in for
+        // pre-branch behaviour; the ramp fed by `run_chunks` makes every one of
+        // them a distinct, order-sensitive value.
         let mut plain = StereoResampler::new(44_100, 48_000);
-        let mut adaptive = StereoResampler::new_adaptive(44_100, 48_000);
         let (_, a) = run_chunks(&mut plain, 20, 256);
+        assert_eq!(a.len(), 11_142, "output length must not move");
+        assert_eq!(
+            &a[..8],
+            &[
+                1.0f32,
+                -1.0,
+                1.915_717_4,
+                -1.915_717_4,
+                2.8375,
+                -2.8375,
+                3.756_25,
+                -3.756_25
+            ],
+            "the first frames (priming included) must not move"
+        );
+        assert_eq!(
+            (a[1000], a[1001], a[5000], a[5001]),
+            (460.375f32, -460.375, 2297.875, -2297.875),
+            "mid-stream interpolation must not move"
+        );
+        assert_eq!(
+            (a[a.len() - 2], a[a.len() - 1]),
+            (5118.4375f32, -5118.4375),
+            "the accumulated fractional position must not move"
+        );
+
+        // Secondary: the adaptive constructor still agrees at trim zero, so the
+        // sink and the source see the same stream when nothing is trimming.
+        let mut adaptive = StereoResampler::new_adaptive(44_100, 48_000);
         let (_, b) = run_chunks(&mut adaptive, 20, 256);
         assert_eq!(a, b, "at trim zero the two constructors must agree exactly");
     }

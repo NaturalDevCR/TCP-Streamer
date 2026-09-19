@@ -171,6 +171,7 @@ pub fn run_sink(
             key,
             nonce_salt,
             target_samples,
+            out_rate,
             out_channels,
             pipeline,
             prod,
@@ -210,8 +211,18 @@ pub fn run_sink(
         }
     });
 
-    let stream = build_output_stream(&device, &config, out_format, cons, underruns.clone())
-        .map_err(|e| e.to_string())?;
+    // Both threads above are already running. If the stream fails to open we
+    // return without ever handing `is_running` to a caller who could clear it,
+    // so they would run for the life of the process — and the monitor would
+    // keep writing "Clock drift correction" into the Logs view every 5 s for a
+    // sink that never started, once per retry. Clear it on the way out.
+    let stream = match build_output_stream(&device, &config, out_format, cons, underruns.clone()) {
+        Ok(stream) => stream,
+        Err(e) => {
+            is_running.store(false, Ordering::Relaxed);
+            return Err(e.to_string());
+        }
+    };
 
     Ok((
         stream,

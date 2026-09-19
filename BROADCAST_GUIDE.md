@@ -71,9 +71,15 @@ The default is 250 ms, which suits a quiet wired LAN. Raise it if the dashboard 
 
 The Mac's capture clock and the Windows playback clock are independent. Nothing synchronises them, and they will diverge slowly.
 
-TCP Streamer absorbs that divergence continuously, by adjusting its resampling ratio a few parts per million so the two clocks stay matched. The correction is gradual and inaudible — there is no dropped audio and no inserted silence while it works. You can watch it in the Logs view: a value settling near zero means your two machines happen to have well-matched clocks.
+TCP Streamer absorbs that divergence continuously, by adjusting its resampling ratio a few parts per million so the two clocks stay matched. Nothing is dropped and no silence is inserted while it works.
 
-A coarse correction still exists for excursions too large for that to absorb — a network stall, or a device glitch. Those drop a small chunk or insert a brief silence, which is audible, but they fire only when the buffer has moved far from its target. On a wired link you should not hear one.
+This is not free, but at the corrections involved it is inaudible. Interpolating between samples costs a little high-frequency energy, and the amount varies as the correction varies — in principle a very slow, very shallow wobble on the top octave. The size of it scales with the size of the correction, and two ordinary crystals sit a few parts per million apart, which is nothing. A correction sitting at tens of ppm and climbing is the case to look at, and it means one of the two machines has a clock worth investigating.
+
+Watch it in the Logs view, reported as **Clock drift correction: N ppm**. A value settling near zero means your two machines happen to have well-matched clocks. A value pinned at 200 means the loop has run out of range and something else is wrong.
+
+**When can you measure?** Immediately. The sink starts at its configured latency rather than working up to it, so the number you set is the number you have from the first second of audio. Give the link a minute anyway, so the drift correction has settled and any jitter has shown itself — it converges within about half a minute of the first audio, and well inside that minute. After that the standing latency stays put for the show, which is what makes a once-per-venue A/V measurement hold.
+
+A coarse correction still exists for excursions too large for the fine one to absorb — a network stall, or a device glitch. Those drop a small chunk or insert a brief silence, which is audible, but they fire only when the buffer has moved far from its target: past 1.75x or below 0.25x of your fixed latency. On a wired link that has already been watched behave, you should not hear one.
 
 ## Limits
 

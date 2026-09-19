@@ -10,10 +10,12 @@ All notable changes to TCP Streamer are documented in this file.
 
 - **Broadcast latency profile** — A fixed latency target (250 ms default, 400 ms under loopback capture) that does not drift, for live production where a measured audio/video offset must stay valid for a whole show. It ignores the Adaptive Buffer setting by design. A **Fixed latency (ms)** field adjusts the target between 50 and 2000 ms; under loopback capture the target is floored at 400 ms, because loopback needs the extra buffering and this profile has no adaptation to fall back on.
 - **[BROADCAST_GUIDE.md](BROADCAST_GUIDE.md)** — Covers the two-machine DAW-to-switcher scenario end to end.
-- **Continuous clock-drift correction** — The sink now tracks the source's clock by nudging its resampling ratio a few parts per million, instead of dropping a chunk of audio or inserting silence. Ordinary drift is absorbed inaudibly. Drop/insert remains as a safety net for large excursions such as a network stall. The active correction is reported in the Logs view.
+- **Continuous clock-drift correction** — The sink now tracks the source's clock by nudging its resampling ratio a few parts per million, instead of dropping a chunk of audio or inserting silence. Ordinary drift is absorbed inaudibly. Drop/insert remains as a safety net for large excursions such as a network stall. The correction loop's gains are derived from the buffer target and the device rate, so it settles within about half a minute at any supported latency instead of hunting. The active correction is reported in the Logs view.
 
 ### Fixed
 
+- The sink's playback buffer is now prefilled to its configured latency when the stream starts, so the standing latency begins at the value you set instead of climbing to it over several minutes. A Broadcast audio/video offset measured right after startup is now valid.
+- A sink whose output stream failed to open left its receive and drift-monitor threads running, and the monitor kept writing `Clock drift correction` entries into the Logs view for a sink that never started — one extra thread and one extra stream of entries per retry.
 - Custom latency settings were silently ignored in sink mode — `start_sink` passed only the profile name, so the sink resolved through a function that falls back to Balanced for any unrecognized key, including `custom`. The de-jitter target and packet-loss window were both derived from the wrong parameters. Profile resolution now happens in one shared function used by both the source and the sink.
 
 ### Changed
