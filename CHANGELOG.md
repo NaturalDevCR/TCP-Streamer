@@ -8,7 +8,7 @@ All notable changes to TCP Streamer are documented in this file.
 
 ### Added
 
-- **Broadcast latency profile** — A fixed latency target (250 ms default, 400 ms under loopback capture) that does not drift, for live production where a measured audio/video offset must stay valid for a whole show. It ignores the Adaptive Buffer setting by design. A **Fixed latency (ms)** field adjusts the target between 50 and 2000 ms.
+- **Broadcast latency profile** — A fixed latency target (250 ms default, 400 ms under loopback capture) that does not drift, for live production where a measured audio/video offset must stay valid for a whole show. It ignores the Adaptive Buffer setting by design. A **Fixed latency (ms)** field adjusts the target between 50 and 2000 ms; under loopback capture the target is floored at 400 ms, because loopback needs the extra buffering and this profile has no adaptation to fall back on.
 - **[BROADCAST_GUIDE.md](BROADCAST_GUIDE.md)** — Covers the two-machine DAW-to-switcher scenario end to end.
 
 ### Fixed
