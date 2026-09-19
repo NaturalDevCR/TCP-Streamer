@@ -104,6 +104,7 @@ pub fn start_sink(
     output_device: String,
     source_addr: String,
     latency_profile: String,
+    overrides: super::engine::latency::LatencyOverrides,
     psk: String,
 ) -> Result<(), AudioError> {
     state
@@ -114,6 +115,7 @@ pub fn start_sink(
             output_device,
             source_addr,
             latency_profile,
+            overrides,
             psk,
             app_handle: Box::new(app_handle),
         })

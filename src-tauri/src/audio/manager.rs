@@ -39,6 +39,7 @@ pub enum AudioCommand {
         output_device: String,
         source_addr: String,
         latency_profile: String,
+        overrides: super::engine::latency::LatencyOverrides,
         psk: String,
         app_handle: Box<AppHandle>,
     },
@@ -163,6 +164,7 @@ impl AudioState {
                         output_device,
                         source_addr,
                         latency_profile,
+                        overrides,
                         psk,
                         app_handle,
                     }) => {
@@ -186,6 +188,7 @@ impl AudioState {
                             output_device,
                             source_addr,
                             latency_profile,
+                            overrides,
                             psk,
                             (*app_handle).clone(),
                         ) {

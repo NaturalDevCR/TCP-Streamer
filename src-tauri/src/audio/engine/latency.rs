@@ -327,4 +327,24 @@ mod tests {
             params("broadcast", false)
         );
     }
+
+    #[test]
+    fn sink_custom_profile_is_not_silently_balanced() {
+        // Regression: the sink used to call params() directly, and params() falls
+        // back to "balanced" for any unknown key — including "custom". The user's
+        // settings were discarded without a warning.
+        let custom = resolve(
+            "custom",
+            false,
+            LatencyOverrides {
+                ring_ms: Some(3000),
+                min_buffer_ms: Some(150),
+                max_buffer_ms: Some(900),
+                chunk_size: Some(256),
+                fixed_latency_ms: None,
+            },
+        );
+        assert_ne!(custom, params("balanced", false));
+        assert_eq!(custom.adaptive_min_ms, 150);
+    }
 }
