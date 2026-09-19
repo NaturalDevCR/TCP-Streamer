@@ -1,6 +1,6 @@
 # TCP Streamer
 
-> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture, send, receive, and play back audio over TCP or encrypted Native UDP with sub-second latency.
+> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with sub-second latency.
 
 ![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
