@@ -198,11 +198,31 @@ mod tests {
             let mut occupancy = TARGET;
             let k = SAMPLES_PER_TICK * 1e-6;
             let mut worst_deviation = 0.0f32;
-            for _ in 0..1800 {
+            let mut trim_at_600 = 0.0f64;
+            for tick in 0..1800 {
                 let trim = c.update(occupancy);
                 occupancy += ((disturbance - trim) * k) as f32;
                 worst_deviation = worst_deviation.max((occupancy - TARGET).abs());
+                if tick == 599 {
+                    trim_at_600 = trim;
+                }
             }
+            // Checkpoint on the SHAPE of the response, not just its endpoint.
+            // Tick 600 (60 s) is where a correctly-damped loop and an undamped
+            // one diverge most clearly, well before either reaches the 180 s
+            // endpoint below: a correctly-damped loop is mid-transient there
+            // (measured ~7.7 ppm from the disturbance), while the pre-fix,
+            // essentially undamped gains are still only barely off zero
+            // (~42.5 ppm from the disturbance) because their ~12-minute hunt
+            // period hasn't turned yet. The endpoint bound alone let those
+            // broken gains slip through at 2.35 ppm against the 2 ppm bound
+            // below, purely because 1800 ticks happened to land near a
+            // favorable point in that slow hunt.
+            assert!(
+                (trim_at_600 - disturbance).abs() < 20.0,
+                "after 60 s the trim {trim_at_600} should already be within 20 ppm of the \
+                 {disturbance} ppm offset"
+            );
             assert!(
                 (c.trim_ppm - disturbance).abs() < 2.0,
                 "after 180 s the trim {} should be within 2 ppm of the {disturbance} ppm offset",
