@@ -85,6 +85,30 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The release body used to be a hardcoded placeholder, so every published
+      # release said "See the assets" and nothing about what changed. Pull the
+      # matching CHANGELOG section instead, and fail the build if there isn't
+      # one — a release with no notes should not be publishable by accident.
+      - name: Extract release notes from the changelog
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes=$(awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+            echo "::error::CHANGELOG.md has no section for [$version]. Add one before tagging $GITHUB_REF_NAME."
+            exit 1
+          fi
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            printf '%s\n' "$notes"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -92,6 +116,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "TCP Streamer ${{ github.ref_name }}"
-          releaseBody: "See the assets to download and install this version."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
