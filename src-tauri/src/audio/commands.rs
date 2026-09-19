@@ -45,6 +45,7 @@ pub fn start_stream(
     enable_adaptive_buffer: bool,
     min_buffer_ms: u32,
     max_buffer_ms: u32,
+    fixed_latency_ms: u32,
     latency_profile: String,
     allowlist: String,
     transport: String,
@@ -67,6 +68,7 @@ pub fn start_stream(
         enable_adaptive_buffer,
         min_buffer_ms,
         max_buffer_ms,
+        fixed_latency_ms,
         latency_profile,
         allowlist,
         transport,
@@ -102,6 +104,7 @@ pub fn start_sink(
     output_device: String,
     source_addr: String,
     latency_profile: String,
+    overrides: super::engine::latency::LatencyOverrides,
     psk: String,
 ) -> Result<(), AudioError> {
     state
@@ -112,6 +115,7 @@ pub fn start_sink(
             output_device,
             source_addr,
             latency_profile,
+            overrides,
             psk,
             app_handle: Box::new(app_handle),
         })

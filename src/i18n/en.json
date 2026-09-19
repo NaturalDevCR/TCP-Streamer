@@ -92,6 +92,9 @@
     "latencyBalanced": "Balanced",
     "latencyRobust": "Robust",
     "latencyCustom": "Custom",
+    "latencyBroadcast": "Broadcast (fixed latency)",
+    "fixedLatency": "Fixed latency (ms)",
+    "broadcastNote": "Latency is held constant so the audio/video offset stays stable for the whole show. The adaptive buffer setting is ignored.",
     "ringBufferDuration": "Ring Buffer (ms)",
     "chunkSize": "Chunk Size (samples)",
     "minBuffer": "Min Buffer (ms)",
@@ -112,7 +115,8 @@
       "chunkSize": "Sets samples handled per network write. Smaller chunks can reduce latency but increase processing overhead.",
       "adaptiveBuffer": "Automatically adjusts buffering within the configured limits as network jitter changes.",
       "minBuffer": "Sets the lowest buffer duration the adaptive controller may use when the network is stable.",
-      "maxBuffer": "Sets the highest buffer duration the adaptive controller may use during network instability."
+      "maxBuffer": "Sets the highest buffer duration the adaptive controller may use during network instability.",
+      "fixedLatency": "The exact latency to hold, in milliseconds (50-2000). Lower values need a wired network: nothing will adapt if the link cannot keep up."
     }
   },
   "logs": {

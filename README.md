@@ -1,6 +1,6 @@
 # TCP Streamer
 
-> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture, send, receive, and play back audio over TCP or encrypted Native UDP with sub-second latency.
+> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with sub-second latency.
 
 ![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
@@ -39,7 +39,7 @@
 1. **Source** — Capture audio from an input device and send it over the network.
 2. **Sink** — Receive an audio stream from the network and play it through a local output device.
 
-Both roles support **TCP** (max compatibility, HTTP/WAV streaming) and **Native UDP** (low latency, encryption, mDNS discovery).
+The **source** role supports **TCP** (max compatibility, HTTP/WAV streaming) and **Native UDP** (low latency, encryption, mDNS discovery). The **sink** role requires **Native UDP** — it subscribes to a Native UDP source and has no TCP receive path.
 
 ### How It Works
 
@@ -51,7 +51,7 @@ Both roles support **TCP** (max compatibility, HTTP/WAV streaming) and **Native 
 └─────────────┘      └──────────────┘      └─────────────┘
 
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  TCP/UDP    │      │     TCP      │      │   Audio     │
+│  Native UDP │      │     TCP      │      │   Audio     │
 │  Source     │─────>│   Streamer   │─────>│   Output    │
 │             │      │   (Sink)     │      │  (Device)   │
 └─────────────┘      └──────────────┘      └─────────────┘
@@ -124,7 +124,8 @@ Best for universal compatibility. Works with Snapcast, Mopidy, VLC, browsers, an
 | Role   | Behavior                                                                                      |
 | ------ | --------------------------------------------------------------------------------------------- |
 | Source | Connects to a remote TCP server or listens for incoming TCP connections (client/server mode). |
-| Sink   | Connects to a TCP audio source and plays received audio.                                      |
+
+> **TCP is a source-only transport.** A TCP source is consumed by external receivers — Snapcast, VLC, a browser — not by TCP Streamer's own sink role. To stream between two TCP Streamer instances, use Native UDP on both ends.
 
 In server mode, TCP Streamer auto-detects HTTP clients and serves a `.wav` stream for browser playback.
 
@@ -196,6 +197,16 @@ Send audio from a microphone or monitoring device to a central server for record
 
 In TCP Server mode, open the HTTP URL (e.g., `http://LAN_IP:1704/stream.wav`) in any web browser to listen to the live stream.
 
+### 5. Live Production (Two Machines)
+
+Send a stereo program bus from a DAW on one machine to a live production switcher on another — for example Logic Pro on macOS feeding vMix on Windows for a YouTube Live stream.
+
+```bash
+Mac (Logic → Source, UDP, Broadcast) ──LAN──▶ Windows (Sink, Broadcast) → vMix
+```
+
+Full walkthrough, including audio/video sync procedure: **[BROADCAST_GUIDE.md](BROADCAST_GUIDE.md)**.
+
 ---
 
 ## Installation
@@ -251,6 +262,8 @@ pnpm tauri build
 
 ### 2. Select Transport
 
+Transport selection applies to the **source** role. A sink always uses Native UDP, so the app hides this choice when the sink role is selected.
+
 - **TCP** — Maximum compatibility with any audio receiver (Snapcast, VLC, browsers). Choose Client or Server mode.
 - **Native UDP** — Low latency with optional mDNS discovery and encryption. Ideal for TCP Streamer-to-TCP Streamer links.
 
@@ -284,13 +297,16 @@ Controls coordinated ring buffer and chunk size presets. The adaptive controller
 | **Ultra-low** | 2000      | 100 – 500                       | 256    | Wired LAN, minimal latency                    |
 | **Balanced**  | 4000      | 200 – 1500                      | 512    | Default; good trade-off for most networks     |
 | **Robust**    | 8000      | 500 – 3000                      | 1024   | Unstable/WiFi networks, high jitter tolerance |
+| **Broadcast** | 3000+     | Fixed (no adaptation)           | 512    | Live production; stable A/V offset            |
 | **Custom**    | Manual    | Manual (Min/Max Buffer sliders) | Manual | Full control over all parameters              |
+
+The **Broadcast** profile holds its latency target at a constant 250 ms (400 ms for loopback capture), adjustable with the **Fixed latency (ms)** field. It ignores the Adaptive Buffer setting on purpose: a target that moves during a show breaks any audio/video offset the operator has compensated for. Under loopback capture the target is floored at 400 ms regardless of the field, because loopback needs the extra buffering and the broadcast profile has no adaptation to fall back on. See [BROADCAST_GUIDE.md](BROADCAST_GUIDE.md).
 
 Loopback (WASAPI) capture uses higher floors in each profile for extra stability.
 
 ### Connection Settings
 
-- **Transport:** TCP (universal) or Native UDP (low-latency + discovery + encryption).
+- **Transport (Source):** TCP (universal) or Native UDP (low-latency + discovery + encryption). A sink always uses Native UDP.
 - **Mode (TCP):** Client connects to a remote receiver; Server listens for incoming connections.
 - **Target Address:** Remote `host:port` for TCP client or Native UDP sink.
 - **Allowlist:** Comma-separated IP/CIDR entries to restrict server access (empty = allow all).
@@ -392,11 +408,10 @@ Input Device → cpal capture (real-time-safe) → Ring Buffer (f32, stereo)
   → Network
 ```
 
-**Sink (TCP/UDP):**
+**Sink (Native UDP):**
 
 ```
-Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
-  → s16le→f32 Decoder → Ring Buffer
+Network → de-jitter + crypto → s16le→f32 Decoder → Ring Buffer
   → Playback (cpal output device with format negotiation)
 ```
 

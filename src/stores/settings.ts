@@ -23,6 +23,7 @@ interface SettingsDict {
   max_buffer?: number;
   network_preset?: string;
   latency_profile?: string;
+  fixed_latency_ms?: number;
   allowlist?: string;
   mode?: string;
   role?: string;
@@ -30,6 +31,21 @@ interface SettingsDict {
   output_device?: string;
   source_addr?: string;
   psk?: string;
+}
+
+/** Bounds mirror FIXED_LATENCY_MIN_MS / FIXED_LATENCY_MAX_MS in latency.rs. */
+export const FIXED_LATENCY_MIN_MS = 50;
+export const FIXED_LATENCY_MAX_MS = 2000;
+
+/**
+ * Clamps a fixed-latency value into the range the backend accepts. A number
+ * input yields 0 for an empty field and NaN for a stray "-" or "e", and either
+ * would be silently discarded on the next load — so nothing invalid is ever
+ * persisted or sent.
+ */
+export function clampFixedLatency(value: number): number {
+  if (!Number.isFinite(value)) return 250;
+  return Math.min(Math.max(Math.round(value), FIXED_LATENCY_MIN_MS), FIXED_LATENCY_MAX_MS);
 }
 
 export const useSettingsStore = defineStore("settings", () => {
@@ -82,6 +98,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const dscpStrategy = ref("voip");
   const chunkSize = ref(512);
   const latencyProfile = ref("balanced");
+  const fixedLatencyMs = ref(250);
 
   // Profiles
   const profiles = ref<Record<string, SettingsDict>>({});
@@ -197,6 +214,8 @@ export const useSettingsStore = defineStore("settings", () => {
     if (s.min_buffer) minBuffer.value = s.min_buffer as number;
     if (s.max_buffer) maxBuffer.value = s.max_buffer as number;
     if (s.latency_profile) latencyProfile.value = s.latency_profile as string;
+    if (typeof s.fixed_latency_ms === "number")
+      fixedLatencyMs.value = clampFixedLatency(s.fixed_latency_ms as number);
     if (s.allowlist) allowlist.value = s.allowlist as string;
     if (s.mode) mode.value = s.mode as string;
     if (s.role) role.value = s.role as string;
@@ -232,6 +251,7 @@ export const useSettingsStore = defineStore("settings", () => {
       min_buffer: minBuffer.value,
       max_buffer: maxBuffer.value,
       latency_profile: latencyProfile.value,
+      fixed_latency_ms: clampFixedLatency(fixedLatencyMs.value),
       allowlist: allowlist.value,
       mode: mode.value,
       role: role.value,
@@ -338,6 +358,7 @@ export const useSettingsStore = defineStore("settings", () => {
     dscpStrategy,
     chunkSize,
     latencyProfile,
+    fixedLatencyMs,
     allowlist,
     profiles,
     currentProfile,

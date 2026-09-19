@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke, listen } from "../composables/useTauri";
-import { useSettingsStore } from "./settings";
+import { useSettingsStore, clampFixedLatency } from "./settings";
 import type { LogEntry, Toast, QualityEvent } from "../types/events";
 
 export const useStreamStore = defineStore("stream", () => {
@@ -103,6 +103,13 @@ export const useStreamStore = defineStore("stream", () => {
           outputDevice: settings.outputDevice,
           sourceAddr: settings.sourceAddr,
           latencyProfile: settings.latencyProfile,
+          overrides: {
+            ringMs: settings.ringBufferDuration,
+            minBufferMs: settings.minBuffer,
+            maxBufferMs: settings.maxBuffer,
+            chunkSize: settings.chunkSize,
+            fixedLatencyMs: clampFixedLatency(settings.fixedLatencyMs),
+          },
           psk: settings.psk,
         });
         isStreaming.value = true;
@@ -145,6 +152,7 @@ export const useStreamStore = defineStore("stream", () => {
         enableAdaptiveBuffer: settings.adaptiveBuffer,
         minBufferMs: settings.minBuffer,
         maxBufferMs: settings.maxBuffer,
+        fixedLatencyMs: clampFixedLatency(settings.fixedLatencyMs),
         format: settings.format,
         latencyProfile: settings.latencyProfile,
         allowlist: settings.allowlist,

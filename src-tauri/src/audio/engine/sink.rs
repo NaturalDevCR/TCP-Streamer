@@ -19,6 +19,7 @@ pub fn run_sink(
     output_device_name: String,
     source_addr: String,
     latency_profile: String,
+    overrides: super::latency::LatencyOverrides,
     psk: String,
     app_handle: AppHandle,
 ) -> Result<(cpal::Stream, StreamStats), String> {
@@ -136,7 +137,9 @@ pub fn run_sink(
     // the standing occupancy the drift controller maintains is the profile's
     // latency FLOOR, not the capacity.
     let ch = out_channels.max(1) as usize;
-    let lp = super::latency::params(&latency_profile, false);
+    // `false` for is_loopback: loopback is a capture-side concern and the sink
+    // never captures. Overrides come from the user's Custom or Broadcast settings.
+    let lp = super::latency::resolve(&latency_profile, false, overrides);
     let ring_samples =
         ((out_rate as usize) * ch * (lp.adaptive_max_ms.max(lp.ring_ms) as usize) / 1000) / ch * ch;
     let rb = HeapRb::<f32>::new(ring_samples.max(ch * 512));

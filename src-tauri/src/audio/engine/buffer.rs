@@ -115,4 +115,15 @@ mod tests {
         assert_eq!(a.on_tick(false), None);
         assert_eq!(a.on_tick(false), Some(3000));
     }
+
+    #[test]
+    fn target_never_moves_when_band_collapsed() {
+        // The broadcast profile relies on this: min == max means on_tick can
+        // never report a change, whether or not glitches occur.
+        let mut c = AdaptiveBuffer::new(250, 250, 500, 250, 3);
+        for i in 0..20 {
+            assert_eq!(c.on_tick(i % 2 == 0), None);
+            assert_eq!(c.target_ms(), 250);
+        }
+    }
 }

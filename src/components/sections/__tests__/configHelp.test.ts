@@ -37,6 +37,7 @@ const sections = [
       "adaptiveBuffer",
       "minBuffer",
       "maxBuffer",
+      "fixedLatency",
     ],
   ],
   [
