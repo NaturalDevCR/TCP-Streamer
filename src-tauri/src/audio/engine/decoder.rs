@@ -6,8 +6,8 @@
 pub fn decode_pcm_i16_le_to_f32(bytes: &[u8], out: &mut Vec<f32>) {
     out.clear();
     out.reserve(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let v = i16::from_le_bytes([pair[0], pair[1]]);
+    for pair in bytes.as_chunks::<2>().0 {
+        let v = i16::from_le_bytes(*pair);
         out.push(v as f32 / 32768.0);
     }
 }

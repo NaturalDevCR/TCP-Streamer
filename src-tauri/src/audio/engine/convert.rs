@@ -136,8 +136,7 @@ impl StereoResampler {
         self.frames.clear();
         self.frames.reserve(3 + input_frames);
         self.frames.extend_from_slice(&self.history);
-        self.frames
-            .extend(input.chunks_exact(2).map(|frame| [frame[0], frame[1]]));
+        self.frames.extend(input.as_chunks::<2>().0.iter().copied());
 
         let available = (self.frames.len() as f64 - 2.0 - self.pos).max(0.0);
         out.reserve((available / self.step).ceil() as usize * 2);
@@ -235,13 +234,13 @@ pub fn stereo_to_channels(input: &[f32], out_channels: usize, out: &mut Vec<f32>
     out.reserve(frames * out_channels);
     match out_channels {
         1 => {
-            for frame in input[..frames * 2].chunks_exact(2) {
+            for frame in input[..frames * 2].as_chunks::<2>().0 {
                 out.push((frame[0] + frame[1]) * 0.5);
             }
         }
         2 => out.extend_from_slice(&input[..frames * 2]),
         n => {
-            for frame in input[..frames * 2].chunks_exact(2) {
+            for frame in input[..frames * 2].as_chunks::<2>().0 {
                 out.push(frame[0]);
                 out.push(frame[1]);
                 for _ in 2..n {
