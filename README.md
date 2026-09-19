@@ -51,7 +51,7 @@ The **source** role supports **TCP** (max compatibility, HTTP/WAV streaming) and
 └─────────────┘      └──────────────┘      └─────────────┘
 
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  TCP/UDP    │      │     TCP      │      │   Audio     │
+│  Native UDP │      │     TCP      │      │   Audio     │
 │  Source     │─────>│   Streamer   │─────>│   Output    │
 │             │      │   (Sink)     │      │  (Device)   │
 └─────────────┘      └──────────────┘      └─────────────┘
@@ -306,7 +306,7 @@ Loopback (WASAPI) capture uses higher floors in each profile for extra stability
 
 ### Connection Settings
 
-- **Transport:** TCP (universal) or Native UDP (low-latency + discovery + encryption).
+- **Transport (Source):** TCP (universal) or Native UDP (low-latency + discovery + encryption). A sink always uses Native UDP.
 - **Mode (TCP):** Client connects to a remote receiver; Server listens for incoming connections.
 - **Target Address:** Remote `host:port` for TCP client or Native UDP sink.
 - **Allowlist:** Comma-separated IP/CIDR entries to restrict server access (empty = allow all).
@@ -408,11 +408,10 @@ Input Device → cpal capture (real-time-safe) → Ring Buffer (f32, stereo)
   → Network
 ```
 
-**Sink (TCP/UDP):**
+**Sink (Native UDP):**
 
 ```
-Network → [TCP: Connection trait read] / [UDP: de-jitter + crypto]
-  → s16le→f32 Decoder → Ring Buffer
+Network → de-jitter + crypto → s16le→f32 Decoder → Ring Buffer
   → Playback (cpal output device with format negotiation)
 ```
 
