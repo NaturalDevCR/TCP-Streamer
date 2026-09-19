@@ -103,6 +103,13 @@ export const useStreamStore = defineStore("stream", () => {
           outputDevice: settings.outputDevice,
           sourceAddr: settings.sourceAddr,
           latencyProfile: settings.latencyProfile,
+          overrides: {
+            ringMs: settings.ringBufferDuration,
+            minBufferMs: settings.minBuffer,
+            maxBufferMs: settings.maxBuffer,
+            chunkSize: settings.chunkSize,
+            fixedLatencyMs: settings.fixedLatencyMs,
+          },
           psk: settings.psk,
         });
         isStreaming.value = true;
@@ -145,6 +152,7 @@ export const useStreamStore = defineStore("stream", () => {
         enableAdaptiveBuffer: settings.adaptiveBuffer,
         minBufferMs: settings.minBuffer,
         maxBufferMs: settings.maxBuffer,
+        fixedLatencyMs: settings.fixedLatencyMs,
         format: settings.format,
         latencyProfile: settings.latencyProfile,
         allowlist: settings.allowlist,

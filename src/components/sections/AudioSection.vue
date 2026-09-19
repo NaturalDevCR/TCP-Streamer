@@ -82,9 +82,26 @@
             <SelectOption value="ultra-low" :label="t('audio.latencyUltraLow')" />
             <SelectOption value="balanced" :label="t('audio.latencyBalanced')" />
             <SelectOption value="robust" :label="t('audio.latencyRobust')" />
+            <SelectOption value="broadcast" :label="t('audio.latencyBroadcast')" />
             <SelectOption value="custom" :label="t('audio.latencyCustom')" />
           </Select>
         </Field>
+
+        <template v-if="settings.latencyProfile === 'broadcast'">
+          <Field :label="t('audio.fixedLatency')" :tooltip="t('audio.help.fixedLatency')">
+            <Input
+              v-model.number="settings.fixedLatencyMs"
+              type="number"
+              :min="50"
+              :max="2000"
+              :step="50"
+              :disabled="stream.isStreaming"
+            />
+          </Field>
+          <p class="text-xs text-[var(--color-text-muted)]">
+            {{ t("audio.broadcastNote") }}
+          </p>
+        </template>
 
         <p
           v-if="settings.latencyProfile === 'ultra-low' && settings.isLoopback"

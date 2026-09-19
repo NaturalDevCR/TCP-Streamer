@@ -47,6 +47,7 @@ describe("i18n catalog parity", () => {
         "adaptiveBuffer",
         "minBuffer",
         "maxBuffer",
+        "fixedLatency",
       ],
     ],
     ["settings", ["profile", "autoStart", "autoStream", "autoReconnect", "language"]],

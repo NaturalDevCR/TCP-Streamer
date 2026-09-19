@@ -92,6 +92,9 @@
     "latencyBalanced": "Balanceado",
     "latencyRobust": "Robusto",
     "latencyCustom": "Personalizado",
+    "latencyBroadcast": "Broadcast (latencia fija)",
+    "fixedLatency": "Latencia fija (ms)",
+    "broadcastNote": "La latencia se mantiene constante para que el desfase entre audio y video no cambie durante toda la transmisión. El ajuste de búfer adaptativo se ignora.",
     "ringBufferDuration": "Buffer circular (ms)",
     "chunkSize": "Tamaño de chunk (muestras)",
     "minBuffer": "Buffer mín (ms)",
@@ -112,7 +115,8 @@
       "chunkSize": "Define las muestras procesadas por escritura de red. Chunks menores reducen latencia pero aumentan el procesamiento.",
       "adaptiveBuffer": "Ajusta automáticamente el buffer dentro de los límites configurados según cambia el jitter de la red.",
       "minBuffer": "Define la menor duración que puede usar el controlador adaptativo cuando la red está estable.",
-      "maxBuffer": "Define la mayor duración que puede usar el controlador adaptativo durante inestabilidad de red."
+      "maxBuffer": "Define la mayor duración que puede usar el controlador adaptativo durante inestabilidad de red.",
+      "fixedLatency": "Latencia exacta a mantener, en milisegundos (50-2000). Los valores bajos requieren red cableada: nada se adaptará si el enlace no da abasto."
     }
   },
   "logs": {

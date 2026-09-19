@@ -23,6 +23,7 @@ interface SettingsDict {
   max_buffer?: number;
   network_preset?: string;
   latency_profile?: string;
+  fixed_latency_ms?: number;
   allowlist?: string;
   mode?: string;
   role?: string;
@@ -82,6 +83,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const dscpStrategy = ref("voip");
   const chunkSize = ref(512);
   const latencyProfile = ref("balanced");
+  const fixedLatencyMs = ref(250);
 
   // Profiles
   const profiles = ref<Record<string, SettingsDict>>({});
@@ -197,6 +199,7 @@ export const useSettingsStore = defineStore("settings", () => {
     if (s.min_buffer) minBuffer.value = s.min_buffer as number;
     if (s.max_buffer) maxBuffer.value = s.max_buffer as number;
     if (s.latency_profile) latencyProfile.value = s.latency_profile as string;
+    if (s.fixed_latency_ms) fixedLatencyMs.value = s.fixed_latency_ms as number;
     if (s.allowlist) allowlist.value = s.allowlist as string;
     if (s.mode) mode.value = s.mode as string;
     if (s.role) role.value = s.role as string;
@@ -232,6 +235,7 @@ export const useSettingsStore = defineStore("settings", () => {
       min_buffer: minBuffer.value,
       max_buffer: maxBuffer.value,
       latency_profile: latencyProfile.value,
+      fixed_latency_ms: fixedLatencyMs.value,
       allowlist: allowlist.value,
       mode: mode.value,
       role: role.value,
@@ -338,6 +342,7 @@ export const useSettingsStore = defineStore("settings", () => {
     dscpStrategy,
     chunkSize,
     latencyProfile,
+    fixedLatencyMs,
     allowlist,
     profiles,
     currentProfile,
