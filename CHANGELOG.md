@@ -4,7 +4,7 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
-## [Unreleased]
+## [2.4.0] — 2026-09-19
 
 ### Added
 
