@@ -4,13 +4,15 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
-## [3.0.0] — 2026-10-10
+## [3.0.1] — 2026-10-10
 
 ### Breaking changes
 
 - Native UDP v2 is incompatible with v1. Upgrade the source and receiver together. TCP/HTTP compatibility is unchanged.
 
 ### Fixed
+
+- Cross-platform slow-reader regression setup now observes actual socket backpressure; test code conforms to current stable Clippy.
 
 - Authoritative session acknowledgments, cancellable startup and cleanup, stale-event rejection, and readable native error messages.
 - Empty select options, isolated complete profiles/devices, persistence failures, keyboard shortcuts, translated states, and accessible responsive controls.

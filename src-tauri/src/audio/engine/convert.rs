@@ -330,7 +330,12 @@ mod tests {
             "expected about {expected_frames} frames, got {output_frames}"
         );
 
-        let left: Vec<f32> = output.chunks_exact(2).map(|frame| frame[0]).collect();
+        let left: Vec<f32> = output
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|frame| frame[0])
+            .collect();
         let crossings = count_zero_crossings(&left);
         let expected_crossings = (2.0 * 440.0 * seconds) as usize;
         let crossing_error =
@@ -413,7 +418,12 @@ mod tests {
         assert!(!output.is_empty());
 
         for channel in 0..2 {
-            let samples: Vec<f32> = output.chunks_exact(2).map(|frame| frame[channel]).collect();
+            let samples: Vec<f32> = output
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|frame| frame[channel])
+                .collect();
             for pair in samples.windows(2) {
                 let delta = pair[1] - pair[0];
                 assert!(
@@ -488,7 +498,7 @@ mod tests {
         for chunk in input.chunks(882 * 2) {
             p.process(chunk, &mut out);
             assert_eq!(out.len() % 6, 0, "output must be whole 6ch frames");
-            for frame in out.chunks_exact(6) {
+            for frame in out.as_chunks::<6>().0 {
                 assert_eq!(&frame[2..], &[0.0, 0.0, 0.0, 0.0], "rear channels silent");
             }
             total_frames += out.len() / 6;
@@ -536,7 +546,7 @@ mod tests {
         let mut resampler = StereoResampler::new(rate, 48_000);
         let output = process_random_chunks(&mut resampler, &input, 0xfeed_beef);
 
-        for frame in output.chunks_exact(2) {
+        for frame in output.as_chunks::<2>().0 {
             assert!(
                 (frame[0] + frame[1]).abs() < 1e-3,
                 "stereo mismatch: left={}, right={}",
@@ -663,7 +673,7 @@ mod tests {
         // order of magnitude of slack for interpolation and the ratio sweep.
         // Bound the collected channel before calling windows(): chaining
         // .collect().windows() on one line borrows from a temporary.
-        let left: Vec<f32> = produced.chunks_exact(2).map(|f| f[0]).collect();
+        let left: Vec<f32> = produced.as_chunks::<2>().0.iter().map(|f| f[0]).collect();
         let max_step = left
             .windows(2)
             .map(|w| (w[1] - w[0]).abs())

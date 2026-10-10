@@ -1029,7 +1029,7 @@ mod pipeline_tests {
         // Pitch check: zero crossings of L over the whole stream at 48k must
         // still be ~440Hz (2 crossings per cycle). A chipmunk regression
         // (channel/rate misinterpretation) blows way past the 2% tolerance.
-        let left: Vec<f32> = decoded.chunks_exact(2).map(|f| f[0]).collect();
+        let left: Vec<f32> = decoded.as_chunks::<2>().0.iter().map(|f| f[0]).collect();
         let crossings = left
             .windows(2)
             .filter(|p| (p[0] <= 0.0 && p[1] > 0.0) || (p[0] >= 0.0 && p[1] < 0.0))
@@ -1043,7 +1043,7 @@ mod pipeline_tests {
 
         // Channel integrity: R must stay the negation of L (junk channels and
         // interleave shifts would break this immediately).
-        for (i, f) in decoded.chunks_exact(2).enumerate().skip(8) {
+        for (i, f) in decoded.as_chunks::<2>().0.iter().enumerate().skip(8) {
             assert!(
                 (f[0] + f[1]).abs() < 2e-2,
                 "frame {i}: L={} R={} not mirrored",

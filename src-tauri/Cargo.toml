@@ -1,6 +1,6 @@
 [package]
 name = "tcp-streamer"
-version = "3.0.0"
+version = "3.0.1"
 description = "Cross-platform PCM audio streaming over TCP and authenticated native UDP"
 authors = ["NaturalDevCR contributors"]
 edition = "2021"

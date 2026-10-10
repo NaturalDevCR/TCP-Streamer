@@ -95,14 +95,36 @@ mod tests {
     #[test]
     fn slow_receiver_cannot_extend_audio_write_deadline() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        // Limit the advertised receive window before the handshake. Windows can
+        // otherwise accept a large loopback write despite a small send buffer.
+        socket2::SockRef::from(&listener)
+            .set_recv_buffer_size(1024)
+            .unwrap();
         let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (peer, _) = listener.accept().unwrap();
         let socket = socket2::SockRef::from(&stream);
         socket.set_send_buffer_size(1024).unwrap();
         let mut connection = TcpConnection::new(stream);
+        // Observe actual backpressure instead of assuming an OS buffer size.
+        let payload = vec![0; 64 * 1024];
+        let mut filled = 0;
+        let fill_start = std::time::Instant::now();
+        loop {
+            match connection.write(&payload) {
+                Ok(n) if n > 0 => filled += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                other => panic!("Unexpected socket prefill result: {other:?}"),
+            }
+            assert!(
+                filled < 64 * 1024 * 1024,
+                "Loopback never applied backpressure"
+            );
+            assert!(fill_start.elapsed() < std::time::Duration::from_secs(2));
+        }
         let start = std::time::Instant::now();
         let result = connection.write_all(&vec![0; 8 * 1024 * 1024]);
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
         assert!(start.elapsed() < std::time::Duration::from_secs(1));
         connection.close();
         drop(peer);
