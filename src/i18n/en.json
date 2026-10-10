@@ -1,5 +1,7 @@
 {
-  "app": { "name": "TCP Streamer" },
+  "app": {
+    "name": "TCP Streamer"
+  },
   "tooltip": {
     "moreInfo": "More information about {option}"
   },
@@ -46,7 +48,7 @@
     "modeClient": "Client (Send Audio to IP)",
     "modeServer": "Server (Listen for Connections)",
     "targetAddress": "Target address",
-    "targetAddressPlaceholder": "192.168.1.100:4953",
+    "targetAddressPlaceholder": "192.168.1.100",
     "listeningPort": "Listening Port",
     "port": "Port",
     "allowlist": "Allowlist",
@@ -92,9 +94,9 @@
     "latencyBalanced": "Balanced",
     "latencyRobust": "Robust",
     "latencyCustom": "Custom",
-    "latencyBroadcast": "Broadcast (fixed latency)",
-    "fixedLatency": "Fixed latency (ms)",
-    "broadcastNote": "Latency is held constant so the audio/video offset stays stable for the whole show. The adaptive buffer setting is ignored.",
+    "latencyBroadcast": "Broadcast (latency target)",
+    "fixedLatency": "Latency target (ms)",
+    "broadcastNote": "Target buffering latency for broadcast. Measured end-to-end latency also depends on devices and the network. Adaptive buffering is ignored.",
     "ringBufferDuration": "Ring Buffer (ms)",
     "chunkSize": "Chunk Size (samples)",
     "minBuffer": "Min Buffer (ms)",
@@ -169,5 +171,100 @@
     "profileExists": "Profile already exists",
     "profileDeleted": "Profile '{name}' deleted",
     "cannotDeleteDefault": "Cannot delete Default profile"
+  },
+  "session": {
+    "stopped": "Ready",
+    "starting": "Starting…",
+    "waiting": "Waiting for receiver",
+    "running": "Streaming",
+    "reconnecting": "Reconnecting…",
+    "error": "Error",
+    "failure": "Error: {error}",
+    "validation": {
+      "device": "Select an input device",
+      "outputDevice": "Select an output device",
+      "sourceAddress": "Enter the source address",
+      "target": "Enter the target address",
+      "port": "Enter a port from 1 to 65535"
+    },
+    "stopping": "Stopping…"
+  },
+  "quality": {
+    "excellent": "Excellent",
+    "good": "Good",
+    "fair": "Fair",
+    "poor": "Poor",
+    "degraded": "Network quality degraded to {score}",
+    "recovered": "Network quality recovered to {score}"
+  },
+  "operation": {
+    "refresh": "Refresh devices",
+    "searching": "Searching…",
+    "found": "{count} found",
+    "encrypted": "encrypted",
+    "noSources": "No sources found. Check that the source is running on this network.",
+    "dirty": "Unsaved changes",
+    "save": "Save changes",
+    "profileName": "Profile name",
+    "deleteConfirm": "Delete profile \"{name}\"?",
+    "switchConfirm": "Save changes before switching profile? Cancel keeps this profile.",
+    "paused": "Resume following",
+    "pause": "Pause following",
+    "export": "Export sanitized",
+    "import": "Import profile",
+    "importHelp": "Paste a version 1 exported profile. Secrets are excluded.",
+    "onboarding": "Choose Source to send microphone or system audio, or Receiver to play a native UDP source. Configure the device and endpoint in Connection, then start. TCP/HTTP sends unencrypted audio. Native UDP supports a shared secret.",
+    "locked": "The active session uses the settings saved at start. Stop before changing configuration.",
+    "microphone": "If no input appears, allow microphone access in your operating system privacy settings, then refresh.",
+    "effective": "Active configuration",
+    "none": "No active session",
+    "close": "Closing the window keeps TCP Streamer active in the system tray.",
+    "shortcuts": "Save: Ctrl/Cmd+S · Start/Stop: Ctrl/Cmd+Enter",
+    "sinkAudio": "The receiver negotiates sample rate and capture format with the source. Buffer settings apply locally.",
+    "secret": "Shared secrets remain in memory by default. Remembering a secret saves it unencrypted in local preferences; sanitized export always excludes it.",
+    "support": "Project support",
+    "rememberSecret": "Remember shared secret locally",
+    "noData": "No data",
+    "bufferResized": "Buffer resized to {ms} ms: {reason}",
+    "invalidBuffer": "Require 0 < minimum ≤ maximum ≤ ring capacity",
+    "occupancy": "Buffer occupancy",
+    "targetLatency": "Buffer target",
+    "authenticationFailures": "Authentication failures",
+    "lostFrames": "Lost audio frames",
+    "drift": "Clock correction",
+    "wireFormat": "Negotiated wire format",
+    "deviceFormat": "Opened device format",
+    "ringCapacity": "Ring capacity",
+    "frames": "frames",
+    "driverDefault": "Driver default",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "currentOutput": "Current playback format",
+    "currentWire": "Current wire format",
+    "requested": "Requested at start",
+    "underrunEvents": "Playback/capture underrun events",
+    "missingAudioFrames": "Missing playback frames",
+    "droppedAudioFrames": "Dropped audio frames",
+    "ringOccupancy": "Ring occupancy"
+  },
+  "preflight": {
+    "title": "Check before starting",
+    "scopeNote": "Checks configuration, device availability, DNS and local port binding. This does not capture audio, connect to a receiver or verify remote UDP reachability.",
+    "checking": "Checking…",
+    "check": "Run checks",
+    "stale": "Settings changed after this check. Run it again.",
+    "ready": "Checks passed. You can start manually.",
+    "notReady": "Resolve the failed checks before starting.",
+    "stages": {
+      "configuration": "Configuration",
+      "device": "Audio device",
+      "network": "Network",
+      "scope": "Check scope"
+    },
+    "status": {
+      "ok": "Passed",
+      "error": "Failed",
+      "warning": "Warning"
+    }
   }
 }

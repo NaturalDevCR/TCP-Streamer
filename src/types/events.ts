@@ -7,6 +7,8 @@ export interface LogEvent {
 
 /** Streaming quality metrics (honest signals) */
 export interface QualityEvent {
+  counter_unit?: "events/frames" | "frames/frames";
+  session_id?: number;
   score: number;
   rtt_ms: number | null;
   rtt_var_ms: number | null;
@@ -17,6 +19,15 @@ export interface QualityEvent {
 
 /** Periodic streaming statistics */
 export interface StatsEvent {
+  session_id?: number;
+  received?: boolean;
+  buffer_ms?: number;
+  target_ms?: number;
+  sample_rate?: number;
+  channels?: number;
+  auth_failures?: number;
+  lost_frames?: number;
+  trim_ppm?: number;
   uptime_seconds: number;
   bytes_sent: number;
   bitrate_kbps: number;
@@ -24,6 +35,7 @@ export interface StatsEvent {
 
 /** Buffer resize notification */
 export interface BufferResizeEvent {
+  session_id?: number;
   new_size_ms: number;
   reason: string;
 }

@@ -83,6 +83,34 @@ pub fn negotiate(candidates: &[ConfigCandidate], requested_rate: u32) -> Option<
         })
 }
 
+/// Match the devices exposed by enumeration across every available host.
+/// Prefer the default host when multiple hosts expose the same device name.
+pub fn find_device(name: &str, output: bool) -> Result<cpal::Device, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let mut hosts = vec![cpal::default_host()];
+    hosts.extend(
+        cpal::available_hosts()
+            .into_iter()
+            .filter_map(|id| cpal::host_from_id(id).ok()),
+    );
+    for host in hosts {
+        let devices = if output {
+            host.output_devices()
+        } else {
+            host.input_devices()
+        };
+        if let Ok(mut devices) = devices {
+            if let Some(device) = devices.find(|d| d.name().is_ok_and(|n| n == name)) {
+                return Ok(device);
+            }
+        }
+    }
+    Err(format!(
+        "{} device not found: {name}",
+        if output { "Output" } else { "Input" }
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

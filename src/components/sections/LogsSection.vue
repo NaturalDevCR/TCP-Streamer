@@ -2,7 +2,7 @@
   <div class="flex flex-col gap-4 h-full">
     <Card :title="t('logs.title')">
       <template #header>
-        <div class="flex gap-2 items-center">
+        <div class="flex flex-wrap gap-2 items-center">
           <Select v-model="stream.logFilter" class="w-[140px]">
             <SelectOption value="all" :label="t('logs.filterAll')" />
             <SelectOption value="info" :label="t('logs.filterInfo')" />
@@ -19,9 +19,13 @@
             class="w-[180px]"
           />
 
+          <Button size="sm" variant="ghost" @click="paused = !paused">{{
+            t(paused ? "operation.paused" : "operation.pause")
+          }}</Button>
           <Button size="sm" variant="ghost" @click="copyLogs">
             {{ t("action.copy") }}
           </Button>
+          <Button size="sm" variant="ghost" @click="exportLogs">{{ t("operation.export") }}</Button>
           <Button size="sm" variant="ghost" @click="stream.clearLogs()">
             {{ t("action.clear") }}
           </Button>
@@ -53,6 +57,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
+import { sanitizeSupport } from "../../utils/sanitize";
+import { useSettingsStore } from "../../stores/settings";
 import { useStreamStore } from "../../stores/stream";
 import Card from "../ui/Card.vue";
 import Button from "../ui/Button.vue";
@@ -66,6 +72,7 @@ const stream = useStreamStore();
 const searchQuery = ref("");
 const logContainer = ref<HTMLElement | null>(null);
 const userScrolledUp = ref(false);
+const paused = ref(false);
 
 const searchedLogs = computed(() => {
   if (!searchQuery.value) return stream.filteredLogs;
@@ -88,9 +95,9 @@ const logColors: Record<string, string> = {
 };
 
 watch(
-  () => stream.filteredLogs.length,
+  () => stream.filteredLogs.at(-1),
   async () => {
-    if (userScrolledUp.value) return;
+    if (userScrolledUp.value || paused.value) return;
     await nextTick();
     if (logContainer.value) {
       logContainer.value.scrollTop = logContainer.value.scrollHeight;
@@ -104,8 +111,32 @@ function onScroll() {
   userScrolledUp.value = el.scrollTop + el.clientHeight < el.scrollHeight - 10;
 }
 
+function exportLogs() {
+  const settings = useSettingsStore();
+  const values = [
+    settings.psk,
+    settings.ip,
+    settings.sourceAddr,
+    settings.allowlist,
+    ...settings.discoveredSources.map((s) => s.addr),
+    ...Object.values(settings.profiles).flatMap((p) => [
+      String(p.psk || ""),
+      String(p.ip || ""),
+      String(p.source_addr || ""),
+    ]),
+  ];
+  const text = searchedLogs.value
+    .map((l) => `[${l.timestamp}] [${l.level}] ${l.message}`)
+    .join("\n");
+  navigator.clipboard
+    .writeText(sanitizeSupport(text, values))
+    .then(() => stream.addToast(t("toast.copied")))
+    .catch(() => stream.addToast(t("toast.copyFailed"), "error"));
+}
 function copyLogs() {
-  const text = searchedLogs.value.map((l) => `[${l.timestamp}] ${l.message}`).join("\n");
+  const text = searchedLogs.value
+    .map((l) => `[${l.timestamp}] [${l.level}] ${l.message}`)
+    .join("\n");
   navigator.clipboard
     .writeText(text)
     .then(() => stream.addToast(t("toast.copied"), "success"))

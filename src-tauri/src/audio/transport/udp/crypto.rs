@@ -17,9 +17,34 @@ pub fn derive_key(psk: &str, salt_a: u64, salt_b: u64) -> [u8; 32] {
     salt[8..].copy_from_slice(&salt_b.to_be_bytes());
     let hk = Hkdf::<Sha256>::new(Some(&salt), psk.as_bytes());
     let mut okm = [0u8; 32];
-    hk.expand(b"tcp-streamer/udp/v1", &mut okm)
+    hk.expand(b"tcp-streamer/udp/v2/audio", &mut okm)
         .expect("32 is a valid HKDF length");
     okm
+}
+
+pub fn random_salt() -> std::io::Result<u64> {
+    let mut bytes = [0u8; 8];
+    getrandom::getrandom(&mut bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+/// Authenticate before mutating replay state; encryption policy is session-owned.
+pub fn authenticated_audio(
+    key: Option<&[u8; 32]>,
+    salt: u32,
+    header: &super::packet::AudioHeader,
+    aad: &[u8],
+    payload: &[u8],
+    replay: &mut ReplayWindow,
+) -> Option<Vec<u8>> {
+    if header.flags > 1 || (header.flags == 1) != key.is_some() {
+        return None;
+    }
+    let pcm = match key {
+        Some(key) => open(key, salt, header.seq, aad, payload)?,
+        None => payload.to_vec(),
+    };
+    replay.check_and_update(header.seq).then_some(pcm)
 }
 
 /// The 4-byte nonce salt both peers compute identically from the session salts.

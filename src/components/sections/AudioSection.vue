@@ -1,6 +1,9 @@
 <template>
-  <div class="flex flex-col gap-4">
-    <Card :title="t('audio.title')">
+  <fieldset :disabled="settings.configurationLocked" class="flex flex-col gap-4 min-w-0">
+    <p v-if="settings.role === 'sink'" class="text-xs text-[var(--color-text-muted)]">
+      {{ t("operation.sinkAudio") }}
+    </p>
+    <Card v-if="settings.role === 'source'" :title="t('audio.title')">
       <div class="flex flex-col gap-4">
         <div class="flex gap-3">
           <Field
@@ -11,18 +14,11 @@
           >
             <Select
               v-model="settings.deviceName"
-              :disabled="stream.isStreaming || settings.devicesLoading"
+              :placeholder="
+                settings.devicesLoading ? t('connection.loadingDevices') : t('connection.noDevices')
+              "
+              :disabled="settings.configurationLocked || settings.devicesLoading"
             >
-              <SelectOption
-                v-if="settings.devicesLoading"
-                value=""
-                :label="t('connection.loadingDevices')"
-              />
-              <SelectOption
-                v-else-if="settings.devices.length === 0"
-                value=""
-                :label="t('connection.noDevices')"
-              />
               <SelectOption v-for="d in settings.devices" :key="d" :value="d" :label="d" />
             </Select>
           </Field>
@@ -32,7 +28,7 @@
             :tooltip="t('audio.help.sampleRate')"
             class="w-[140px]"
           >
-            <Select v-model.number="settings.sampleRate" :disabled="stream.isStreaming">
+            <Select v-model.number="settings.sampleRate" :disabled="settings.configurationLocked">
               <SelectOption :value="48000" label="48 kHz" />
               <SelectOption :value="44100" label="44.1 kHz" />
             </Select>
@@ -45,21 +41,21 @@
             :tooltip="t('audio.help.bufferSize')"
             class="flex-1"
           >
-            <Select v-model.number="settings.bufferSize" :disabled="stream.isStreaming">
-              <SelectOption :value="256" label="256 (Low)" />
-              <SelectOption :value="512" label="512 (Medium)" />
-              <SelectOption :value="1024" label="1024 (High)" />
-              <SelectOption :value="2048" label="2048 (Max)" />
+            <Select v-model.number="settings.bufferSize" :disabled="settings.configurationLocked">
+              <SelectOption :value="256" label="256" />
+              <SelectOption :value="512" label="512" />
+              <SelectOption :value="1024" label="1024" />
+              <SelectOption :value="2048" label="2048" />
             </Select>
           </Field>
 
           <Field
-            v-if="settings.isServer"
+            v-if="settings.isServer && settings.transport === 'tcp'"
             :label="t('audio.format')"
             :tooltip="t('audio.help.format')"
             class="flex-1"
           >
-            <Select v-model="settings.format" :disabled="stream.isStreaming">
+            <Select v-model="settings.format" :disabled="settings.configurationLocked">
               <SelectOption value="pcm" :label="t('audio.formatPcm')" />
               <SelectOption value="wav" :label="t('audio.formatWav')" />
             </Select>
@@ -70,15 +66,19 @@
 
     <Card>
       <div class="flex flex-col gap-4">
-        <template v-if="settings.showLoopback">
+        <template v-if="settings.role === 'source' && settings.showLoopback">
           <div class="flex items-center justify-between">
             <SettingLabel :label="t('audio.loopback')" :tooltip="t('audio.help.loopback')" />
-            <Switch v-model="settings.loopbackMode" @update:model-value="onLoopbackChange" />
+            <Switch
+              v-model="settings.loopbackMode"
+              :aria-label="t('audio.loopback')"
+              @update:model-value="onLoopbackChange"
+            />
           </div>
         </template>
 
         <Field :label="t('audio.latencyProfile')" :tooltip="t('audio.help.latencyProfile')">
-          <Select v-model="settings.latencyProfile" :disabled="stream.isStreaming">
+          <Select v-model="settings.latencyProfile" :disabled="settings.configurationLocked">
             <SelectOption value="ultra-low" :label="t('audio.latencyUltraLow')" />
             <SelectOption value="balanced" :label="t('audio.latencyBalanced')" />
             <SelectOption value="robust" :label="t('audio.latencyRobust')" />
@@ -95,7 +95,7 @@
               :min="50"
               :max="2000"
               :step="50"
-              :disabled="stream.isStreaming"
+              :disabled="settings.configurationLocked"
             />
           </Field>
           <p class="text-xs text-[var(--color-text-muted)]">
@@ -110,6 +110,16 @@
           {{ t("audio.ultraLowWarning") }}
         </p>
 
+        <div
+          v-if="settings.role === 'source' && settings.latencyProfile !== 'broadcast'"
+          class="flex items-center justify-between"
+        >
+          <SettingLabel
+            :label="t('audio.adaptiveBuffer')"
+            :tooltip="t('audio.help.adaptiveBuffer')"
+          />
+          <Switch v-model="settings.adaptiveBuffer" :aria-label="t('audio.adaptiveBuffer')" />
+        </div>
         <template v-if="settings.latencyProfile === 'custom'">
           <div class="flex gap-3">
             <Field
@@ -117,19 +127,23 @@
               :tooltip="t('audio.help.ringBufferDuration')"
               class="flex-1"
             >
-              <Select v-model.number="settings.ringBufferDuration" :disabled="stream.isStreaming">
-                <SelectOption :value="2000" label="2000ms (Low)" />
-                <SelectOption :value="4000" label="4000ms (Balanced)" />
-                <SelectOption :value="8000" label="8000ms (High)" />
-                <SelectOption :value="15000" label="15000ms (Max)" />
+              <Select
+                v-model.number="settings.ringBufferDuration"
+                :disabled="settings.configurationLocked"
+              >
+                <SelectOption :value="2000" label="2000ms" />
+                <SelectOption :value="4000" label="4000ms" />
+                <SelectOption :value="8000" label="8000ms" />
+                <SelectOption :value="15000" label="15000ms" />
               </Select>
             </Field>
             <Field
+              v-if="settings.role === 'source'"
               :label="t('audio.chunkSize')"
               :tooltip="t('audio.help.chunkSize')"
               class="flex-1"
             >
-              <Select v-model.number="settings.chunkSize" :disabled="stream.isStreaming">
+              <Select v-model.number="settings.chunkSize" :disabled="settings.configurationLocked">
                 <SelectOption :value="128" label="128" />
                 <SelectOption :value="256" label="256" />
                 <SelectOption :value="512" label="512" />
@@ -138,14 +152,6 @@
                 <SelectOption :value="4096" label="4096" />
               </Select>
             </Field>
-          </div>
-
-          <div class="flex items-center justify-between">
-            <SettingLabel
-              :label="t('audio.adaptiveBuffer')"
-              :tooltip="t('audio.help.adaptiveBuffer')"
-            />
-            <Switch v-model="settings.adaptiveBuffer" />
           </div>
 
           <div class="flex gap-3">
@@ -157,12 +163,18 @@
               <Input
                 v-model.number="settings.minBuffer"
                 type="number"
-                :min="1000"
-                :max="5000"
+                :min="50"
+                :max="20000"
                 :step="500"
               />
             </Field>
             <Field
+              :error="
+                settings.maxBuffer > settings.ringBufferDuration ||
+                settings.minBuffer > settings.maxBuffer
+                  ? t('operation.invalidBuffer')
+                  : undefined
+              "
               :label="t('audio.maxBuffer')"
               :tooltip="t('audio.help.maxBuffer')"
               class="flex-1"
@@ -170,7 +182,7 @@
               <Input
                 v-model.number="settings.maxBuffer"
                 type="number"
-                :min="5000"
+                :min="50"
                 :max="20000"
                 :step="1000"
               />
@@ -179,12 +191,11 @@
         </template>
       </div>
     </Card>
-  </div>
+  </fieldset>
 </template>
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "../../stores/settings";
-import { useStreamStore } from "../../stores/stream";
 import Card from "../ui/Card.vue";
 import Field from "../ui/Field.vue";
 import Input from "../ui/Input.vue";
@@ -195,7 +206,6 @@ import SettingLabel from "../ui/SettingLabel.vue";
 
 const { t } = useI18n();
 const settings = useSettingsStore();
-const stream = useStreamStore();
 
 async function onLoopbackChange() {
   await settings.loadDevices();

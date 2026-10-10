@@ -2,11 +2,107 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke, listen } from "../composables/useTauri";
 import { useSettingsStore, clampFixedLatency } from "./settings";
-import type { LogEntry, Toast, QualityEvent } from "../types/events";
+import { i18n } from "../i18n";
+import type { LogEntry, Toast, QualityEvent, StatsEvent, BufferResizeEvent } from "../types/events";
+
+export interface EffectiveConfig {
+  role: string;
+  transport: string;
+  profile: string;
+  sample_rate: number;
+  channels: number;
+  device_sample_rate: number;
+  device_channels: number;
+  ring_ms: number;
+  target_ms: number;
+  chunk_frames: number;
+  capture_buffer_frames: number | null;
+  adaptive: boolean;
+}
+export interface SessionStatus {
+  effective?: EffectiveConfig | null;
+  state: "running" | "starting" | "waiting" | "reconnecting" | "stopped" | "error";
+  message: string;
+  session_id: number;
+}
 
 export const useStreamStore = defineStore("stream", () => {
   const isStreaming = ref(false);
-  const statusText = ref("Ready");
+  const sessionState = ref<SessionStatus["state"]>("stopped");
+  const sessionId = ref(0);
+  const pending = ref(false);
+  const stopping = ref(false);
+  let operationId = 0;
+  const statusDetail = ref("");
+  const statusText = computed(() =>
+    stopping.value
+      ? i18n.global.t("session.stopping")
+      : statusDetail.value || i18n.global.t(`session.${sessionState.value}`),
+  );
+  const statusTone = computed<"success" | "danger" | "warning" | "neutral">(() => {
+    if (sessionState.value === "error") return "danger";
+    if (stopping.value || ["starting", "waiting", "reconnecting"].includes(sessionState.value))
+      return "warning";
+    return sessionState.value === "running" ? "success" : "neutral";
+  });
+  let terminalSession = -1;
+  const sinkMetrics = ref({ authFailures: 0, lostFrames: 0, trimPpm: 0, received: false });
+  const effectiveFormat = ref<{
+    sample_rate?: number;
+    channels?: number;
+    buffer_ms?: number;
+    target_ms?: number;
+  }>({});
+  const effectiveConfig = ref<EffectiveConfig | null>(null);
+  const activeSettings = ref<Record<string, unknown> | null>(null);
+  function applySession(status: SessionStatus) {
+    if (
+      !status ||
+      (stopping.value &&
+        ["running", "starting", "waiting", "reconnecting"].includes(status.state)) ||
+      status.session_id < sessionId.value ||
+      (status.session_id <= terminalSession &&
+        ["running", "starting", "waiting", "reconnecting"].includes(status.state))
+    )
+      return;
+    if (["stopped", "error"].includes(status.state))
+      terminalSession = Math.max(terminalSession, status.session_id);
+    if (status.session_id !== sessionId.value) effectiveConfig.value = null;
+    if (status.effective !== undefined) effectiveConfig.value = status.effective;
+    sessionId.value = status.session_id;
+    sessionState.value = status.state;
+    if (status.state !== "running") qualityAvailable.value = false;
+    statusDetail.value = status.state === "error" ? status.message : "";
+    isStreaming.value = ["running", "starting", "waiting", "reconnecting"].includes(status.state);
+    useSettingsStore().configurationLocked = isStreaming.value || pending.value;
+    if (!isStreaming.value) {
+      tcpUrl.value = "";
+      httpUrl.value = "";
+      connectionInfo.value = "";
+    }
+  }
+  function resetMetrics() {
+    effectiveFormat.value = {};
+    effectiveConfig.value = null;
+    statsAvailable.value = false;
+    qualityAvailable.value = false;
+    uptimeSeconds.value = 0;
+    bytesSent.value = 0;
+    bitrateKbps.value = 0;
+    qualityScore.value = 0;
+    rttMs.value = null;
+    rttVarMs.value = null;
+    underruns.value = 0;
+    dropped.value = 0;
+    bufferHealth.value = 0;
+    bufferMs.value = 0;
+    qualityWarningShown = false;
+  }
+  function fail(error: unknown) {
+    statusDetail.value = i18n.global.t("session.failure", { error: String(error) });
+    sessionState.value = "error";
+    addToast(statusDetail.value, "error");
+  }
 
   // Stats
   const uptimeSeconds = ref(0);
@@ -14,6 +110,9 @@ export const useStreamStore = defineStore("stream", () => {
   const bitrateKbps = ref(0);
 
   // Quality
+  const qualityUnits = ref<"events/frames" | "frames/frames">("events/frames");
+  const qualityAvailable = ref(false);
+  const statsAvailable = ref(false);
   const qualityScore = ref(0);
   const rttMs = ref<number | null>(null);
   const rttVarMs = ref<number | null>(null);
@@ -64,10 +163,10 @@ export const useStreamStore = defineStore("stream", () => {
 
   const qualityLabel = computed(() => {
     const s = qualityScore.value;
-    if (s >= 90) return { text: "Excellent", color: "#10b981" };
-    if (s >= 70) return { text: "Good", color: "#f59e0b" };
-    if (s >= 50) return { text: "Fair", color: "#f97316" };
-    return { text: "Poor", color: "#ef4444" };
+    if (s >= 90) return { text: i18n.global.t("quality.excellent"), color: "#10b981" };
+    if (s >= 70) return { text: i18n.global.t("quality.good"), color: "#f59e0b" };
+    if (s >= 50) return { text: i18n.global.t("quality.fair"), color: "#f97316" };
+    return { text: i18n.global.t("quality.poor"), color: "#ef4444" };
   });
 
   // ── Actions ──
@@ -79,27 +178,51 @@ export const useStreamStore = defineStore("stream", () => {
     }, 3000);
   }
 
+  function appendLog(log: LogEntry) {
+    logs.value = [...logs.value.slice(-(MAX_LOGS - 1)), log];
+  }
+
   function clearLogs() {
     logs.value = [];
   }
 
   async function startStream() {
+    if (pending.value || isStreaming.value) return;
     const settings = useSettingsStore();
+    if (settings.preflightLoading) return;
     const device = settings.deviceName;
     const isServer = settings.isServer;
-
-    if (settings.role === "sink") {
-      if (!settings.outputDevice) {
-        statusText.value = "Select an output device";
-        return;
-      }
-      if (!settings.sourceAddr) {
-        statusText.value = "Enter the source address";
-        return;
-      }
-      await settings.saveSettings();
-      try {
-        await invoke("start_sink", {
+    const invalid =
+      settings.role === "sink"
+        ? !settings.outputDevice
+          ? "outputDevice"
+          : !settings.sourceAddr
+            ? "sourceAddress"
+            : ""
+        : !device
+          ? "device"
+          : settings.transport === "tcp" && !isServer && !settings.ip
+            ? "target"
+            : !Number.isInteger(settings.port) || settings.port < 1 || settings.port > 65535
+              ? "port"
+              : "";
+    if (invalid) {
+      statusDetail.value = i18n.global.t(`session.validation.${invalid}`);
+      addToast(statusDetail.value, "error");
+      return;
+    }
+    const operation = ++operationId;
+    pending.value = true;
+    settings.configurationLocked = true;
+    sessionState.value = "starting";
+    statusDetail.value = "";
+    resetMetrics();
+    try {
+      if (!(await settings.saveSettings())) throw new Error(settings.persistenceError);
+      if (operation !== operationId) return;
+      let status: SessionStatus;
+      if (settings.role === "sink")
+        status = (await invoke("start_sink", {
           outputDevice: settings.outputDevice,
           sourceAddr: settings.sourceAddr,
           latencyProfile: settings.latencyProfile,
@@ -111,86 +234,77 @@ export const useStreamStore = defineStore("stream", () => {
             fixedLatencyMs: clampFixedLatency(settings.fixedLatencyMs),
           },
           psk: settings.psk,
-        });
-        isStreaming.value = true;
-        statusText.value = `Playing from ${settings.sourceAddr}`;
-      } catch (error) {
-        statusText.value = "Error: " + error;
-      }
-      return;
-    }
-
-    if (!device) {
-      statusText.value = "Select a device";
-      return;
-    }
-    if (!isServer && !settings.ip) {
-      statusText.value = "Enter Target IP";
-      return;
-    }
-    if (!settings.port) {
-      statusText.value = "Enter Target Port";
-      return;
-    }
-
-    try {
-      await settings.saveSettings();
-      await invoke("start_stream", {
-        protocol: "tcp",
-        deviceName: device,
-        ip: settings.ip,
-        port: settings.port,
-        sampleRate: settings.sampleRate,
-        bufferSize: settings.bufferSize,
-        ringBufferDurationMs: settings.ringBufferDuration,
-        autoReconnect: settings.autoReconnect,
-        highPriority: settings.highPriority,
-        dscpStrategy: settings.dscpStrategy,
-        chunkSize: settings.chunkSize,
-        isLoopback: settings.isLoopback,
-        isServer: isServer,
-        enableAdaptiveBuffer: settings.adaptiveBuffer,
-        minBufferMs: settings.minBuffer,
-        maxBufferMs: settings.maxBuffer,
-        fixedLatencyMs: clampFixedLatency(settings.fixedLatencyMs),
-        format: settings.format,
-        latencyProfile: settings.latencyProfile,
-        allowlist: settings.allowlist,
-        transport: settings.transport,
-        psk: settings.psk,
-      });
-
-      isStreaming.value = true;
-      statusText.value = isServer ? "Listening" : `Streaming to ${settings.ip}`;
-      bufferMs.value = settings.ringBufferDuration;
-
-      if (isServer) {
-        const lip = settings.localIp;
-        const p = settings.port;
-        tcpUrl.value = `tcp://${lip}:${p}`;
-        httpUrl.value = `http://${lip}:${p}/stream.wav`;
-        connectionInfo.value = `Use this as a TCP source in your audio receiver:\ntcp://${lip}:${p}`;
+        })) as SessionStatus;
+      else
+        status = (await invoke("start_stream", {
+          protocol: "tcp",
+          deviceName: device,
+          ip: settings.ip,
+          port: settings.port,
+          sampleRate: settings.sampleRate,
+          bufferSize: settings.bufferSize,
+          ringBufferDurationMs: settings.ringBufferDuration,
+          autoReconnect: settings.autoReconnect,
+          highPriority: settings.highPriority,
+          dscpStrategy: settings.dscpStrategy,
+          chunkSize: settings.chunkSize,
+          isLoopback: settings.isLoopback,
+          isServer: isServer && settings.transport === "tcp",
+          enableAdaptiveBuffer: settings.adaptiveBuffer,
+          minBufferMs: settings.minBuffer,
+          maxBufferMs: settings.maxBuffer,
+          fixedLatencyMs: clampFixedLatency(settings.fixedLatencyMs),
+          format: settings.transport === "udp" ? "pcm" : settings.format,
+          latencyProfile: settings.latencyProfile,
+          allowlist: settings.allowlist,
+          transport: settings.transport,
+          psk: settings.psk,
+        })) as SessionStatus;
+      if (operation !== operationId) return;
+      applySession(status);
+      if (isStreaming.value) {
+        activeSettings.value = { ...settings.snapshot(), psk: undefined };
+        bufferMs.value = settings.ringBufferDuration;
+        if (settings.role === "source" && settings.transport === "tcp" && isServer) {
+          const host = settings.localIp.includes(":") ? `[${settings.localIp}]` : settings.localIp;
+          tcpUrl.value = `tcp://${host}:${settings.port}`;
+          httpUrl.value = `http://${host}:${settings.port}/stream.wav`;
+          connectionInfo.value = tcpUrl.value;
+        }
       }
     } catch (error) {
-      statusText.value = "Error: " + error;
+      if (operation === operationId) {
+        fail(error);
+        isStreaming.value = false;
+      }
+    } finally {
+      if (operation === operationId) {
+        pending.value = false;
+        settings.configurationLocked = isStreaming.value;
+      }
     }
   }
 
   async function stopStream() {
+    if (stopping.value) return;
+    ++operationId;
+    stopping.value = true;
+    pending.value = true;
     try {
-      await invoke("stop_stream");
-      isStreaming.value = false;
-      statusText.value = "Ready";
-      tcpUrl.value = "";
-      httpUrl.value = "";
-      connectionInfo.value = "";
+      const status = (await invoke("stop_stream")) as SessionStatus;
+      if (status) applySession(status);
+      else applySession({ state: "stopped", message: "", session_id: sessionId.value });
     } catch (error) {
-      statusText.value = "Error stopping: " + error;
+      fail(error);
+    } finally {
+      pending.value = false;
+      stopping.value = false;
+      useSettingsStore().configurationLocked = isStreaming.value;
     }
   }
 
   async function toggleStream() {
-    if (isStreaming.value) {
+    if (pending.value || isStreaming.value) {
       await stopStream();
     } else {
       await startStream();
@@ -198,28 +312,63 @@ export const useStreamStore = defineStore("stream", () => {
   }
 
   // ── Event Listeners ──
+  let unlisteners: (() => void)[] = [];
+  function disposeListeners() {
+    unlisteners.forEach((fn) => fn());
+    unlisteners = [];
+  }
+  async function subscribe<T>(name: string, callback: (event: { payload: T }) => void) {
+    unlisteners.push(await listen(name, callback));
+  }
   async function initListeners() {
-    await listen("log-event", (event: { payload: LogEntry }) => {
+    disposeListeners();
+    await subscribe<SessionStatus>("stream-state", (event) => applySession(event.payload));
+    try {
+      applySession((await invoke("get_stream_state")) as SessionStatus);
+    } catch (e) {
+      fail(e);
+    }
+
+    await subscribe("log-event", (event: { payload: LogEntry }) => {
       const log = event.payload;
-      logs.value.push(log);
-      if (logs.value.length > MAX_LOGS) {
-        logs.value = logs.value.slice(-MAX_LOGS);
-      }
+      appendLog(log);
     });
 
-    await listen(
-      "stats-event",
-      (event: {
-        payload: { uptime_seconds: number; bytes_sent: number; bitrate_kbps: number };
-      }) => {
-        const s = event.payload;
-        uptimeSeconds.value = s.uptime_seconds;
-        bytesSent.value = s.bytes_sent;
-        bitrateKbps.value = s.bitrate_kbps;
-      },
-    );
+    await subscribe("stats-event", (event: { payload: StatsEvent }) => {
+      if (
+        !isStreaming.value ||
+        (event.payload.session_id !== undefined && event.payload.session_id !== sessionId.value)
+      )
+        return;
+      statsAvailable.value = true;
+      const s = event.payload;
+      sinkMetrics.value = {
+        authFailures: s.auth_failures || 0,
+        lostFrames: s.lost_frames || 0,
+        trimPpm: s.trim_ppm || 0,
+        received: Boolean(s.received),
+      };
+      effectiveFormat.value = {
+        sample_rate: s.sample_rate,
+        channels: s.channels,
+        buffer_ms: s.buffer_ms,
+        target_ms: s.target_ms,
+      };
+      uptimeSeconds.value = s.uptime_seconds;
+      bytesSent.value = s.bytes_sent;
+      bitrateKbps.value = s.bitrate_kbps;
+    });
 
-    await listen("quality-event", (event: { payload: QualityEvent }) => {
+    await subscribe("quality-event", (event: { payload: QualityEvent }) => {
+      if (
+        !isStreaming.value ||
+        (event.payload.session_id !== undefined && event.payload.session_id !== sessionId.value)
+      )
+        return;
+      qualityAvailable.value = sessionState.value === "running";
+      qualityUnits.value =
+        event.payload.counter_unit ||
+        (effectiveConfig.value?.role === "sink" ? "frames/frames" : "events/frames");
       const q = event.payload;
       qualityScore.value = q.score;
       rttMs.value = q.rtt_ms;
@@ -229,30 +378,52 @@ export const useStreamStore = defineStore("stream", () => {
       bufferHealth.value = q.buffer_health;
 
       // Quality warnings
-      if (q.score < 50 && !qualityWarningShown) {
-        addToast(`Network quality degraded to ${q.score}`, "warning");
+      if (qualityAvailable.value && q.score < 50 && !qualityWarningShown) {
+        addToast(i18n.global.t("quality.degraded", { score: q.score }), "warning");
         qualityWarningShown = true;
-      } else if (q.score >= 70 && qualityWarningShown) {
-        addToast(`Network quality recovered to ${q.score}`, "success");
+      } else if (qualityAvailable.value && q.score >= 70 && qualityWarningShown) {
+        addToast(i18n.global.t("quality.recovered", { score: q.score }), "success");
         qualityWarningShown = false;
       }
     });
 
-    await listen("buffer-resize", (event: { payload: { new_size_ms: number; reason: string } }) => {
+    await subscribe("buffer-resize", (event: { payload: BufferResizeEvent }) => {
+      if (
+        !isStreaming.value ||
+        (event.payload.session_id !== undefined && event.payload.session_id !== sessionId.value)
+      )
+        return;
       bufferMs.value = event.payload.new_size_ms;
       logs.value.push({
         timestamp: new Date().toLocaleTimeString(),
         level: "info",
-        message: `Buffer resized to ${event.payload.new_size_ms}ms: ${event.payload.reason}`,
+        message: i18n.global.t("operation.bufferResized", {
+          ms: event.payload.new_size_ms,
+          reason: event.payload.reason,
+        }),
         visible: true,
       });
     });
   }
 
   return {
+    sinkMetrics,
+    effectiveConfig,
+    effectiveFormat,
+    statsAvailable,
+    qualityUnits,
+    qualityAvailable,
+    sessionState,
+    sessionId,
+    pending,
+    stopping,
+    activeSettings,
+    applySession,
+    disposeListeners,
     // State
     isStreaming,
     statusText,
+    statusTone,
     uptimeSeconds,
     bytesSent,
     bitrateKbps,

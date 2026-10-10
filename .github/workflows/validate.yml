@@ -1,0 +1,52 @@
+name: Validate
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit or tag to validate
+        type: string
+        required: false
+        default: ""
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - name: Install native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo fmt --check --manifest-path src-tauri/Cargo.toml

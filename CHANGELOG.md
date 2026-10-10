@@ -4,6 +4,35 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [3.0.0] — 2026-10-10
+
+### Breaking changes
+
+- Native UDP v2 is incompatible with v1. Upgrade the source and receiver together. TCP/HTTP compatibility is unchanged.
+
+### Fixed
+
+- Authoritative session acknowledgments, cancellable startup and cleanup, stale-event rejection, and readable native error messages.
+- Empty select options, isolated complete profiles/devices, persistence failures, keyboard shortcuts, translated states, and accessible responsive controls.
+- Required UDP encryption, authenticated metadata/replay handling, protected subscriber leases, source restart recovery and bounded jitter processing with frame-duration preservation.
+- TCP slow-reader handling with a nonblocking absolute write deadline, complete fragmented HTTP headers and HEAD responses without audio bodies.
+- Strict allowlists/configuration, negotiated capture buffer requests, device failure supervision and receiver telemetry with explicit counter units.
+- Broadcast source pacing now retains its target buffer instead of draining it, and starvation observes audio available above that target.
+
+### Changed
+
+- New Custom configurations default to a 200–1500 ms target band and 4000 ms ring capacity. Existing manual values are preserved and validated before allocation.
+- Shared secrets stay in memory by default; local plaintext persistence requires explicit opt-in and exports remove secrets/addresses.
+- Dashboard distinguishes requested settings, negotiated device/wire formats, current occupancy and target. Native UDP is still limited to one receiver; TCP/HTTP still transmit unencrypted audio.
+- Read-only connection preflight inspects configuration, device formats, DNS and temporary local port binding without opening audio streams or sending audio/control packets to the remote endpoint.
+- Native UDP dual-stack listening with IPv4 fallback and bracketed IPv6 endpoint support.
+- Native UDP wire protocol version 2 uses authenticated session negotiation; update both endpoints together because version 1 peers are rejected.
+- Shared Build/Release validation gates and Rust tests/Clippy on all three desktop platforms; Node 22, frozen pnpm installation and locked Rust builds.
+- Manual releases require an existing version tag matching all three manifests and changelog notes. Assets are prepared as a draft for native verification before publication.
+- Reduced renderer CSP to local scripts and IPC connections, with explicit main-window capability selection.
+- Tray and second-instance activation restore, unminimize and focus the existing window.
+- Documented transport/role limits, per-endpoint buffering versus measured latency, and external signing/updater prerequisites.
+
 ## [2.4.0] — 2026-09-19
 
 ### Added

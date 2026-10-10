@@ -21,10 +21,10 @@ use super::chunked::ChunkedWriter;
 use super::constants::*;
 use super::stats::{emit_log, BufferResizeEvent, QualityEvent, StatsEvent, StreamStats};
 use super::wav_helper::create_wav_header;
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::DeviceTrait;
 
 use ringbuf::HeapRb;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -82,6 +82,8 @@ pub fn run(
     transport: String,
     psk: String,
     app_handle: AppHandle,
+    session_id: u64,
+    is_running: Arc<AtomicBool>,
 ) -> Result<(cpal::Stream, StreamStats), String> {
     emit_log(
         &app_handle,
@@ -92,63 +94,17 @@ pub fn run(
         ),
     );
 
-    let host = cpal::default_host();
-
-    // Device selection logic
-    let device = if is_loopback {
-        // WASAPI loopback exists only on Windows; elsewhere an input stream on
-        // an output device "builds" but never delivers a single sample.
-        if std::env::consts::OS != "windows" {
-            return Err(
-                "Loopback (system audio) capture is only supported on Windows. \
-                 Select a real input device."
-                    .to_string(),
-            );
-        }
-        // Loopback mode: Search in OUTPUT devices
-        let clean_name = device_name.replace("[Loopback] ", "");
-        let mut found_device = None;
-
-        let available_devices = host.output_devices().map_err(|e| e.to_string())?;
-        let mut device_list_log = Vec::new();
-
-        for dev in available_devices {
-            if let Ok(name) = dev.name() {
-                device_list_log.push(name.clone());
-                if name == clean_name || name.trim() == clean_name.trim() {
-                    found_device = Some(dev);
-                    break;
-                }
-            }
-        }
-
-        if found_device.is_none() {
-            emit_log(
-                &app_handle,
-                "error",
-                format!(
-                    "Loopback device '{}' not found. Available outputs: {:?}",
-                    clean_name, device_list_log
-                ),
-            );
-        }
-
-        found_device.ok_or_else(|| format!("Loopback device not found: {}", clean_name))?
+    if is_loopback && std::env::consts::OS != "windows" {
+        return Err("Loopback capture requires Windows; select an input device".into());
+    }
+    let clean_name = if is_loopback {
+        device_name
+            .strip_prefix("[Loopback] ")
+            .unwrap_or(&device_name)
     } else {
-        // Standard mode: Search in INPUT devices
-        let mut found_device = None;
-        if let Ok(devices) = host.input_devices() {
-            for dev in devices {
-                if let Ok(name) = dev.name() {
-                    if name == device_name {
-                        found_device = Some(dev);
-                        break;
-                    }
-                }
-            }
-        }
-        found_device.ok_or_else(|| format!("Input device not found: {}", device_name))?
+        &device_name
     };
+    let device = self::device::find_device(clean_name, is_loopback)?;
 
     // 0.5. Format contract: `sample_rate` is the OUTPUT (wire) rate — what the
     // receiver (e.g. Snapserver's `48000:16:2` source) expects. The device is
@@ -244,15 +200,15 @@ pub fn run(
     let stream_config = cpal::StreamConfig {
         channels: device_channels,
         sample_rate: cpal::SampleRate(capture_rate),
-        buffer_size: cpal::BufferSize::Default,
+        buffer_size: self::capture::resolve_buffer_size(buffer_size, config_range.buffer_size()),
     };
 
     emit_log(
         &app_handle,
         "info",
         format!(
-            "Capture buffer: Default (OS driver chooses optimal size, requested {} frames)",
-            buffer_size
+            "Capture buffer: {:?} (requested {} frames)",
+            stream_config.buffer_size, buffer_size
         ),
     );
 
@@ -272,6 +228,26 @@ pub fn run(
         },
     );
     let effective_chunk = lp.chunk_size;
+    super::session::SESSION.configure(
+        session_id,
+        super::session::EffectiveConfig {
+            role: "source".into(),
+            transport: transport.clone(),
+            profile: latency_profile.clone(),
+            sample_rate: wire_rate,
+            channels: STEREO,
+            device_sample_rate: capture_rate,
+            device_channels,
+            ring_ms: lp.ring_ms.max(lp.adaptive_max_ms),
+            target_ms: lp.adaptive_min_ms,
+            chunk_frames: lp.chunk_size,
+            capture_buffer_frames: match stream_config.buffer_size {
+                cpal::BufferSize::Fixed(n) => Some(n),
+                _ => None,
+            },
+            adaptive: latency_profile != "broadcast" && enable_adaptive_buffer,
+        },
+    );
 
     let ring_capacity_ms = lp.adaptive_max_ms.max(lp.ring_ms);
     // Ring holds interleaved STEREO at the capture rate. Capacity must stay
@@ -306,7 +282,6 @@ pub fn run(
 
     // Shared stats
     let bytes_sent = Arc::new(AtomicU64::new(0));
-    let is_running = Arc::new(AtomicBool::new(true));
     let overruns = Arc::new(AtomicU64::new(0));
     let underruns = Arc::new(AtomicU64::new(0));
 
@@ -322,7 +297,7 @@ pub fn run(
     // The broadcast profile exists to hold latency constant for A/V sync, so it
     // overrides the user's adaptive toggle instead of trusting it — the stored
     // value may still be true from a previous Custom session.
-    let adaptive_enabled_net = enable_adaptive_buffer && latency_profile != "broadcast";
+    let adaptive_enabled_net = latency_profile != "broadcast" && enable_adaptive_buffer;
     if enable_adaptive_buffer && !adaptive_enabled_net {
         emit_log(
             &app_handle,
@@ -334,11 +309,42 @@ pub fn run(
     let overruns_net = overruns.clone();
     let underruns_net = underruns.clone();
     let effective_chunk_net = effective_chunk;
+    let fixed_source_delay = latency_profile == "broadcast";
     let transport_net = transport.clone();
     let psk_net = psk.clone();
 
-    let allow_rules = super::transport::allowlist::parse_rules(&allowlist);
+    let allow_rules = super::transport::allowlist::validate_rules(&allowlist)?;
 
+    // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
+    let capacity_hint = effective_chunk as usize * STEREO as usize;
+    let audio_stream = self::capture::build_input_stream(
+        &device,
+        &stream_config,
+        selected_format,
+        device_channels,
+        prod,
+        overruns.clone(),
+        capacity_hint,
+        is_running.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Acquire transport resources before spawning, so failed capture/bind cannot leak a worker.
+    let listener = if transport == "tcp" && is_server {
+        let (l, _) = bind_dual_stack(port).map_err(|e| format!("TCP bind failed: {e}"))?;
+        l.set_nonblocking(true).map_err(|e| e.to_string())?;
+        Some(l)
+    } else {
+        None
+    };
+    let initial_udp = if transport == "udp" {
+        Some(
+            super::transport::udp::source::UdpSource::bind(port, wire_rate, STEREO, psk.clone())
+                .map_err(|e| format!("UDP bind failed: {e}"))?,
+        )
+    } else {
+        None
+    };
     // 2. Spawn Network Thread (Consumer)
     let priority = if high_priority {
         ThreadPriority::Max
@@ -349,7 +355,7 @@ pub fn run(
         .name("NetworkThread")
         .priority(priority);
 
-    let _ = thread_builder.spawn(move |result| {
+    let network_handle = thread_builder.spawn(move |result| {
         if let Err(e) = result {
             emit_log(
                 &app_handle_net,
@@ -363,24 +369,6 @@ pub fn run(
                 "Network thread priority set to Max".to_string(),
             );
         }
-
-        // Bind listener if in server mode
-        let listener = if is_server_clone {
-            match bind_dual_stack(port) {
-                Ok((l, label)) => {
-                    let _ = l.set_nonblocking(true);
-                    emit_log(&app_handle_net, "success", format!("TCP Server listening on {} (port {})", label, port));
-                    Some(l)
-                }
-                Err(e) => {
-                    emit_log(&app_handle_net, "error", format!("Failed to bind TCP server port: {}", e));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
 
         let mut temp_buffer = vec![0.0f32; effective_chunk_net as usize * STEREO as usize];
         let start_time = Instant::now();
@@ -399,7 +387,10 @@ pub fn run(
             adaptive_min_ms,
             6,
         );
-        let mut glitch_baseline: u64 = 0;
+        let mut underrun_baseline: u64 = 0;
+        let mut overrun_baseline: u64 = 0;
+        let mut stats_baseline: u64 = 0;
+        let mut udp_connected = false;
         let mut starvation = self::pacing::StarvationGate::new(STARVATION_THRESHOLD_MS);
 
         let mut retry_delay = Duration::from_secs(INITIAL_RETRY_DELAY_SECS);
@@ -448,8 +439,9 @@ pub fn run(
         // thread, right before encoding (passthrough when rates match).
         let mut resampler = self::convert::StereoResampler::new(capture_rate_net, wire_rate_net);
         let mut resampled: Vec<f32> = Vec::new();
-        let mut udp_source: Option<super::transport::udp::source::UdpSource> = None;
+        let mut udp_source = initial_udp;
         let mut advertiser: Option<super::transport::discovery::Advertiser> = None;
+        let mut next_advertise = Instant::now();
 
         while is_running_clone.load(Ordering::Relaxed) {
             // 1. Hardware-Driven Pacing
@@ -459,7 +451,9 @@ pub fn run(
             // Honest underrun detection: an instantaneously empty ring is the
             // normal steady state (we drain faster than capture fills); only
             // SUSTAINED emptiness while connected counts as a real glitch.
-            let starved = current_stream.is_some() && prefilled && current_buffered < min_chunk_samples;
+            let connected = current_stream.is_some() || udp_source.as_ref().is_some_and(|src| src.has_peer());
+            let available = if fixed_source_delay { self::pacing::fixed_read_len(current_buffered, min_chunk_samples, adaptive.target_ms(), capture_rate_net, STEREO) } else { current_buffered };
+            let starved = connected && prefilled && available < min_chunk_samples;
             if starvation.update(starved, start_time.elapsed().as_millis() as u64) {
                 underruns_net.fetch_add(1, Ordering::Relaxed);
                 emit_log(
@@ -537,7 +531,8 @@ pub fn run(
                         Err(e) => { emit_log(&app_handle_net, "error", format!("UDP bind failed: {}", e)); thread::sleep(Duration::from_millis(500)); }
                     }
                 }
-                if advertiser.is_none() {
+                if advertiser.is_none() && Instant::now() >= next_advertise {
+                    next_advertise = Instant::now() + Duration::from_secs(5);
                     let name = format!("tcp-streamer-{}", port);
                     match super::transport::discovery::advertise(&name, port, !psk_net.is_empty()) {
                         Ok(a) => { advertiser = Some(a); emit_log(&app_handle_net, "info", "Advertised via mDNS".to_string()); }
@@ -546,7 +541,12 @@ pub fn run(
                 }
                 if let Some(src) = udp_source.as_mut() {
                     src.poll_subscribe();
-                    if src.has_peer() {
+                    let peer_active = src.has_peer();
+                    if peer_active != udp_connected {
+                        udp_connected = peer_active;
+                        super::session::publish(&app_handle_net, session_id, if peer_active { "running" } else { "waiting" }, if peer_active { "Transmitting UDP audio" } else { "Waiting for UDP receiver" });
+                    }
+                    if peer_active {
                         // Standing-latency enforcement (same policy as TCP):
                         // after a stall, drop backlog above the adaptive target
                         // instead of letting it become permanent latency.
@@ -572,16 +572,21 @@ pub fn run(
                                 ),
                             );
                         }
-                        let count = cons.pop_slice(&mut temp_buffer);
+                        let read_len = if fixed_source_delay { self::pacing::fixed_read_len(cons.len(), temp_buffer.len(), adaptive.target_ms(), capture_rate_net, STEREO) } else { temp_buffer.len() };
+                        let count = cons.pop_slice(&mut temp_buffer[..read_len]);
                         if count > 0 {
+                            prefilled = true;
                             resampler.process(&temp_buffer[..count], &mut resampled);
                             self::encoder::encode_f32_to_pcm_i16_le(&resampled, &mut payload);
-                            src.send_audio(&payload);
-                            let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
+                            match src.send_audio(&payload) {
+                                Ok(sent) => { bytes_sent_clone.fetch_add(sent as u64, Ordering::Relaxed); }
+                                Err(e) => emit_log(&app_handle_net, "warning", format!("UDP send failed: {e}")),
+                            }
                         } else {
                             thread::sleep(Duration::from_millis(1));
                         }
                     } else {
+                        prefilled = false;
                         // No subscriber: keep the ring fresh so a new peer
                         // starts live instead of receiving stale backlog, and
                         // capture-side overruns don't pile up while idle.
@@ -598,14 +603,16 @@ pub fn run(
             if last_stats_emit.elapsed() >= Duration::from_secs(2) {
                 let uptime = start_time.elapsed().as_secs();
                 let current_bytes = bytes_sent_clone.load(Ordering::Relaxed);
-                let bitrate = if uptime > 0 {
-                    (current_bytes as f64 * 8.0) / (uptime as f64 * 1000.0)
-                } else {
-                    0.0
-                };
+                let elapsed = last_stats_emit.elapsed().as_secs_f64();
+                let bitrate = (current_bytes.saturating_sub(stats_baseline) as f64 * 8.0) / (elapsed * 1000.0);
+                stats_baseline = current_bytes;
                 let _ = app_handle_net.emit(
                     "stats-event",
                     StatsEvent {
+                        session_id, received: false,
+                        buffer_ms: cons.len() as f32 * 1000.0 / (capture_rate_net * u32::from(STEREO)) as f32,
+                        target_ms: adaptive.target_ms(), sample_rate: wire_rate_net, channels: STEREO,
+                        auth_failures: 0, lost_frames: 0, trim_ppm: 0,
                         uptime_seconds: uptime,
                         bytes_sent: current_bytes,
                         bitrate_kbps: bitrate,
@@ -618,31 +625,32 @@ pub fn run(
             if last_quality_emit.elapsed() >= Duration::from_secs(QUALITY_REPORT_INTERVAL_SECS) {
                 let occupied = cons.len();
                 let capacity = cons.capacity();
-                let buffer_health = 1.0 - (occupied as f32 / capacity as f32);
+                let buffer_health = occupied as f32 / capacity as f32;
                 let occupancy_ratio = occupied as f32 / capacity as f32;
 
-                let total_glitches =
-                    underruns_net.load(Ordering::Relaxed) + overruns_net.load(Ordering::Relaxed);
-                let glitches_delta = total_glitches.saturating_sub(glitch_baseline);
-                glitch_baseline = total_glitches;
+                let total_under = underruns_net.load(Ordering::Relaxed);
+                let total_over = overruns_net.load(Ordering::Relaxed);
+                let glitches_delta = total_under.saturating_sub(underrun_baseline) + u64::from(total_over > overrun_baseline);
+                underrun_baseline = total_under;
+                overrun_baseline = total_over;
 
                 // Best-effort RTT from the live socket, if connected.
                 let rtt = current_stream.as_ref().and_then(|s| s.rtt());
 
-                let score = super::metrics::quality_score(
-                    glitches_delta,
-                    occupancy_ratio,
-                    rtt.map(|r| r.srtt_ms),
-                );
+                let score = if current_stream.is_some() || udp_connected { super::metrics::quality_score(
+                    glitches_delta, occupancy_ratio, rtt.map(|r| r.srtt_ms),
+                ) } else { 0 };
 
                 let _ = app_handle_net.emit(
                     "quality-event",
                     QualityEvent {
+                        session_id,
                         score,
                         rtt_ms: rtt.map(|r| r.srtt_ms),
                         rtt_var_ms: rtt.map(|r| r.rttvar_ms),
                         underruns: underruns_net.load(Ordering::Relaxed),
-                        dropped: overruns_net.load(Ordering::Relaxed),
+                        dropped: overruns_net.load(Ordering::Relaxed) / u64::from(STEREO),
+                        counter_unit: "events/frames".into(),
                         buffer_health,
                     },
                 );
@@ -651,6 +659,7 @@ pub fn run(
                 // Real adaptive control: one tick per quality interval.
                 if adaptive_enabled_net {
                     if let Some(new_target) = adaptive.on_tick(glitches_delta > 0) {
+                        if let Some(status) = super::session::SESSION.update_runtime(session_id, wire_rate_net, STEREO, new_target) { let _ = app_handle_net.emit("stream-state", status); }
                         emit_log(
                             &app_handle_net,
                             "info",
@@ -659,6 +668,7 @@ pub fn run(
                         let _ = app_handle_net.emit(
                             "buffer-resize",
                             BufferResizeEvent {
+                                session_id,
                                 new_size_ms: new_target,
                                 reason: if glitches_delta > 0 {
                                     "Glitches detected"
@@ -690,6 +700,8 @@ pub fn run(
                                     continue;
                                 }
                                 let _ = stream.set_nodelay(true);
+                                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                                let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
 
                                 // Apply DSCP/QoS to the accepted client connection (parity with client mode).
                                 let tos_val = super::transport::dscp::dscp_to_tos(&dscp_clone);
@@ -700,44 +712,26 @@ pub fn run(
                                     }
                                 }
 
-                                // Bounded, non-blocking handshake (no thread stall).
-                                stream.set_nonblocking(true).ok();
-                                let mut peekbuf = [0u8; 8];
-                                let mut is_http = false;
-                                let deadline = Instant::now() + Duration::from_millis(50);
-                                loop {
-                                    match stream.peek(&mut peekbuf) {
-                                        Ok(n) if n >= 4 => {
-                                            is_http = super::transport::tcp_server::looks_like_http(&peekbuf[..n]);
-                                            break;
-                                        }
-                                        Ok(_) => {}
-                                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                                        Err(_) => break,
-                                    }
-                                    if Instant::now() >= deadline {
-                                        break;
-                                    }
-                                    thread::sleep(Duration::from_millis(2));
-                                }
-                                stream.set_nonblocking(false).ok();
-
+                                let handshake = match super::transport::tcp_server::inspect_request(&mut stream, &is_running_clone) {
+                                    Ok(handshake) => handshake,
+                                    Err(e) => { emit_log(&app_handle_net, "warning", format!("Receiver handshake failed: {e}")); let _ = stream.shutdown(std::net::Shutdown::Both); continue; }
+                                };
+                                let is_http = handshake != super::transport::tcp_server::Handshake::Raw;
                                 if is_http {
-                                    let mut hdr = [0u8; 1024];
-                                    let _ = stream.read(&mut hdr); // consume request line (best-effort)
                                     let resp = super::transport::tcp_server::http_stream_headers("audio/wav");
                                     if let Err(e) = stream.write_all(resp.as_bytes()) {
-                                        emit_log(&app_handle_net, "error", format!("Failed to send HTTP headers: {}", e));
-                                    } else {
-                                        emit_log(&app_handle_net, "info", "HTTP client detected. Serving audio/wav".to_string());
+                                        emit_log(&app_handle_net, "warning", format!("HTTP response failed: {e}")); let _ = stream.shutdown(std::net::Shutdown::Both); continue;
                                     }
+                                    if handshake == super::transport::tcp_server::Handshake::HttpHead { let _ = stream.shutdown(std::net::Shutdown::Both); continue; }
+                                    emit_log(&app_handle_net, "info", "Serving HTTP audio/wav".into());
                                 }
 
                                 let request_format = if is_http { "wav" } else { format_clone.as_str() };
                                 emit_log(&app_handle_net, "success", format!("Client connected from {} (Format: {})", addr, request_format));
                                 use_chunked = is_http;
                                 wav_header_sent = false;
-                                current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
+                                super::session::publish(&app_handle_net, session_id, "running", format!("TCP receiver connected: {addr}"));
+                            current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
                                 disconnect_time = None;
                                 last_heartbeat = Instant::now();
                             }
@@ -750,9 +744,10 @@ pub fn run(
                 } else {
                     // CLIENT MODE (TCP only)
                     match super::transport::tcp_client::connect(
-                        &ip_clone, port, &dscp_clone, Duration::from_secs(2),
+                        &ip_clone, port, &dscp_clone, Duration::from_millis(300), &is_running_clone,
                     ) {
                         Ok(stream) => {
+                            super::session::publish(&app_handle_net, session_id, "running", format!("Streaming TCP to {ip_clone}:{port}"));
                             emit_log(&app_handle_net, "success", format!("Connected to {}:{}", ip_clone, port));
                             current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
                             disconnect_time = None;
@@ -761,7 +756,9 @@ pub fn run(
                         }
                         Err(e) => {
                             emit_log(&app_handle_net, "error", format!("Connection failed: {}", e));
+                            if !is_running_clone.load(Ordering::Relaxed) { continue; }
                             if !auto_reconnect_net {
+                                super::session::publish(&app_handle_net, session_id, "error", format!("TCP connection failed: {e}"));
                                 emit_log(
                                     &app_handle_net,
                                     "info",
@@ -770,7 +767,8 @@ pub fn run(
                                 is_running_clone.store(false, Ordering::Relaxed);
                                 continue;
                             }
-                            thread::sleep(add_jitter(retry_delay));
+                            super::session::publish(&app_handle_net, session_id, "reconnecting", format!("TCP reconnect: {e}"));
+                            super::session::interruptible_sleep(&is_running_clone, add_jitter(retry_delay));
                             retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
                         }
                     }
@@ -857,7 +855,8 @@ pub fn run(
                     );
                 }
 
-                let count = cons.pop_slice(&mut temp_buffer);
+                let read_len = if fixed_source_delay { self::pacing::fixed_read_len(cons.len(), temp_buffer.len(), adaptive.target_ms(), capture_rate_net, STEREO) } else { temp_buffer.len() };
+                        let count = cons.pop_slice(&mut temp_buffer[..read_len]);
 
                 if count > 0 {
                     resampler.process(&temp_buffer[..count], &mut resampled);
@@ -865,7 +864,6 @@ pub fn run(
 
                     let _write_start = Instant::now();
                     let mut write_success = false;
-                    let mut would_block = false;
 
                     {
                         let stream: &mut dyn super::transport::Connection = stream_socket.as_mut();
@@ -873,7 +871,6 @@ pub fn run(
                             let mut writer = ChunkedWriter::new(stream);
                             match writer.write_all(&payload) {
                                  Ok(_) => write_success = true,
-                                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { would_block = true; },
                                  Err(e) => {
                                       emit_log(&app_handle_net, "error", format!("Write error (chunked): {}", e));
                                  }
@@ -881,7 +878,6 @@ pub fn run(
                         } else {
                             match stream.write_all(&payload) {
                                 Ok(_) => write_success = true,
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { would_block = true; },
                                 Err(e) => {
                                      let (level, msg) = if e.kind() == std::io::ErrorKind::BrokenPipe {
                                          ("info", "Client disconnected".to_string())
@@ -898,12 +894,12 @@ pub fn run(
                         let _ = bytes_sent_clone.fetch_add(payload.len() as u64, Ordering::Relaxed);
 
                         current_stream = Some(stream_socket);
-                    } else if would_block {
-                        current_stream = Some(stream_socket);
+
                     } else {
                          // Write error — disconnect
                          stream_socket.close();
                          current_stream = None;
+                         super::session::publish(&app_handle_net, session_id, if is_server_clone { "waiting" } else { "reconnecting" }, "TCP connection lost");
 
                          if !is_server_clone && !auto_reconnect_net {
                              emit_log(&app_handle_net, "info", "Auto-reconnect disabled; stopping stream.".to_string());
@@ -928,24 +924,12 @@ pub fn run(
             "info",
             format!("Network thread stopped: {}", exit_reason),
         );
-    });
-
-    // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
-    let capacity_hint = effective_chunk as usize * STEREO as usize;
-    let audio_stream = self::capture::build_input_stream(
-        &device,
-        &stream_config,
-        selected_format,
-        device_channels,
-        prod,
-        overruns.clone(),
-        capacity_hint,
-    )
-    .map_err(|e| e.to_string())?;
+    }).map_err(|e| format!("Failed to spawn network worker: {e}"))?;
 
     Ok((
         audio_stream,
         StreamStats {
+            workers: vec![network_handle],
             bytes_sent,
             start_time: Instant::now(),
             is_running,

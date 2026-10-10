@@ -1,13 +1,15 @@
 #![deny(clippy::all)]
 
 use super::constants::*;
+use super::session::{publish, SessionStatus, SESSION};
 use super::stats::{emit_log, StreamStats};
 use cpal::traits::StreamTrait;
-use std::sync::atomic::Ordering;
-use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
+type Reply = mpsc::Sender<Result<SessionStatus, String>>;
 
 pub enum AudioCommand {
     Start {
@@ -33,8 +35,13 @@ pub enum AudioCommand {
         transport: String,
         psk: String,
         app_handle: Box<AppHandle>,
+        reply: Reply,
+        running: Arc<AtomicBool>,
     },
-    Stop,
+    Stop {
+        reply: Option<Reply>,
+        app_handle: Option<Box<AppHandle>>,
+    },
     StartSink {
         output_device: String,
         source_addr: String,
@@ -42,11 +49,14 @@ pub enum AudioCommand {
         overrides: super::engine::latency::LatencyOverrides,
         psk: String,
         app_handle: Box<AppHandle>,
+        reply: Reply,
+        running: Arc<AtomicBool>,
     },
 }
 
 pub struct AudioState {
     pub tx: Mutex<mpsc::SyncSender<AudioCommand>>,
+    cancellation: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl AudioState {
@@ -55,6 +65,7 @@ impl AudioState {
 
         thread::spawn(move || {
             let mut current_stream_handle: Option<(cpal::Stream, StreamStats)> = None;
+            let mut current_app: Option<AppHandle> = None;
 
             loop {
                 match rx.try_recv() {
@@ -81,6 +92,8 @@ impl AudioState {
                         transport,
                         psk,
                         app_handle,
+                        reply,
+                        running,
                     }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
@@ -89,7 +102,17 @@ impl AudioState {
                             drop(stats);
                         }
 
-                        if is_server {
+                        let status = SESSION.begin();
+                        let session_id = status.session_id;
+                        publish(&app_handle, session_id, "starting", "Starting audio source");
+                        current_app = Some((*app_handle).clone());
+                        if transport == "udp" {
+                            emit_log(
+                                &app_handle,
+                                "info",
+                                format!("Starting Native UDP source on port {port}"),
+                            );
+                        } else if is_server {
                             emit_log(
                                 &app_handle,
                                 "info",
@@ -126,9 +149,23 @@ impl AudioState {
                             transport,
                             psk,
                             (*app_handle).clone(),
+                            session_id,
+                            running.clone(),
                         ) {
                             Ok((stream, stats)) => {
-                                if let Err(e) = stream.play() {
+                                if !running.load(Ordering::Relaxed) {
+                                    drop(stream);
+                                    drop(stats);
+                                    publish(&app_handle, session_id, "stopped", "Start cancelled");
+                                    let _ = reply.send(Ok(SESSION.snapshot()));
+                                } else if let Err(e) = stream.play() {
+                                    publish(
+                                        &app_handle,
+                                        session_id,
+                                        "error",
+                                        format!("Playback failed: {e}"),
+                                    );
+                                    let _ = reply.send(Err(e.to_string()));
                                     emit_log(
                                         &app_handle,
                                         "error",
@@ -136,6 +173,15 @@ impl AudioState {
                                     );
                                 } else {
                                     current_stream_handle = Some((stream, stats));
+                                    if SESSION.snapshot().state == "starting" {
+                                        publish(
+                                            &app_handle,
+                                            session_id,
+                                            "waiting",
+                                            "Waiting for receiver",
+                                        );
+                                    }
+                                    let _ = reply.send(Ok(SESSION.snapshot()));
                                     emit_log(
                                         &app_handle,
                                         "success",
@@ -144,6 +190,17 @@ impl AudioState {
                                 }
                             }
                             Err(e) => {
+                                publish(
+                                    &app_handle,
+                                    session_id,
+                                    if running.load(Ordering::Relaxed) {
+                                        "error"
+                                    } else {
+                                        "stopped"
+                                    },
+                                    e.clone(),
+                                );
+                                let _ = reply.send(Err(e.clone()));
                                 emit_log(
                                     &app_handle,
                                     "error",
@@ -152,13 +209,19 @@ impl AudioState {
                             }
                         }
                     }
-                    Ok(AudioCommand::Stop) => {
+                    Ok(AudioCommand::Stop { reply, app_handle }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
                             stream.pause().ok();
                             drop(stream);
                         }
                         current_stream_handle = None;
+                        if let Some(app) = app_handle.as_deref().or(current_app.as_ref()) {
+                            publish(app, SESSION.snapshot().session_id, "stopped", "Ready");
+                        }
+                        if let Some(reply) = reply {
+                            let _ = reply.send(Ok(SESSION.snapshot()));
+                        }
                     }
                     Ok(AudioCommand::StartSink {
                         output_device,
@@ -167,6 +230,8 @@ impl AudioState {
                         overrides,
                         psk,
                         app_handle,
+                        reply,
+                        running,
                     }) => {
                         if let Some((stream, stats)) = current_stream_handle.take() {
                             stats.is_running.store(false, Ordering::Relaxed);
@@ -175,6 +240,10 @@ impl AudioState {
                             drop(stats);
                         }
 
+                        let status = SESSION.begin();
+                        let session_id = status.session_id;
+                        publish(&app_handle, session_id, "starting", "Subscribing to source");
+                        current_app = Some((*app_handle).clone());
                         emit_log(
                             &app_handle,
                             "info",
@@ -191,9 +260,23 @@ impl AudioState {
                             overrides,
                             psk,
                             (*app_handle).clone(),
+                            session_id,
+                            running.clone(),
                         ) {
                             Ok((stream, stats)) => {
-                                if let Err(e) = stream.play() {
+                                if !running.load(Ordering::Relaxed) {
+                                    drop(stream);
+                                    drop(stats);
+                                    publish(&app_handle, session_id, "stopped", "Start cancelled");
+                                    let _ = reply.send(Ok(SESSION.snapshot()));
+                                } else if let Err(e) = stream.play() {
+                                    publish(
+                                        &app_handle,
+                                        session_id,
+                                        "error",
+                                        format!("Playback failed: {e}"),
+                                    );
+                                    let _ = reply.send(Err(e.to_string()));
                                     emit_log(
                                         &app_handle,
                                         "error",
@@ -201,6 +284,15 @@ impl AudioState {
                                     );
                                 } else {
                                     current_stream_handle = Some((stream, stats));
+                                    if SESSION.snapshot().state == "starting" {
+                                        publish(
+                                            &app_handle,
+                                            session_id,
+                                            "waiting",
+                                            "Waiting for source audio",
+                                        );
+                                    }
+                                    let _ = reply.send(Ok(SESSION.snapshot()));
                                     emit_log(
                                         &app_handle,
                                         "success",
@@ -209,6 +301,17 @@ impl AudioState {
                                 }
                             }
                             Err(e) => {
+                                publish(
+                                    &app_handle,
+                                    session_id,
+                                    if running.load(Ordering::Relaxed) {
+                                        "error"
+                                    } else {
+                                        "stopped"
+                                    },
+                                    e.clone(),
+                                );
+                                let _ = reply.send(Err(e.clone()));
                                 emit_log(
                                     &app_handle,
                                     "error",
@@ -218,7 +321,27 @@ impl AudioState {
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => {
-                        thread::sleep(Duration::from_millis(200));
+                        if current_stream_handle
+                            .as_ref()
+                            .is_some_and(|(_, stats)| !stats.is_running.load(Ordering::Relaxed))
+                        {
+                            if let Some((stream, stats)) = current_stream_handle.take() {
+                                let _ = stream.pause();
+                                drop(stream);
+                                drop(stats);
+                            }
+                            if SESSION.snapshot().state != "error" {
+                                if let Some(app) = &current_app {
+                                    publish(
+                                        app,
+                                        SESSION.snapshot().session_id,
+                                        "error",
+                                        "Audio transport stopped unexpectedly",
+                                    );
+                                }
+                            }
+                        }
+                        thread::sleep(Duration::from_millis(20));
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
                         break;
@@ -227,12 +350,43 @@ impl AudioState {
             }
         });
 
-        Self { tx: Mutex::new(tx) }
+        Self {
+            tx: Mutex::new(tx),
+            cancellation: Mutex::new(None),
+        }
     }
 
+    pub fn new_running_flag(&self) -> Arc<AtomicBool> {
+        let running = Arc::new(AtomicBool::new(true));
+        let mut guard = self.cancellation.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = guard.replace(running.clone()) {
+            old.store(false, Ordering::Relaxed);
+        }
+        running
+    }
+    pub fn cancel(&self) {
+        if let Some(running) = self
+            .cancellation
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            running.store(false, Ordering::Relaxed);
+        }
+    }
     pub fn shutdown(&self) {
+        self.cancel();
+        let (reply, ack) = mpsc::channel();
         if let Ok(tx) = self.tx.lock() {
-            let _ = tx.send(AudioCommand::Stop);
+            if tx
+                .try_send(AudioCommand::Stop {
+                    reply: Some(reply),
+                    app_handle: None,
+                })
+                .is_ok()
+            {
+                let _ = ack.recv_timeout(Duration::from_secs(2));
+            }
         }
     }
 }

@@ -11,7 +11,7 @@
 use cpal::traits::DeviceTrait;
 use cpal::{BufferSize, SampleFormat, SupportedBufferSize};
 use ringbuf::HeapProducer;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Converts one callback buffer to interleaved stereo f32 in `scratch` and
@@ -58,6 +58,7 @@ pub(crate) fn push_stereo<T: Copy>(
 /// callback. `in_channels` is the device's native channel count (as opened);
 /// the ring receives interleaved stereo f32 regardless. `overruns` counts
 /// samples dropped when the ring cannot accept a whole callback buffer.
+#[allow(clippy::too_many_arguments)]
 pub fn build_input_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -66,8 +67,10 @@ pub fn build_input_stream(
     mut producer: HeapProducer<f32>,
     overruns: Arc<AtomicU64>,
     capacity_hint: usize,
+    running: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
-    let err_fn = |err: cpal::StreamError| {
+    let err_fn = move |err: cpal::StreamError| {
+        running.store(false, Ordering::Relaxed);
         log::error!("CPAL stream error: {}", err);
     };
     let ch = in_channels as usize;
@@ -318,6 +321,7 @@ mod hardware_smoke {
             prod,
             overruns,
             4096,
+            Arc::new(AtomicBool::new(true)),
         )
         .expect("negotiated config must build");
         stream.play().expect("stream must start");

@@ -19,22 +19,36 @@ pub enum Pop {
 
 pub struct JitterBuffer {
     next_seq: u64,
+    started: bool,
     buf: BTreeMap<u64, Vec<u8>>,
     lost_after: usize,
 }
 
 impl JitterBuffer {
     /// `lost_after` = how many later frames must be buffered before a missing
-    /// `next_seq` is treated as lost. The stream starts at seq 0.
+    /// `next_seq` is treated as lost. The stream synchronizes to its first received sequence; discontinuities are bounded.
     pub fn new(lost_after: usize) -> Self {
         Self {
             next_seq: 0,
+            started: false,
             buf: BTreeMap::new(),
             lost_after: lost_after.max(1),
         }
     }
 
     pub fn push(&mut self, seq: u64, frame: Vec<u8>) {
+        if !self.started {
+            self.next_seq = seq;
+            self.started = true;
+        }
+        // Rebase large discontinuities in constant work and bound retained memory.
+        if seq.saturating_sub(self.next_seq) > 256 {
+            self.buf.clear();
+            self.next_seq = seq;
+        }
+        if self.buf.len() >= 256 && !self.buf.contains_key(&seq) {
+            return;
+        }
         if seq < self.next_seq {
             return; // too old
         }
@@ -43,11 +57,11 @@ impl JitterBuffer {
 
     pub fn pop(&mut self) -> Pop {
         if let Some(frame) = self.buf.remove(&self.next_seq) {
-            self.next_seq += 1;
+            self.next_seq = self.next_seq.saturating_add(1);
             return Pop::Frame(frame);
         }
         if self.buf.len() >= self.lost_after {
-            self.next_seq += 1; // declare lost, skip the gap
+            self.next_seq = self.next_seq.saturating_add(1); // declare lost, skip the gap
             return Pop::Gap;
         }
         Pop::Starved
@@ -80,8 +94,8 @@ mod tests {
     #[test]
     fn out_of_order_is_reordered() {
         let mut j = JitterBuffer::new(3);
-        j.push(2, f(2));
         j.push(0, f(0));
+        j.push(2, f(2));
         j.push(1, f(1));
         assert_eq!(j.pop(), Pop::Frame(f(0)));
         assert_eq!(j.pop(), Pop::Frame(f(1)));
@@ -91,22 +105,26 @@ mod tests {
     #[test]
     fn missing_frame_becomes_gap_once_enough_buffered() {
         let mut j = JitterBuffer::new(2);
-        // seq 0 never arrives; 1 and 2 do.
-        j.push(1, f(1));
+        j.push(0, f(0));
+        assert_eq!(j.pop(), Pop::Frame(f(0)));
+        // seq 1 never arrives; 2 and 3 do.
         j.push(2, f(2));
-        assert_eq!(j.pop(), Pop::Gap); // 0 declared lost (2 buffered >= lost_after)
-        assert_eq!(j.pop(), Pop::Frame(f(1)));
+        j.push(3, f(3));
+        assert_eq!(j.pop(), Pop::Gap);
         assert_eq!(j.pop(), Pop::Frame(f(2)));
+        assert_eq!(j.pop(), Pop::Frame(f(3)));
     }
 
     #[test]
     fn waits_when_not_enough_buffered() {
         let mut j = JitterBuffer::new(3);
-        j.push(1, f(1)); // only 1 buffered, < lost_after
-        assert_eq!(j.pop(), Pop::Starved); // still waiting for 0
-        j.push(0, f(0)); // late but recovered
+        j.push(0, f(0));
         assert_eq!(j.pop(), Pop::Frame(f(0)));
+        j.push(2, f(2));
+        assert_eq!(j.pop(), Pop::Starved);
+        j.push(1, f(1));
         assert_eq!(j.pop(), Pop::Frame(f(1)));
+        assert_eq!(j.pop(), Pop::Frame(f(2)));
     }
 
     #[test]

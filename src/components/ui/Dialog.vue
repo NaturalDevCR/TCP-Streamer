@@ -6,6 +6,7 @@
     <DialogPortal>
       <DialogOverlay class="fixed inset-0 z-40 bg-black/60" />
       <DialogContent
+        v-bind="description ? {} : { 'aria-describedby': undefined }"
         class="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius)] bg-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl p-6 focus:outline-none"
       >
         <DialogTitle v-if="title" class="text-base font-semibold text-[var(--color-text)] mb-2">
@@ -16,6 +17,7 @@
         </DialogDescription>
         <slot />
         <DialogClose
+          :aria-label="t('action.cancel')"
           class="absolute right-4 top-4 rounded-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-ring"
         >
           <svg
@@ -37,6 +39,8 @@
   </DialogRoot>
 </template>
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+const { t } = useI18n();
 import {
   DialogRoot,
   DialogTrigger,

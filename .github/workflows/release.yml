@@ -1,52 +1,73 @@
 name: Release
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
-
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z); versions and changelog must match
+        required: true
+        type: string
+permissions:
+  contents: read
 jobs:
-  lint-and-test:
+  resolve:
     runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+      body: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
         with:
-          node-version: "lts/*"
-          cache: "pnpm"
-
-      - name: Install Frontend Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run ESLint
-        run: pnpm lint
-
-      - name: Run Frontend Tests
-        run: pnpm test
-
-      - name: Install native dependencies
+          fetch-depth: 0
+      - name: Resolve existing release tag
+        id: release
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run Rust Tests
-        working-directory: src-tauri
-        run: cargo test
-
-      - name: Run Clippy
-        working-directory: src-tauri
-        run: cargo clippy -- -D warnings
-
+          if [[ ! "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release requires an existing vX.Y.Z tag."
+            exit 1
+          fi
+          commit=$(git rev-parse --verify "refs/tags/$REQUESTED_TAG^{commit}")
+          git checkout --detach "$commit"
+          echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Validate manifest versions and extract notes
+        id: notes
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const version = process.env.RELEASE_TAG.slice(1);
+          const frontend = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')).version;
+          const cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8').split(/^\[/m)
+            .find(section => section.startsWith('package]'))?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          if ([frontend, tauri, cargo].some(value => value !== version)) {
+            throw new Error(`Tag ${version} must match package.json (${frontend}), tauri.conf.json (${tauri}) and Cargo.toml (${cargo})`);
+          }
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const section = changelog.split(/^## /m).find(part => part.startsWith(`[${version}]`));
+          const notes = section?.slice(section.indexOf('\n') + 1).trim();
+          if (!notes) throw new Error(`CHANGELOG.md needs nonempty notes for [${version}]`);
+          const delimiter = 'RELEASE_NOTES_' + crypto.randomUUID();
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `body<<${delimiter}\n${notes}\n${delimiter}\n`);
+          NODE
+  validate:
+    needs: resolve
+    uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ needs.resolve.outputs.commit }}
   release:
-    needs: lint-and-test
+    needs: [resolve, validate]
     permissions:
       contents: write
     strategy:
@@ -54,68 +75,32 @@ jobs:
       matrix:
         platform: [macos-latest, ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.platform }}
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+      - name: Install native dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev libssl-dev libfuse2
-
-      - name: Rust setup
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Sync node version and setup cache
-        uses: actions/setup-node@v5
+          workspaces: ./src-tauri -> target
+      - uses: actions/setup-node@v5
         with:
-          node-version: "lts/*"
-          cache: "pnpm"
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      # The release body used to be a hardcoded placeholder, so every published
-      # release said "See the assets" and nothing about what changed. Pull the
-      # matching CHANGELOG section instead, and fail the build if there isn't
-      # one — a release with no notes should not be publishable by accident.
-      - name: Extract release notes from the changelog
-        id: notes
-        shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          notes=$(awk -v ver="$version" '
-            $0 ~ "^## \\[" ver "\\]" { found = 1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md)
-          if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
-            echo "::error::CHANGELOG.md has no section for [$version]. Add one before tagging $GITHUB_REF_NAME."
-            exit 1
-          fi
-          {
-            echo "body<<RELEASE_NOTES_EOF"
-            printf '%s\n' "$notes"
-            echo "RELEASE_NOTES_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build the app
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Build release assets
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "TCP Streamer ${{ github.ref_name }}"
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
+          args: -- --locked
+          tagName: ${{ needs.resolve.outputs.tag }}
+          releaseName: TCP Streamer ${{ needs.resolve.outputs.tag }}
+          releaseBody: ${{ needs.resolve.outputs.body }}
+          releaseDraft: true
           prerelease: false

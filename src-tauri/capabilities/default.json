@@ -9,7 +9,17 @@
     "core:window:allow-minimize",
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
-    "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/NaturalDevCR/TCP-Streamer/*"
+        },
+        {
+          "url": "https://github.com/jdavidoa91/tcp-streamer/*"
+        }
+      ]
+    },
     "autostart:default",
     "store:default"
   ]

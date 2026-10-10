@@ -47,7 +47,30 @@ impl TcpConnection {
 
 impl Write for TcpConnection {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.stream.set_nonblocking(true)?;
         self.stream.write(buf)
+    }
+    fn write_all(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+        use std::io::{Error, ErrorKind};
+        use std::time::{Duration, Instant};
+        self.stream.set_nonblocking(true)?;
+        let end = Instant::now() + Duration::from_millis(200);
+        while !buf.is_empty() {
+            let left = end
+                .checked_duration_since(Instant::now())
+                .ok_or_else(|| Error::new(ErrorKind::TimedOut, "Audio write deadline exceeded"))?;
+            let _ = left;
+            match self.stream.write(buf) {
+                Ok(0) => return Err(Error::new(ErrorKind::WriteZero, "Peer accepted no audio")),
+                Ok(n) => buf = &buf[n..],
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.stream.flush()
@@ -63,5 +86,25 @@ impl Connection for TcpConnection {
     }
     fn close(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn slow_receiver_cannot_extend_audio_write_deadline() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (peer, _) = listener.accept().unwrap();
+        let socket = socket2::SockRef::from(&stream);
+        socket.set_send_buffer_size(1024).unwrap();
+        let mut connection = TcpConnection::new(stream);
+        let start = std::time::Instant::now();
+        let result = connection.write_all(&vec![0; 8 * 1024 * 1024]);
+        assert!(result.is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        connection.close();
+        drop(peer);
     }
 }

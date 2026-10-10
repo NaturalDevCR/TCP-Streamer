@@ -6,7 +6,7 @@
 use cpal::traits::DeviceTrait;
 use cpal::{SampleFormat, StreamConfig};
 use ringbuf::HeapConsumer;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Pops up to `data.len()` f32 samples and writes them through `conv`;
@@ -42,8 +42,12 @@ pub fn build_output_stream(
     format: SampleFormat,
     mut consumer: HeapConsumer<f32>,
     underruns: Arc<AtomicU64>,
+    running: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
-    let err_fn = |err: cpal::StreamError| log::error!("CPAL output error: {}", err);
+    let err_fn = move |err: cpal::StreamError| {
+        running.store(false, Ordering::Relaxed);
+        log::error!("CPAL output error: {}", err);
+    };
     // Preallocated so the integer-format callbacks never allocate mid-stream
     // (resize within capacity is a plain fill).
     let mut scratch: Vec<f32> = Vec::with_capacity(16_384);

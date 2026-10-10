@@ -1,5 +1,9 @@
 <template>
   <input
+    :id="field?.id.value"
+    :aria-label="field?.label.value"
+    :aria-describedby="field?.describedBy.value || undefined"
+    :aria-invalid="field?.invalid.value || undefined"
     :type="type ?? 'text'"
     :value="modelValue"
     :placeholder="placeholder"
@@ -9,6 +13,16 @@
   />
 </template>
 <script setup lang="ts">
+import { inject, type ComputedRef } from "vue";
+const field = inject<
+  | {
+      id: ComputedRef<string>;
+      label: ComputedRef<string | undefined>;
+      describedBy: ComputedRef<string>;
+      invalid: ComputedRef<boolean>;
+    }
+  | undefined
+>("field", undefined);
 const props = defineProps<{
   modelValue?: string | number;
   type?: string;

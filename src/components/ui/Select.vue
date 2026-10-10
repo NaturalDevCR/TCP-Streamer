@@ -5,6 +5,11 @@
     @update:model-value="$emit('update:modelValue', $event as string)"
   >
     <SelectTrigger
+      v-bind="$attrs"
+      :id="field?.id.value"
+      :aria-label="field?.label.value"
+      :aria-describedby="field?.describedBy.value || undefined"
+      :aria-invalid="field?.invalid.value || undefined"
       class="focus-ring flex w-full h-9 items-center justify-between gap-1 rounded-[var(--radius)] bg-[var(--color-surface-1)] border border-[var(--color-border)] px-3 text-sm text-[var(--color-text)] data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed hover:border-[var(--color-border-strong)]"
     >
       <SelectValue :placeholder="placeholder" />
@@ -24,6 +29,17 @@
   </SelectRoot>
 </template>
 <script setup lang="ts">
+defineOptions({ inheritAttrs: false });
+import { inject, type ComputedRef } from "vue";
+const field = inject<
+  | {
+      id: ComputedRef<string>;
+      label: ComputedRef<string | undefined>;
+      describedBy: ComputedRef<string>;
+      invalid: ComputedRef<boolean>;
+    }
+  | undefined
+>("field", undefined);
 import {
   SelectRoot,
   SelectTrigger,

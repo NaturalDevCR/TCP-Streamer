@@ -6,6 +6,9 @@
     <button
       v-for="opt in options"
       :key="opt.value"
+      role="radio"
+      :aria-checked="modelValue === opt.value"
+      :tabindex="modelValue === opt.value ? 0 : -1"
       type="button"
       :class="[
         'px-3 py-1.5 text-sm font-medium rounded-[calc(var(--radius)-2px)] transition-colors focus-ring',
@@ -14,6 +17,7 @@
           : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
       ]"
       :disabled="disabled"
+      @keydown="onKey($event, opt.value)"
       @click="$emit('update:modelValue', opt.value)"
     >
       {{ opt.label }}
@@ -21,10 +25,29 @@
   </div>
 </template>
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   modelValue?: string | number;
   options: { value: string | number; label: string }[];
   disabled?: boolean;
 }>();
-defineEmits<{ "update:modelValue": [string | number] }>();
+const emit = defineEmits<{ "update:modelValue": [string | number] }>();
+function onKey(event: KeyboardEvent, value: string | number) {
+  if (
+    !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) ||
+    props.disabled
+  )
+    return;
+  event.preventDefault();
+  const idx = props.options.findIndex((o) => o.value === value);
+  const direction = ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 1;
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? props.options.length - 1
+        : (idx + direction + props.options.length) % props.options.length;
+  emit("update:modelValue", props.options[next].value);
+  const buttons = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll("button");
+  (buttons?.[next] as HTMLElement)?.focus();
+}
 </script>

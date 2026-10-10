@@ -1,5 +1,7 @@
 {
-  "app": { "name": "TCP Streamer" },
+  "app": {
+    "name": "TCP Streamer"
+  },
   "tooltip": {
     "moreInfo": "Más información sobre {option}"
   },
@@ -46,7 +48,7 @@
     "modeClient": "Cliente (Enviar audio a IP)",
     "modeServer": "Servidor (Esperar conexiones)",
     "targetAddress": "Dirección destino",
-    "targetAddressPlaceholder": "192.168.1.100:4953",
+    "targetAddressPlaceholder": "192.168.1.100",
     "listeningPort": "Puerto de escucha",
     "port": "Puerto",
     "allowlist": "Lista de permitidos",
@@ -92,9 +94,9 @@
     "latencyBalanced": "Balanceado",
     "latencyRobust": "Robusto",
     "latencyCustom": "Personalizado",
-    "latencyBroadcast": "Broadcast (latencia fija)",
-    "fixedLatency": "Latencia fija (ms)",
-    "broadcastNote": "La latencia se mantiene constante para que el desfase entre audio y video no cambie durante toda la transmisión. El ajuste de búfer adaptativo se ignora.",
+    "latencyBroadcast": "Difusión (objetivo de latencia)",
+    "fixedLatency": "Objetivo de latencia (ms)",
+    "broadcastNote": "Objetivo de latencia del búfer para difusión. La latencia real de extremo a extremo también depende de los dispositivos y la red. Se ignora el búfer adaptativo.",
     "ringBufferDuration": "Buffer circular (ms)",
     "chunkSize": "Tamaño de chunk (muestras)",
     "minBuffer": "Buffer mín (ms)",
@@ -169,5 +171,100 @@
     "profileExists": "El perfil ya existe",
     "profileDeleted": "Perfil '{name}' borrado",
     "cannotDeleteDefault": "No se puede borrar el perfil por defecto"
+  },
+  "session": {
+    "stopped": "Listo",
+    "starting": "Iniciando…",
+    "waiting": "Esperando receptor",
+    "running": "Transmitiendo",
+    "reconnecting": "Reconectando…",
+    "error": "Error",
+    "failure": "Error: {error}",
+    "validation": {
+      "device": "Selecciona un dispositivo de entrada",
+      "outputDevice": "Selecciona un dispositivo de salida",
+      "sourceAddress": "Ingresa la dirección del origen",
+      "target": "Ingresa la dirección de destino",
+      "port": "Ingresa un puerto entre 1 y 65535"
+    },
+    "stopping": "Deteniendo…"
+  },
+  "quality": {
+    "excellent": "Excelente",
+    "good": "Buena",
+    "fair": "Regular",
+    "poor": "Mala",
+    "degraded": "La calidad de red bajó a {score}",
+    "recovered": "La calidad de red se recuperó a {score}"
+  },
+  "operation": {
+    "refresh": "Actualizar dispositivos",
+    "searching": "Buscando…",
+    "found": "{count} encontrados",
+    "encrypted": "cifrado",
+    "noSources": "No se encontraron fuentes. Verifica que el origen esté activo en esta red.",
+    "dirty": "Cambios sin guardar",
+    "save": "Guardar cambios",
+    "profileName": "Nombre del perfil",
+    "deleteConfirm": "¿Eliminar el perfil \"{name}\"?",
+    "switchConfirm": "¿Guardar los cambios antes de cambiar de perfil? Cancelar conserva este perfil.",
+    "paused": "Reanudar seguimiento",
+    "pause": "Pausar seguimiento",
+    "export": "Exportar sanitizado",
+    "import": "Importar perfil",
+    "importHelp": "Pega un perfil exportado de versión 1. Se excluyen los secretos.",
+    "onboarding": "Elige Fuente para enviar audio del micrófono o del sistema, o Receptor para reproducir una fuente UDP nativa. Configura el dispositivo y la dirección en Conexión y luego inicia. TCP/HTTP envía audio sin cifrar. UDP nativo admite un secreto compartido.",
+    "locked": "La sesión activa usa los ajustes guardados al iniciar. Detén la sesión antes de cambiar la configuración.",
+    "microphone": "Si no aparece una entrada, permite acceso al micrófono en los ajustes de privacidad del sistema y actualiza los dispositivos.",
+    "effective": "Configuración activa",
+    "none": "No hay una sesión activa",
+    "close": "Cerrar la ventana mantiene TCP Streamer activo en la bandeja del sistema.",
+    "shortcuts": "Guardar: Ctrl/Cmd+S · Iniciar/Detener: Ctrl/Cmd+Enter",
+    "sinkAudio": "El receptor negocia la frecuencia y el formato de captura con la fuente. Los ajustes de búfer se aplican localmente.",
+    "secret": "Los secretos permanecen en memoria por defecto. Recordar un secreto lo guarda sin cifrar en las preferencias locales; la exportación sanitizada siempre lo excluye.",
+    "support": "Soporte del proyecto",
+    "rememberSecret": "Recordar secreto compartido localmente",
+    "noData": "Sin datos",
+    "bufferResized": "Búfer cambiado a {ms} ms: {reason}",
+    "invalidBuffer": "Se requiere 0 < mínimo ≤ máximo ≤ capacidad del anillo",
+    "occupancy": "Ocupación del búfer",
+    "targetLatency": "Objetivo del búfer",
+    "authenticationFailures": "Fallos de autenticación",
+    "lostFrames": "Frames de audio perdidos",
+    "drift": "Corrección de reloj",
+    "wireFormat": "Formato negociado de red",
+    "deviceFormat": "Formato abierto del dispositivo",
+    "ringCapacity": "Capacidad del anillo",
+    "frames": "frames",
+    "driverDefault": "Predeterminado del controlador",
+    "enabled": "Activado",
+    "disabled": "Desactivado",
+    "currentOutput": "Formato de reproducción actual",
+    "currentWire": "Formato de red actual",
+    "requested": "Solicitado al iniciar",
+    "underrunEvents": "Eventos de falta de audio",
+    "missingAudioFrames": "Frames de reproducción faltantes",
+    "droppedAudioFrames": "Frames de audio descartados",
+    "ringOccupancy": "Ocupación del anillo"
+  },
+  "preflight": {
+    "title": "Comprobar antes de iniciar",
+    "scopeNote": "Comprueba configuración, disponibilidad del dispositivo, DNS y puertos locales. No captura audio, no conecta con un receptor ni verifica acceso remoto por UDP.",
+    "checking": "Comprobando…",
+    "check": "Ejecutar comprobación",
+    "stale": "Los ajustes cambiaron después de la comprobación. Ejecútala de nuevo.",
+    "ready": "Comprobaciones aprobadas. Puedes iniciar manualmente.",
+    "notReady": "Resuelve las comprobaciones fallidas antes de iniciar.",
+    "stages": {
+      "configuration": "Configuración",
+      "device": "Dispositivo de audio",
+      "network": "Red",
+      "scope": "Alcance de la comprobación"
+    },
+    "status": {
+      "ok": "Aprobado",
+      "error": "Falló",
+      "warning": "Advertencia"
+    }
   }
 }

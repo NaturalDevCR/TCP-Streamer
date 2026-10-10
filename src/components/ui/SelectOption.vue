@@ -1,5 +1,7 @@
 <template>
   <SelectItem
+    v-if="String(value).length > 0"
+    :key="label"
     :value="String(value)"
     class="relative flex w-full cursor-pointer select-none items-center rounded-[6px] px-2 py-1.5 text-sm text-[var(--color-text)] outline-none data-[highlighted]:bg-[var(--color-accent)] data-[highlighted]:text-[var(--color-on-accent)]"
   >

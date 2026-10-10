@@ -13,12 +13,24 @@ pub fn connect(
     port: u16,
     dscp_strategy: &str,
     connect_timeout: Duration,
+    running: &std::sync::atomic::AtomicBool,
 ) -> io::Result<TcpStream> {
-    let addrs = super::resolve::resolve_target(host, port)?;
+    let addrs =
+        super::resolve::resolve_target_cancellable(host, port, running, Duration::from_secs(2))?;
+    let deadline = std::time::Instant::now() + connect_timeout;
     let tos = u32::from(super::dscp::dscp_to_tos(dscp_strategy));
 
     let mut last_err: Option<io::Error> = None;
     for addr in addrs {
+        if !running.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Connection cancelled",
+            ));
+        }
+        let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            break;
+        };
         let domain = if addr.is_ipv6() {
             Domain::IPV6
         } else {
@@ -41,8 +53,13 @@ pub fn connect(
             let _ = socket.set_tos(tos);
         }
 
-        match socket.connect_timeout(&addr.into(), connect_timeout) {
-            Ok(()) => return Ok(socket.into()),
+        match socket.connect_timeout(&addr.into(), left.min(Duration::from_millis(100))) {
+            Ok(()) => {
+                let stream: TcpStream = socket.into();
+                stream.set_write_timeout(Some(Duration::from_millis(200)))?;
+                stream.set_read_timeout(Some(Duration::from_millis(200)))?;
+                return Ok(stream);
+            }
             Err(e) => last_err = Some(e),
         }
     }

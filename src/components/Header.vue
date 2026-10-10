@@ -1,6 +1,6 @@
 <template>
   <header
-    class="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]"
+    class="flex flex-wrap gap-2 items-center justify-between px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]"
   >
     <div class="flex items-center gap-1">
       <div
@@ -13,6 +13,7 @@
         <button
           v-for="item in navItems"
           :key="item.id"
+          :aria-current="ui.section === item.id ? 'page' : undefined"
           :class="[
             'focus-ring flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors',
             ui.section === item.id
@@ -27,27 +28,41 @@
       </nav>
     </div>
 
-    <div class="flex items-center gap-2">
-      <StatusDot :tone="statusTone" :label="stream.statusText" />
+    <div class="flex flex-wrap min-w-0 max-w-full items-center gap-2">
+      <span class="max-w-[180px] truncate" :title="stream.statusText" role="status"
+        ><StatusDot :tone="stream.statusTone" :label="stream.statusText"
+      /></span>
 
       <Button
-        :variant="stream.isStreaming ? 'danger' : 'primary'"
+        :variant="stream.pending || stream.isStreaming ? 'danger' : 'primary'"
         size="sm"
+        :disabled="stream.stopping || settings.preflightLoading"
+        :title="t('operation.shortcuts')"
         @click="stream.toggleStream()"
       >
-        <IconPlay v-if="!stream.isStreaming" class="w-3.5 h-3.5" />
+        <IconPlay v-if="!stream.pending && !stream.isStreaming" class="w-3.5 h-3.5" />
         <IconStop v-else class="w-3.5 h-3.5" />
-        {{ stream.isStreaming ? t("action.stop") : t("action.start") }}
+        {{ stream.pending || stream.isStreaming ? t("action.stop") : t("action.start") }}
       </Button>
 
-      <Select
-        :model-value="ui.locale"
-        class="w-[100px]"
-        @update:model-value="(v) => ui.setLocale(v as 'en' | 'es')"
+      <Button
+        v-if="settings.isDirty"
+        size="sm"
+        variant="secondary"
+        :title="t('operation.dirty')"
+        @click="settings.saveSettings()"
+        >{{ t("operation.save") }}</Button
       >
-        <SelectOption value="en" label="English" />
-        <SelectOption value="es" label="Español" />
-      </Select>
+      <div class="w-[100px] shrink-0">
+        <Select
+          :aria-label="t('settings.language')"
+          :model-value="ui.locale"
+          @update:model-value="(v) => ui.setLocale(v as 'en' | 'es')"
+        >
+          <SelectOption value="en" label="English" />
+          <SelectOption value="es" label="Español" />
+        </Select>
+      </div>
     </div>
   </header>
 </template>
@@ -55,6 +70,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStreamStore } from "../stores/stream";
+import { useSettingsStore } from "../stores/settings";
 import { useUiStore } from "../stores/ui";
 import Button from "./ui/Button.vue";
 import StatusDot from "./ui/StatusDot.vue";
@@ -73,10 +89,7 @@ import type { Section } from "../stores/ui";
 const { t } = useI18n();
 const stream = useStreamStore();
 const ui = useUiStore();
-const statusTone = computed(() => {
-  if (stream.isStreaming) return "success";
-  return "neutral";
-});
+const settings = useSettingsStore();
 const navItems = computed<{ id: Section; label: string; icon: typeof IconDashboard }[]>(() => [
   { id: "dashboard", label: t("nav.dashboard"), icon: IconDashboard },
   { id: "connection", label: t("nav.connection"), icon: IconConnection },

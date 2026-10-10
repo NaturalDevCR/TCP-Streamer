@@ -1,19 +1,25 @@
 <template>
-  <button
-    :type="type"
-    :disabled="disabled"
+  <component
+    :is="as === 'a' ? 'a' : 'button'"
+    :type="as === 'a' ? undefined : type || 'button'"
+    :disabled="as === 'a' ? undefined : disabled"
+    :href="disabled ? undefined : href"
+    :aria-disabled="disabled || undefined"
+    :rel="as === 'a' ? 'noopener noreferrer' : undefined"
     :class="[
-      'focus-ring inline-flex items-center justify-center gap-2 rounded-[var(--radius)] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+      'focus-ring inline-flex shrink-0 whitespace-nowrap items-center justify-center gap-2 rounded-[var(--radius)] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
       sizeClass,
       variantClass,
     ]"
   >
     <slot />
-  </button>
+  </component>
 </template>
 <script setup lang="ts">
 import { computed } from "vue";
 const props = defineProps<{
+  as?: "a" | "button";
+  href?: string;
   variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "sm" | "md";
   type?: "button" | "submit";

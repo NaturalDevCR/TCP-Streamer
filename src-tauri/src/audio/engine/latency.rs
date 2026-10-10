@@ -75,12 +75,14 @@ pub fn resolve(profile: &str, is_loopback: bool, overrides: LatencyOverrides) ->
         "custom" => {
             // Defaults mirror the frontend store's initial values so an omitted
             // field behaves the same as an untouched slider.
-            let ring_ms = overrides.ring_ms.unwrap_or(4000);
+            let ring_ms = overrides.ring_ms.unwrap_or(4000).clamp(100, 20000);
+            let min_ms = overrides.min_buffer_ms.unwrap_or(200).clamp(50, 20000);
+            let max_ms = overrides.max_buffer_ms.unwrap_or(1500).clamp(min_ms, 20000);
             LatencyParams {
-                ring_ms,
-                adaptive_min_ms: overrides.min_buffer_ms.unwrap_or(2000),
-                adaptive_max_ms: overrides.max_buffer_ms.unwrap_or(10000),
-                chunk_size: overrides.chunk_size.unwrap_or(512),
+                ring_ms: ring_ms.max(max_ms),
+                adaptive_min_ms: min_ms,
+                adaptive_max_ms: max_ms,
+                chunk_size: overrides.chunk_size.unwrap_or(512).clamp(128, 4096),
                 prefill_ms: ring_ms.min(200),
             }
         }
@@ -114,9 +116,75 @@ pub fn resolve(profile: &str, is_loopback: bool, overrides: LatencyOverrides) ->
     }
 }
 
+/// Validate manual values before allocating audio buffers.
+pub fn validate_overrides(profile: &str, values: LatencyOverrides) -> Result<(), String> {
+    let resolved = resolve(profile, false, values);
+    if profile == "custom" {
+        let ring = values.ring_ms.unwrap_or(resolved.ring_ms);
+        let min = values.min_buffer_ms.unwrap_or(200);
+        let max = values.max_buffer_ms.unwrap_or(1500);
+        let chunk = values.chunk_size.unwrap_or(512);
+        if !(100..=20000).contains(&ring)
+            || min < 50
+            || max < min
+            || max > ring
+            || !(128..=4096).contains(&chunk)
+        {
+            return Err("Custom latency requires 100..20000ms capacity, 50 <= min <= max <= capacity, and 128..4096 frame chunks".into());
+        }
+    }
+    if profile == "broadcast"
+        && values
+            .fixed_latency_ms
+            .is_some_and(|ms| !(FIXED_LATENCY_MIN_MS..=FIXED_LATENCY_MAX_MS).contains(&ms))
+    {
+        return Err("Fixed latency must be 50..2000ms".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_validation_rejects_capacity_below_target_and_extreme_allocation() {
+        assert!(validate_overrides(
+            "custom",
+            LatencyOverrides {
+                ring_ms: Some(400),
+                max_buffer_ms: Some(500),
+                ..LatencyOverrides::default()
+            }
+        )
+        .is_err());
+        assert!(validate_overrides(
+            "custom",
+            LatencyOverrides {
+                ring_ms: Some(u32::MAX),
+                ..LatencyOverrides::default()
+            }
+        )
+        .is_err());
+        assert!(validate_overrides("custom", LatencyOverrides::default()).is_ok());
+    }
+    #[test]
+    fn custom_parameters_cannot_invert_band_or_allocate_unbounded_memory() {
+        let p = resolve(
+            "custom",
+            false,
+            LatencyOverrides {
+                ring_ms: Some(u32::MAX),
+                min_buffer_ms: Some(6000),
+                max_buffer_ms: Some(100),
+                chunk_size: Some(0),
+                fixed_latency_ms: None,
+            },
+        );
+        assert!(p.ring_ms <= 20000);
+        assert!(p.adaptive_max_ms >= p.adaptive_min_ms);
+        assert!(p.chunk_size > 0);
+    }
 
     #[test]
     fn ultra_low_has_lowest_latency() {

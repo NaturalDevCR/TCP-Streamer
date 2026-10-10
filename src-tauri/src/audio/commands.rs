@@ -2,8 +2,10 @@
 
 use super::error::AudioError;
 use super::manager::{AudioCommand, AudioState};
+use super::session::SessionStatus;
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::debug;
+use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, State};
@@ -26,7 +28,7 @@ fn offer_loopback_devices(os: &str, include_loopback: bool) -> bool {
 /// over TCP as raw PCM or WAV.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn start_stream(
+pub async fn start_stream(
     state: State<'_, AudioState>,
     app_handle: AppHandle,
     device_name: String,
@@ -50,7 +52,42 @@ pub fn start_stream(
     allowlist: String,
     transport: String,
     psk: String,
-) -> Result<(), AudioError> {
+) -> Result<SessionStatus, AudioError> {
+    validate_source(
+        &device_name,
+        &ip,
+        port,
+        sample_rate,
+        &transport,
+        is_server,
+        &latency_profile,
+        &allowlist,
+        chunk_size,
+        min_buffer_ms,
+        max_buffer_ms,
+    )?;
+    super::engine::latency::validate_overrides(
+        &latency_profile,
+        super::engine::latency::LatencyOverrides {
+            ring_ms: Some(ring_buffer_duration_ms),
+            min_buffer_ms: Some(min_buffer_ms),
+            max_buffer_ms: Some(max_buffer_ms),
+            chunk_size: Some(chunk_size),
+            fixed_latency_ms: Some(fixed_latency_ms),
+        },
+    )
+    .map_err(AudioError::NetworkError)?;
+    if !["pcm", "wav"].contains(&format.as_str())
+        || !["voip", "ef", "cs5", "lowdelay", "throughput", "besteffort"]
+            .contains(&dscp_strategy.as_str())
+        || buffer_size > 65536
+        || psk.len() > 1024
+    {
+        return Err(AudioError::NetworkError(
+            "Invalid format, DSCP, capture buffer or secret length".into(),
+        ));
+    }
+    let (reply, rx) = mpsc::channel();
     let command = AudioCommand::Start {
         device_name,
         ip,
@@ -74,31 +111,36 @@ pub fn start_stream(
         transport,
         psk,
         app_handle: Box::new(app_handle),
+        reply,
+        running: state.new_running_flag(),
     };
 
-    state
-        .tx
-        .lock()
-        .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
-        .send(command)
-        .map_err(|e| AudioError::ChannelError(e.to_string()))
+    request(&state, command, rx).await
 }
 
 /// Stops the currently active audio stream.
 #[tauri::command]
-pub fn stop_stream(state: State<'_, AudioState>) -> Result<(), AudioError> {
-    state
-        .tx
-        .lock()
-        .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
-        .send(AudioCommand::Stop)
-        .map_err(|e| AudioError::ChannelError(e.to_string()))
+pub async fn stop_stream(
+    state: State<'_, AudioState>,
+    app_handle: AppHandle,
+) -> Result<SessionStatus, AudioError> {
+    state.cancel();
+    let (reply, rx) = mpsc::channel();
+    request(
+        &state,
+        AudioCommand::Stop {
+            reply: Some(reply),
+            app_handle: Some(Box::new(app_handle)),
+        },
+        rx,
+    )
+    .await
 }
 
 /// Starts the sink: subscribes to a native UDP source and plays audio
 /// to the selected output device.
 #[tauri::command]
-pub fn start_sink(
+pub async fn start_sink(
     state: State<'_, AudioState>,
     app_handle: AppHandle,
     output_device: String,
@@ -106,20 +148,35 @@ pub fn start_sink(
     latency_profile: String,
     overrides: super::engine::latency::LatencyOverrides,
     psk: String,
-) -> Result<(), AudioError> {
-    state
-        .tx
-        .lock()
-        .map_err(|_| AudioError::ChannelError("mutex poisoned".to_string()))?
-        .send(AudioCommand::StartSink {
+) -> Result<SessionStatus, AudioError> {
+    if output_device.trim().is_empty() || source_addr.trim().is_empty() {
+        return Err(AudioError::NetworkError(
+            "Select output and source address".into(),
+        ));
+    }
+    validate_profile(&latency_profile)?;
+    super::diagnostics::parse_endpoint(&source_addr).map_err(AudioError::NetworkError)?;
+    super::engine::latency::validate_overrides(&latency_profile, overrides)
+        .map_err(AudioError::NetworkError)?;
+    if psk.len() > 1024 {
+        return Err(AudioError::NetworkError("Secret exceeds 1024 bytes".into()));
+    }
+    let (reply, rx) = mpsc::channel();
+    request(
+        &state,
+        AudioCommand::StartSink {
             output_device,
             source_addr,
             latency_profile,
             overrides,
             psk,
             app_handle: Box::new(app_handle),
-        })
-        .map_err(|e| AudioError::ChannelError(e.to_string()))
+            reply,
+            running: state.new_running_flag(),
+        },
+        rx,
+    )
+    .await
 }
 
 /// Returns the operating system name (e.g. "macos", "linux", "windows").
@@ -228,6 +285,79 @@ pub fn get_local_ip() -> Result<String, AudioError> {
         Ok(ip) => Ok(ip.to_string()),
         Err(e) => Err(AudioError::IpDetectionFailed(e.to_string())),
     }
+}
+
+#[tauri::command]
+pub fn get_stream_state() -> super::session::SessionStatus {
+    super::session::SESSION.snapshot()
+}
+
+async fn request(
+    state: &AudioState,
+    command: AudioCommand,
+    rx: mpsc::Receiver<Result<SessionStatus, String>>,
+) -> Result<SessionStatus, AudioError> {
+    state
+        .tx
+        .lock()
+        .map_err(|_| AudioError::ChannelError("mutex poisoned".into()))?
+        .try_send(command)
+        .map_err(|e| AudioError::ChannelError(e.to_string()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        rx.recv()
+            .map_err(|e| AudioError::ChannelError(e.to_string()))?
+            .map_err(AudioError::StreamBuildError)
+    })
+    .await
+    .map_err(|e| AudioError::ChannelError(e.to_string()))?
+}
+fn validate_profile(profile: &str) -> Result<(), AudioError> {
+    if ["ultra-low", "balanced", "robust", "broadcast", "custom"].contains(&profile) {
+        Ok(())
+    } else {
+        Err(AudioError::NetworkError("Unknown latency profile".into()))
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn validate_source(
+    device: &str,
+    ip: &str,
+    port: u16,
+    rate: u32,
+    transport: &str,
+    server: bool,
+    profile: &str,
+    allowlist: &str,
+    chunk: u32,
+    min: u32,
+    max: u32,
+) -> Result<(), AudioError> {
+    validate_profile(profile)?;
+    if device.trim().is_empty() || port == 0 || !(8000..=192000).contains(&rate) {
+        return Err(AudioError::NetworkError(
+            "Invalid device, port or sample rate".into(),
+        ));
+    }
+    if !["tcp", "udp"].contains(&transport) {
+        return Err(AudioError::NetworkError("Unknown transport".into()));
+    }
+    if transport == "tcp" && !server && ip.trim().is_empty() {
+        return Err(AudioError::NetworkError("TCP target is required".into()));
+    }
+    if transport == "tcp" && !server {
+        super::diagnostics::validate_host(ip).map_err(AudioError::NetworkError)?;
+    }
+    if transport == "tcp" && server {
+        super::transport::allowlist::validate_rules(allowlist).map_err(AudioError::NetworkError)?;
+    }
+    if profile == "custom"
+        && (!(128..=4096).contains(&chunk) || min < 50 || max < min || max > 20000)
+    {
+        return Err(AudioError::NetworkError(
+            "Invalid custom latency limits".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

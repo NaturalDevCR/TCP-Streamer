@@ -33,3 +33,6 @@ dist-ssr
 # This project uses pnpm; do not track npm/yarn lockfiles
 package-lock.json
 yarn.lock
+
+# Local agent planning artifacts
+.superpowers/

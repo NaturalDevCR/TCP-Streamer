@@ -13,6 +13,11 @@ export const useUiStore = defineStore("ui", () => {
     section.value = s;
   }
   function setLocale(l: "en" | "es") {
+    try {
+      localStorage.setItem("tcp-streamer-locale", l);
+    } catch {
+      /* Storage unavailable */
+    }
     locale.value = l;
     i18n.global.locale.value = l;
   }

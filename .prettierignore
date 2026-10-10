@@ -4,3 +4,6 @@ src-tauri/gen/
 node_modules/
 *.lock
 pnpm-lock.yaml
+
+# Local agent planning artifacts
+.superpowers/

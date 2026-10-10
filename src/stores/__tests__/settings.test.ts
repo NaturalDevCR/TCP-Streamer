@@ -143,3 +143,61 @@ describe("clampFixedLatency", () => {
     expect(clampFixedLatency(400)).toBe(400);
   });
 });
+
+describe("profile isolation", () => {
+  beforeEach(() => {
+    mockStore.clear();
+    setActivePinia(createPinia());
+  });
+  it("restores empty secrets and devices without inheriting previous values", async () => {
+    mockStore.set("profiles", {
+      Default: { device: "A", ip: "host", psk: "secret" },
+      Empty: { device: "B", ip: "", psk: "" },
+    });
+    const store = useSettingsStore();
+    await store.loadSettings();
+    await store.switchProfile("Empty");
+    expect(store.deviceName).toBe("B");
+    expect(store.ip).toBe("");
+    expect(store.psk).toBe("");
+  });
+  it("clones current unsaved settings when creating a profile", async () => {
+    const store = useSettingsStore();
+    await store.loadSettings();
+    store.ip = "unsaved";
+    await store.createProfile("New");
+    expect(store.profiles.New.ip).toBe("unsaved");
+  });
+});
+
+describe("secret persistence", () => {
+  beforeEach(() => {
+    mockStore.clear();
+    setActivePinia(createPinia());
+  });
+  it("keeps secrets in memory by default and exports no secret or endpoints", async () => {
+    const store = useSettingsStore();
+    store.psk = "supersecret";
+    store.ip = "private.host";
+    store.sourceAddr = "private.source:1704";
+    store.allowlist = "192.168.1.0/24";
+    await store.saveSettings();
+    expect((mockStore.get("profiles") as Record<string, { psk: string }>).Default.psk).toBe("");
+    expect(store.psk).toBe("supersecret");
+    expect(store.exportProfile()).not.toContain("supersecret");
+    expect(store.exportProfile()).not.toContain("private.");
+    expect(store.exportProfile()).not.toContain("192.168.1");
+  });
+  it("requires explicit opt-in to persist a secret and clears it when disabled", async () => {
+    const store = useSettingsStore();
+    store.psk = "remembered";
+    store.rememberPsk = true;
+    await store.saveSettings();
+    expect((mockStore.get("profiles") as Record<string, { psk: string }>).Default.psk).toBe(
+      "remembered",
+    );
+    store.rememberPsk = false;
+    await store.saveSettings();
+    expect((mockStore.get("profiles") as Record<string, { psk: string }>).Default.psk).toBe("");
+  });
+});

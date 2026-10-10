@@ -5,9 +5,17 @@ use audio::AudioState;
 
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,10 +28,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app
-                .get_webview_window("main")
-                .expect("no main window")
-                .set_focus();
+            show_main_window(app);
         }))
         .manage(AudioState::new())
         .setup(|app| {
@@ -34,35 +39,32 @@ pub fn run() {
                 .any(|arg| arg == "--hidden" || arg == "--minimized" || arg.contains("autostart"));
 
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "Show Settings", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show TCP Streamer", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::with_id("tray")
                 .menu(&menu)
+                .tooltip("TCP Streamer")
+                .show_menu_on_left_click(false)
                 .icon(app.default_window_icon().unwrap().clone())
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
                         app.exit(0);
                     }
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(app);
                     }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
                         let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(app);
                     }
                 })
                 .build(app)?;
@@ -89,6 +91,8 @@ pub fn run() {
             audio::start_stream,
             audio::start_sink,
             audio::stop_stream,
+            audio::get_stream_state,
+            audio::diagnostics::preflight_stream,
             audio::get_os_type,
             audio::get_local_ip
         ])

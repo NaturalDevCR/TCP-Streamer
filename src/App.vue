@@ -24,10 +24,23 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener("keydown", onKeyDown);
+  stream.disposeListeners();
 });
 
 function onKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    settings.saveSettings();
+  }
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    e.key === "Enter" &&
+    !(
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target as HTMLElement)?.isContentEditable
+    )
+  ) {
     e.preventDefault();
     stream.toggleStream();
   }

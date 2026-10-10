@@ -1,8 +1,8 @@
 # TCP Streamer
 
-> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with sub-second latency.
+> A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with configurable buffering. End-to-end latency depends on devices, network and receiver.
 
-![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/NaturalDevCR/TCP-Streamer)
@@ -72,11 +72,11 @@ The **source** role supports **TCP** (max compatibility, HTTP/WAV streaming) and
 
 - **Source role** — Capture and send audio from any input device (microphone, loopback, virtual device).
 - **Sink / Playback role** — Receive and play audio to any output device (speakers, virtual output).
-- **TCP mode** — Universal compatibility with any TCP audio receiver; includes HTTP/WAV streaming.
-- **Native UDP mode** — Sub-second latency with de-jitter buffer, loss concealment, and clock-drift compensation.
+- **TCP mode** — Raw stereo PCM for compatible receivers, or HTTP/WAV streaming in server mode.
+- **Native UDP mode** — Configurable buffering with de-jitter buffer, loss concealment, and clock-drift compensation.
 - **mDNS Discovery** — Native UDP sources automatically advertise on the LAN; sinks scan and pick them.
 - **AEAD/PSK Encryption** — Optional per-packet ChaCha20-Poly1305 encryption for Native UDP with HKDF key derivation.
-- **IPv4 & IPv6** — Dual-stack server bind with hostname resolution for client connections.
+- **IPv4 & IPv6** — TCP and Native UDP use dual-stack listening where supported, with IPv4 fallback and hostname resolution for outgoing connections. IPv6 source endpoints use `[address]:port`.
 - **IP/CIDR Allowlist** — Restrict TCP server access to specific IP addresses or networks.
 
 ### Audio Quality
@@ -92,7 +92,7 @@ The **source** role supports **TCP** (max compatibility, HTTP/WAV streaming) and
 ### Reliability
 
 - **Real adaptive buffer** — Target-occupancy controller grows latency when glitches occur, shrinks when stable.
-- **Honest metrics** — Real underrun/overrun counters, RTT via TCP_INFO, and quality scoring.
+- **Role-aware metrics** — Underrun/overrun counters, transport-supported RTT and quality indicators. Unsupported metrics are shown as unavailable; buffer occupancy is not measured end-to-end latency.
 - **Starvation detection** — Pre-fill cushion prevents cold-start stutter; catch-up logic maintains target latency.
 - **Frame-aligned corrections** — Buffer drops, skips, and drift corrections preserve L/R channel alignment.
 - **Auto-reconnect** — Single connection policy with exponential backoff and jitter (source mode, TCP).
@@ -119,7 +119,7 @@ The **source** role supports **TCP** (max compatibility, HTTP/WAV streaming) and
 
 ### TCP Mode
 
-Best for universal compatibility. Works with Snapcast, Mopidy, VLC, browsers, and any TCP audio receiver.
+Use raw PCM with a receiver explicitly configured for stereo s16le at the selected sample rate (for example Snapcast), or HTTP/WAV with a compatible player. This does not implement every third-party receiver protocol; browser codec/playback support varies.
 
 | Role   | Behavior                                                                                      |
 | ------ | --------------------------------------------------------------------------------------------- |
@@ -143,6 +143,22 @@ Best for low-latency streaming between two TCP Streamer instances or compatible 
 
 ---
 
+## Supported capabilities and security
+
+| Capability              | TCP source                 | Native UDP source                       | Native UDP sink                  |
+| ----------------------- | -------------------------- | --------------------------------------- | -------------------------------- |
+| Capture input audio     | Yes                        | Yes                                     | No                               |
+| Local playback          | No                         | No                                      | Yes                              |
+| Network address family  | IPv4/IPv6                  | IPv4/IPv6 (IPv4 fallback)               | IPv4/IPv6                        |
+| Incoming access control | IP/CIDR allowlist (server) | Shared PSK and single active subscriber | Selected source and matching PSK |
+| Encryption              | No                         | Optional PSK                            | Optional matching PSK            |
+| Browser playback        | HTTP/WAV server            | No                                      | No                               |
+| Discovery               | Manual address             | mDNS advertisement                      | mDNS scan/manual address         |
+
+Native UDP wire protocol version 2 adds authenticated session negotiation; update both endpoints together. Older version 1 peers are rejected. It is a project-specific PCM protocol; both ends must use compatible versions. It is not RTP, SRT, AirPlay or a WAN codec. No synchronized multi-receiver mode, forward error correction, redundant path or automatic failover is provided. mDNS works on the local multicast network and is not proof of identity. PSKs are session-only by default. **Remember locally** explicitly stores the secret in the ordinary settings file, without OS credential-store encryption; enable it only if that local exposure is acceptable. Existing saved keys migrate to the opt-in state so you can disable it to clear storage. Sanitized diagnostic exports omit PSKs and network endpoints. Use a high-entropy shared PSK and a trusted network for private audio; TCP has no encryption and should use a separately secured network when confidentiality matters.
+
+Release assets require manual installation. An authenticated automatic updater is not configured: it needs a maintainer-controlled signing key, embedded public key and HTTPS update feed. Code signing/notarization also requires platform credentials; see the release checklist in [CONTRIBUTING.md](CONTRIBUTING.md). Closing the window keeps the app in the tray; use **Quit** to stop and exit. Launching it again restores the existing window.
+
 ## Audio format & device compatibility
 
 - **Fixed wire format:** Audio is always sent as `s16le`, stereo, at the configured output rate. For Snapcast, use the default 48 kHz setting with `sampleformat = 48000:16:2`:
@@ -165,7 +181,7 @@ Best for low-latency streaming between two TCP Streamer instances or compatible 
 
 ### 1. Multi-Room Audio
 
-Stream audio from your computer to an audio receiver such as Sonium, enabling synchronized playback across multiple rooms.
+Stream audio from your computer to a compatible receiver. Multi-room synchronization and distribution must be provided by the external receiver; TCP Streamer does not synchronize multiple sinks.
 
 **Source (TCP Client):**
 
@@ -181,7 +197,7 @@ TCP Streamer (Source :1704) ← Audio Receiver
 
 ### 2. Low-Latency Desktop-to-Desktop
 
-Use Native UDP for sub-second latency between two computers running TCP Streamer.
+Use Native UDP between two computers running TCP Streamer, with one active sink per source. Measure latency on the actual devices before using the link for live production.
 
 ```bash
 Computer A (Source, UDP) ──mDNS──▶ Computer B (Sink, UDP)
@@ -227,8 +243,8 @@ Download the latest release for your platform:
 
 #### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v22 or later)
-- [pnpm](https://pnpm.io/) (v9 or later) — `npm i -g pnpm` or `corepack enable`
+- [Node.js](https://nodejs.org/) (v22.13 or later)
+- [pnpm](https://pnpm.io/) (the version in `package.json#packageManager`) — `npm i -g pnpm` or `corepack enable`
 - [Rust](https://www.rust-lang.org/) (latest stable)
 - **macOS**: Xcode Command Line Tools
 - **Windows**: Microsoft Visual Studio C++ Build Tools
@@ -242,13 +258,13 @@ git clone https://github.com/NaturalDevCR/TCP-Streamer.git
 cd TCP-Streamer
 
 # Install dependencies
-pnpm install
+pnpm install --frozen-lockfile
 
 # Run in development mode
 pnpm tauri dev
 
 # Build for production
-pnpm tauri build
+pnpm tauri build -- --locked
 ```
 
 ---
@@ -264,7 +280,7 @@ pnpm tauri build
 
 Transport selection applies to the **source** role. A sink always uses Native UDP, so the app hides this choice when the sink role is selected.
 
-- **TCP** — Maximum compatibility with any audio receiver (Snapcast, VLC, browsers). Choose Client or Server mode.
+- **TCP** — Raw PCM for configured receivers, or HTTP/WAV in Server mode. Choose Client or Server mode.
 - **Native UDP** — Low latency with optional mDNS discovery and encryption. Ideal for TCP Streamer-to-TCP Streamer links.
 
 ### 3. Configure Connection
@@ -282,7 +298,7 @@ Transport selection applies to the **source** role. A sink always uses Native UD
 
 ### 5. Start Streaming
 
-Click **Start**. The dashboard shows real-time stats — RTT, underruns, bitrate, and quality score.
+Use **Check configuration** to inspect audio device formats, configuration limits, DNS and local listening-port availability without capturing audio or contacting the remote receiver. This check does not establish device permissions, remote reachability or encryption compatibility. Click **Start** and wait for backend confirmation. A listening source can be ready while still waiting for a receiver. The dashboard shows the metrics supported by the active role and transport; a missing metric is not a zero measurement.
 
 ---
 
@@ -290,7 +306,7 @@ Click **Start**. The dashboard shows real-time stats — RTT, underruns, bitrate
 
 ### Latency Profiles
 
-Controls coordinated ring buffer and chunk size presets. The adaptive controller adjusts the standing-latency target within the profile's min/max band based on observed glitches.
+Controls ring capacity, target occupancy and chunk size. Ring capacity absorbs stalls; it is not a measured end-to-end delay. Outside Broadcast, the source adaptive controller adjusts the backlog ceiling within the profile band when enabled; it does not maintain a minimum source delay. Broadcast retains its target audio in the source ring before sending newly captured frames. The sink uses the profile minimum as its playback occupancy target with separate clock-drift correction; its target does not follow the source adaptive controller.
 
 | Profile       | Ring (ms) | Adaptive Band (ms)              | Chunk  | Use Case                                      |
 | ------------- | --------- | ------------------------------- | ------ | --------------------------------------------- |
@@ -300,13 +316,13 @@ Controls coordinated ring buffer and chunk size presets. The adaptive controller
 | **Broadcast** | 3000+     | Fixed (no adaptation)           | 512    | Live production; stable A/V offset            |
 | **Custom**    | Manual    | Manual (Min/Max Buffer sliders) | Manual | Full control over all parameters              |
 
-The **Broadcast** profile holds its latency target at a constant 250 ms (400 ms for loopback capture), adjustable with the **Fixed latency (ms)** field. It ignores the Adaptive Buffer setting on purpose: a target that moves during a show breaks any audio/video offset the operator has compensated for. Under loopback capture the target is floored at 400 ms regardless of the field, because loopback needs the extra buffering and the broadcast profile has no adaptation to fall back on. See [BROADCAST_GUIDE.md](BROADCAST_GUIDE.md).
+The **Broadcast** profile fixes its buffering target at 250 ms (400 ms for loopback capture), adjustable with the **Fixed latency (ms)** field. It ignores the Adaptive Buffer setting on purpose: a target that moves during a show breaks any audio/video offset the operator has compensated for. Under loopback capture the target is floored at 400 ms regardless of the field, because loopback needs the extra buffering and the broadcast profile has no adaptation to fall back on. See [BROADCAST_GUIDE.md](BROADCAST_GUIDE.md).
 
-Loopback (WASAPI) capture uses higher floors in each profile for extra stability.
+Loopback (WASAPI) capture uses higher floors in each profile for extra stability. Source buffering, sink buffering, driver buffers and network/player queues all contribute to total delay. Using 250 ms on both ends does not promise a 250 ms audio/video offset.
 
 ### Connection Settings
 
-- **Transport (Source):** TCP (universal) or Native UDP (low-latency + discovery + encryption). A sink always uses Native UDP.
+- **Transport (Source):** TCP (raw PCM or HTTP/WAV) or Native UDP (low-latency + discovery + encryption). A sink always uses Native UDP.
 - **Mode (TCP):** Client connects to a remote receiver; Server listens for incoming connections.
 - **Target Address:** Remote `host:port` for TCP client or Native UDP sink.
 - **Allowlist:** Comma-separated IP/CIDR entries to restrict server access (empty = allow all).
@@ -317,9 +333,9 @@ Loopback (WASAPI) capture uses higher floors in each profile for extra stability
 
 - **Input Device:** Microphone, monitor, loopback, or virtual capture device.
 - **Output Sample Rate:** Wire rate sent to the receiver; must match the receiver's expected format.
-- **Capture Buffer (frames):** CPAL hardware buffer size. Smaller = lower latency; larger = fewer glitches.
+- **Capture Buffer (frames):** Requested source hardware buffer size, subject to device-supported range and driver negotiation. A driver may select a different effective size; sink output uses the driver default.
 - **Stream Format:** PCM (raw audio) or WAV (with header for browser/VLC playback in TCP Server mode).
-- **Adaptive Buffer:** Enables automatic buffer resizing within configured min/max limits.
+- **Adaptive Buffer:** Adjusts the source backlog ceiling within the configured band; the allocated ring capacity remains fixed. Broadcast keeps a fixed target. Sink clock-drift control is separate.
 - **Loopback (Windows):** Captures system audio directly via WASAPI without virtual cables.
 
 ### Settings
@@ -362,7 +378,7 @@ src-tauri/src/           — Rust backend (Tauri v2)
     commands.rs          — Tauri IPC command handlers
     manager.rs           — AudioState: stream lifecycle management
     engine/
-      mod.rs             — Core orchestrator (engine::run): 1058 lines
+      mod.rs             — Core orchestrator (engine::run)
       buffer.rs          — Real adaptive latency-target controller
       capture.rs         — Real-time-safe audio capture (ring buffer producer)
       device.rs          — Device format + rate negotiation

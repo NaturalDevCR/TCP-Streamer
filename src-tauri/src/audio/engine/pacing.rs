@@ -66,11 +66,41 @@ impl StarvationGate {
     }
 }
 
+/// Read above the fixed source delay without draining the standing buffer.
+pub fn fixed_read_len(
+    occupied: usize,
+    max_read: usize,
+    target_ms: u32,
+    sample_rate: u32,
+    channels: u16,
+) -> usize {
+    let ch = usize::from(channels.max(1));
+    let floor = sample_rate as usize * ch * target_ms as usize / 1000;
+    let count = occupied.saturating_sub(floor).min(max_read);
+    count - count % ch
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const RATE: u32 = 48000;
+    #[test]
+    fn stalled_broadcast_is_detected_despite_retained_delay_floor() {
+        let mut gate = StarvationGate::new(200);
+        let available = fixed_read_len(24000, 1024, 250, RATE, 2);
+        assert_eq!(available, 0);
+        assert!(!gate.update(available < 1024, 0));
+        assert!(gate.update(available < 1024, 201));
+        assert!(!gate.update(available < 1024, 300));
+    }
+    #[test]
+    fn broadcast_pacing_retains_fixed_delay_and_whole_frames() {
+        assert_eq!(fixed_read_len(24000, 4096, 250, RATE, 2), 0);
+        assert_eq!(fixed_read_len(24481, 4096, 250, RATE, 2), 480);
+        assert_eq!(fixed_read_len(30000, 4096, 250, RATE, 2), 4096);
+        assert_eq!(fixed_read_len(1, 4096, 250, RATE, 2), 0);
+    }
 
     #[test]
     fn no_excess_within_target_plus_margin() {

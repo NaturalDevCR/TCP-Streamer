@@ -14,7 +14,7 @@ Mixer ──USB──▶ Mac / Logic Pro ──▶ BlackHole 2ch ──▶ TCP S
 
 **Use wired gigabit Ethernet, both machines on the same switch.** Do not use Wi-Fi. Lost UDP packets are concealed, not retransmitted, and concealment is audible on exposed program material.
 
-**This is a stereo path.** A multichannel capture device contributes only its front left/right pair, so Logic must sum everything to one stereo bus before it leaves the machine. Running several instances for separate stems does not work: each instance keeps its own buffer and its own drift controller, so the stems drift out of alignment with each other.
+**This is a stereo path.** A multichannel capture device contributes only its front left/right pair, so Logic must sum everything to one stereo bus before it leaves the machine. The application enforces a single instance. Separate stems and synchronized multiple sinks are not supported.
 
 ## macOS source
 
@@ -61,11 +61,11 @@ The Broadcast profile exists for this step. Under any other profile the adaptive
 3. Open the recording and measure the offset between the clap in the picture and the clap in the audio.
 4. Set vMix's video input delay to that measurement.
 
-Measure once per venue setup. The offset holds as long as both ends stay on the Broadcast profile with the same fixed latency.
+Measure on the complete production path, and repeat after changing devices, routing, profile, network or restarting/recovering the stream. A fixed buffering target reduces one source of variation; it does not guarantee a constant measured offset.
 
 ### Choosing a fixed latency
 
-The default is 250 ms, which suits a quiet wired LAN. Raise it if the dashboard reports underruns; there is no adaptation to rescue a target the network cannot meet. Lower it only on a link you have already watched behave.
+Broadcast source pacing retains its configured audio delay in the capture ring; the sink separately maintains its playback occupancy target. These are software-buffer targets, not driver/network measurements. The default buffering target is 250 ms per endpoint (400 ms for source loopback). Source and sink buffering add to driver and switcher delay, so this is not a 250 ms end-to-end guarantee. Raise it if the dashboard reports underruns; there is no adaptation to rescue a target the network cannot meet. Lower it only on a link you have already watched behave.
 
 ## Clock drift
 
@@ -77,15 +77,16 @@ This is not free, but at the corrections involved it is inaudible. Interpolating
 
 Watch it in the Logs view, reported as **Clock drift correction: N ppm**. Expect it to wander, not to freeze on one number: real push/pop timing is never perfectly even, so even a well-matched pair keeps drifting a bit sample to sample, and a reading anywhere in the tens of ppm around zero is normal and does not need a second look. The log line itself only appears when the reported value has moved enough to be worth a line, so you will see it far less often than the trim actually updates internally. A reading at the ±200 ppm cap is a different thing entirely: it is reported the moment it happens, and it means the loop has run out of range and something else — likely one machine's clock, or the network — is worth investigating.
 
-**When can you measure?** Immediately. The sink starts at its configured latency rather than working up to it, so the number you set is the number you have from the first second of audio — the prefill keeps standing latency well under 1% of that target throughout the drift correction's transient, so measuring right away is sound.
+**When can you measure?** After the source and sink are confirmed running and playback is stable. The sink pre-fills its playback ring to a target before enabling output, but driver, source, jitter and switcher queues also affect the measured delay. No hardware measurement establishes a universal startup accuracy or a sub-1% bound.
 
-The drift correction itself is a separate, slower thing: give it about two minutes from the first audio before you judge it. That is how long the underlying correction takes to find its working range, not how long the latency takes to be correct — the latency was already right. If you want to also confirm the link is healthy before trusting it for a whole show, watch that two-minute window and confirm the reported value has settled into its normal wandering range around zero, rather than climbing or sitting at the ±200 cap. After that the standing latency stays put for the show, which is what makes a once-per-venue A/V measurement hold.
+Watch a stable interval before trusting the link for a show. The drift controller has a settling transient; its unit tests validate the control model, not a guaranteed two-minute settling time or inaudibility on every audio device. Recheck the recorded A/V offset after a disconnect, restart or sustained underrun.
 
-A coarse correction still exists for excursions too large for the fine one to absorb — a network stall, or a device glitch. Those drop a small chunk or insert a brief silence, which is audible, but they fire only when the buffer has moved far from its target: past 1.75x or below 0.25x of your fixed latency. On a wired link that has already been watched behave, you should not hear one.
+A coarse correction still exists for excursions too large for the fine one to absorb — a network stall, or a device glitch. Those can drop audio or insert silence, but they fire only when the buffer has moved far from its target: past 1.75x or below 0.25x of your fixed latency. On a wired link that has already been watched behave, you should not hear one.
 
 ## Limits
 
 - Stereo only. No multichannel, no stems.
+- One active sink per Native UDP source. A second subscriber cannot replace an active subscriber until its lease expires.
 - No forward error correction. A lossy link produces concealment, not recovery.
 - No redundant path or automatic failover.
 - The sink requires a Native UDP source. TCP sources are for external receivers such as Snapcast.
