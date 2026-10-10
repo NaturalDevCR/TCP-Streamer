@@ -1,6 +1,6 @@
 # Implementación de la revisión integral
 
-El reporte `revision-integral-2026-10-10.md`, aprobado mediante «procede con todo», guía esta implementación. Los cambios corresponden a la preparación de la versión 3.0.1, autorizada para commit y publicación. Este documento distingue las correcciones realizadas, la evidencia de validación y las ampliaciones de producto todavía pendientes.
+El reporte `revision-integral-2026-10-10.md`, aprobado mediante «procede con todo», guía esta implementación. Los cambios corresponden a la preparación de la versión 3.0.2, autorizada para commit y publicación. Este documento distingue las correcciones realizadas, la evidencia de validación y las ampliaciones de producto todavía pendientes.
 
 ## Resultado implementado
 
@@ -81,7 +81,7 @@ La revisión independiente encontró escritura TCP parcial, cancelación pendien
 
 ## Compatibilidad y ampliaciones pendientes
 
-**Ambos extremos deben actualizarse para usar UDP v2.** No hay compatibilidad de negociación con v1. TCP/HTTP mantienen audio sin cifrar y un receptor activo. El changelog de esta implementación corresponde a la versión 3.0.1. La publicación y los instaladores se verifican por separado en GitHub.
+**Ambos extremos deben actualizarse para usar UDP v2.** No hay compatibilidad de negociación con v1. TCP/HTTP mantienen audio sin cifrar y un receptor activo. El changelog de esta implementación corresponde a la versión 3.0.2. La publicación y los instaladores se verifican por separado en GitHub.
 
 Las siguientes propuestas del reporte siguen como ampliaciones de producto, no se presentan como implementadas:
 

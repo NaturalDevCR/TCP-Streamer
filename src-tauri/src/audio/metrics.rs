@@ -39,41 +39,6 @@ pub fn quality_score(glitches_delta: u64, occupancy_ratio: f32, rtt_ms: Option<f
     score.clamp(0, 100) as u8
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clean_stream_scores_100() {
-        assert_eq!(quality_score(0, 0.1, Some(5.0)), 100);
-        assert_eq!(quality_score(0, 0.1, None), 100);
-    }
-
-    #[test]
-    fn glitches_dominate_the_penalty() {
-        assert_eq!(quality_score(1, 0.0, None), 92);
-        assert_eq!(quality_score(5, 0.0, None), 60);
-        assert_eq!(quality_score(100, 0.0, None), 20); // capped at 10 glitches => -80
-    }
-
-    #[test]
-    fn high_occupancy_adds_latency_penalty() {
-        // occupancy 1.0 => (1.0-0.5)*2*20 = 20 penalty
-        assert_eq!(quality_score(0, 1.0, None), 80);
-    }
-
-    #[test]
-    fn high_rtt_erodes_score_and_is_capped() {
-        assert_eq!(quality_score(0, 0.0, Some(150.0)), 90); // (150-50)/10 = 10
-        assert_eq!(quality_score(0, 0.0, Some(5000.0)), 80); // capped at 20
-    }
-
-    #[test]
-    fn score_never_underflows() {
-        assert_eq!(quality_score(100, 1.0, Some(5000.0)), 0);
-    }
-}
-
 /// Reads a best-effort RTT sample from the OS TCP stack. Returns `None` when
 /// the platform does not expose it or the syscall fails.
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -162,5 +127,40 @@ mod rtt_tests {
             "loopback srtt sane: {}",
             s.srtt_ms
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_stream_scores_100() {
+        assert_eq!(quality_score(0, 0.1, Some(5.0)), 100);
+        assert_eq!(quality_score(0, 0.1, None), 100);
+    }
+
+    #[test]
+    fn glitches_dominate_the_penalty() {
+        assert_eq!(quality_score(1, 0.0, None), 92);
+        assert_eq!(quality_score(5, 0.0, None), 60);
+        assert_eq!(quality_score(100, 0.0, None), 20); // capped at 10 glitches => -80
+    }
+
+    #[test]
+    fn high_occupancy_adds_latency_penalty() {
+        // occupancy 1.0 => (1.0-0.5)*2*20 = 20 penalty
+        assert_eq!(quality_score(0, 1.0, None), 80);
+    }
+
+    #[test]
+    fn high_rtt_erodes_score_and_is_capped() {
+        assert_eq!(quality_score(0, 0.0, Some(150.0)), 90); // (150-50)/10 = 10
+        assert_eq!(quality_score(0, 0.0, Some(5000.0)), 80); // capped at 20
+    }
+
+    #[test]
+    fn score_never_underflows() {
+        assert_eq!(quality_score(100, 1.0, Some(5000.0)), 0);
     }
 }

@@ -4,7 +4,7 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
-## [3.0.1] — 2026-10-10
+## [3.0.2] — 2026-10-10
 
 ### Breaking changes
 
