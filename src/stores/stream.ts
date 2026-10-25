@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { invoke, listen } from "../composables/useTauri";
+import { invoke, listen, isNativeRuntime } from "../composables/useTauri";
 import { useSettingsStore, clampFixedLatency } from "./settings";
 import { i18n } from "../i18n";
 import type { LogEntry, Toast, QualityEvent, StatsEvent, BufferResizeEvent } from "../types/events";
@@ -322,6 +322,7 @@ export const useStreamStore = defineStore("stream", () => {
   }
   async function initListeners() {
     disposeListeners();
+    if (!isNativeRuntime()) return;
     await subscribe<SessionStatus>("stream-state", (event) => applySession(event.payload));
     try {
       applySession((await invoke("get_stream_state")) as SessionStatus);

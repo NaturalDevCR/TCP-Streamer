@@ -1,11 +1,20 @@
 <template>
-  <fieldset :disabled="settings.configurationLocked" class="flex flex-col gap-4 min-w-0">
-    <p v-if="settings.role === 'sink'" class="text-xs text-[var(--color-text-muted)]">
+  <fieldset :disabled="settings.configurationLocked" class="configuration-grid audio-grid">
+    <p
+      v-if="settings.role === 'sink'"
+      class="span-full notice text-xs text-[var(--color-text-muted)]"
+    >
       {{ t("operation.sinkAudio") }}
     </p>
-    <Card v-if="settings.role === 'source'" :title="t('audio.title')">
+    <Card
+      v-if="settings.role === 'source'"
+      class="span-full"
+      step="01"
+      :title="t('workspace.audioFormat')"
+      :description="t('workspace.audioFormatDescription')"
+    >
       <div class="flex flex-col gap-4">
-        <div class="flex gap-3">
+        <div class="form-row">
           <Field
             v-if="settings.role === 'source'"
             :label="t('audio.inputDevice')"
@@ -15,9 +24,15 @@
             <Select
               v-model="settings.deviceName"
               :placeholder="
-                settings.devicesLoading ? t('connection.loadingDevices') : t('connection.noDevices')
+                !settings.nativeAvailable
+                  ? t('runtime.desktopDevices')
+                  : settings.devicesLoading
+                    ? t('connection.loadingDevices')
+                    : t('connection.noDevices')
               "
-              :disabled="settings.configurationLocked || settings.devicesLoading"
+              :disabled="
+                !settings.nativeAvailable || settings.configurationLocked || settings.devicesLoading
+              "
             >
               <SelectOption v-for="d in settings.devices" :key="d" :value="d" :label="d" />
             </Select>
@@ -26,7 +41,7 @@
           <Field
             :label="t('audio.sampleRate')"
             :tooltip="t('audio.help.sampleRate')"
-            class="w-[140px]"
+            class="w-[180px]"
           >
             <Select v-model.number="settings.sampleRate" :disabled="settings.configurationLocked">
               <SelectOption :value="48000" label="48 kHz" />
@@ -35,7 +50,7 @@
           </Field>
         </div>
 
-        <div class="flex gap-3">
+        <div class="form-row">
           <Field
             :label="t('audio.bufferSize')"
             :tooltip="t('audio.help.bufferSize')"
@@ -64,7 +79,12 @@
       </div>
     </Card>
 
-    <Card>
+    <Card
+      class="span-full"
+      step="02"
+      :title="t('workspace.bufferAndLatency')"
+      :description="t('workspace.bufferDescription')"
+    >
       <div class="flex flex-col gap-4">
         <template v-if="settings.role === 'source' && settings.showLoopback">
           <div class="flex items-center justify-between">
@@ -78,13 +98,12 @@
         </template>
 
         <Field :label="t('audio.latencyProfile')" :tooltip="t('audio.help.latencyProfile')">
-          <Select v-model="settings.latencyProfile" :disabled="settings.configurationLocked">
-            <SelectOption value="ultra-low" :label="t('audio.latencyUltraLow')" />
-            <SelectOption value="balanced" :label="t('audio.latencyBalanced')" />
-            <SelectOption value="robust" :label="t('audio.latencyRobust')" />
-            <SelectOption value="broadcast" :label="t('audio.latencyBroadcast')" />
-            <SelectOption value="custom" :label="t('audio.latencyCustom')" />
-          </Select>
+          <SegmentedControl
+            v-model="settings.latencyProfile"
+            class="latency-presets"
+            :options="latencyOptions"
+            :disabled="settings.configurationLocked"
+          />
         </Field>
 
         <template v-if="settings.latencyProfile === 'broadcast'">
@@ -121,7 +140,7 @@
           <Switch v-model="settings.adaptiveBuffer" :aria-label="t('audio.adaptiveBuffer')" />
         </div>
         <template v-if="settings.latencyProfile === 'custom'">
-          <div class="flex gap-3">
+          <div class="form-row">
             <Field
               :label="t('audio.ringBufferDuration')"
               :tooltip="t('audio.help.ringBufferDuration')"
@@ -154,7 +173,7 @@
             </Field>
           </div>
 
-          <div class="flex gap-3">
+          <div class="form-row">
             <Field
               :label="t('audio.minBuffer')"
               :tooltip="t('audio.help.minBuffer')"
@@ -194,8 +213,10 @@
   </fieldset>
 </template>
 <script setup lang="ts">
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "../../stores/settings";
+import SegmentedControl from "../ui/SegmentedControl.vue";
 import Card from "../ui/Card.vue";
 import Field from "../ui/Field.vue";
 import Input from "../ui/Input.vue";
@@ -206,6 +227,25 @@ import SettingLabel from "../ui/SettingLabel.vue";
 
 const { t } = useI18n();
 const settings = useSettingsStore();
+const latencyOptions = computed(() => [
+  {
+    value: "ultra-low",
+    label: t("audio.latencyUltraLow"),
+    description: t("workspace.presets.ultraLow"),
+  },
+  {
+    value: "balanced",
+    label: t("audio.latencyBalanced"),
+    description: t("workspace.presets.balanced"),
+  },
+  { value: "robust", label: t("audio.latencyRobust"), description: t("workspace.presets.robust") },
+  {
+    value: "broadcast",
+    label: t("audio.latencyBroadcast"),
+    description: t("workspace.presets.broadcast"),
+  },
+  { value: "custom", label: t("audio.latencyCustom"), description: t("workspace.presets.custom") },
+]);
 
 async function onLoopbackChange() {
   await settings.loadDevices();

@@ -1,13 +1,13 @@
 <template>
   <Teleport to="body">
-    <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+    <div class="toast-stack fixed bottom-12 right-5 z-50 flex flex-col gap-2 pointer-events-none">
       <TransitionGroup name="toast">
         <div
           v-for="toast in stream.toasts"
           :key="toast.id"
           :role="toast.type === 'error' ? 'alert' : 'status'"
           :class="[
-            'pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg border',
+            'pointer-events-auto flex items-center gap-2 toast-message px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg border',
             toastStyles[toast.type] || toastStyles.info,
           ]"
         >

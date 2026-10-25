@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("../../composables/useTauri", () => ({
+  isNativeRuntime: () => true,
   invoke,
   getStore: vi.fn(),
   enable: vi.fn(),

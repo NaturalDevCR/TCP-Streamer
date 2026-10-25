@@ -2,6 +2,8 @@ import { h, type Component } from "vue";
 
 const svgAttrs = {
   xmlns: "http://www.w3.org/2000/svg",
+  "aria-hidden": "true",
+  focusable: "false",
   viewBox: "0 0 24 24",
   fill: "none",
   stroke: "currentColor",
@@ -124,5 +126,40 @@ export const IconLock: Component = {
     h("svg", svgAttrs, [
       h("rect", { x: 3, y: 11, width: 18, height: 11, rx: 2 }),
       h("path", { d: "M7 11V7a5 5 0 0 1 10 0v4" }),
+    ]),
+};
+
+export const IconWave: Component = {
+  render: () => h("svg", svgAttrs, [h("path", { d: "M3 12h3l2-7 4 14 4-14 2 7h3" })]),
+};
+export const IconChevronRight: Component = {
+  render: () => h("svg", svgAttrs, [h("path", { d: "m9 5 7 7-7 7" })]),
+};
+export const IconArrowRight: Component = {
+  render: () => h("svg", svgAttrs, [h("path", { d: "M4 12h16m-6-6 6 6-6 6" })]),
+};
+export const IconSave: Component = {
+  render: () =>
+    h("svg", svgAttrs, [
+      h("path", {
+        d: "m19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM7 3v6h9V3M7 21v-8h10v8",
+      }),
+    ]),
+};
+export const IconClock: Component = {
+  render: () =>
+    h("svg", svgAttrs, [h("circle", { cx: 12, cy: 12, r: 9 }), h("path", { d: "M12 7v5l3 2" })]),
+};
+export const IconActivity: Component = {
+  render: () => h("svg", svgAttrs, [h("path", { d: "M3 12h4l3-8 4 16 3-8h4" })]),
+};
+export const IconTransfer: Component = {
+  render: () => h("svg", svgAttrs, [h("path", { d: "M7 4v16m-4-4 4 4 4-4M17 20V4m-4 4 4-4 4 4" })]),
+};
+export const IconInfo: Component = {
+  render: () =>
+    h("svg", svgAttrs, [
+      h("circle", { cx: 12, cy: 12, r: 9 }),
+      h("path", { d: "M12 11v6M12 7h.01" }),
     ]),
 };

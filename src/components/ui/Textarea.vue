@@ -8,7 +8,7 @@
     :readonly="readonly"
     :disabled="disabled"
     :placeholder="placeholder"
-    class="focus-ring w-full px-3 py-2 rounded-[var(--radius)] bg-[var(--color-surface-1)] border border-[var(--color-border)] font-mono text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] resize-none disabled:opacity-50"
+    class="ui-control focus-ring w-full px-3 py-2 rounded-[var(--radius)] bg-[var(--color-input)] border border-[var(--color-border)] font-mono text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] resize-none disabled:opacity-50"
     :rows="rows"
     @input="onInput"
   />

@@ -4,6 +4,29 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [3.1.0] — 2026-10-25
+
+### Added
+
+- Redesigned Dashboard, Connection, Audio, Logs and Settings with a shared dark theme, green accents, sidebar navigation and persistent session controls.
+- Visual audio routing, real session metrics, stream health, active configuration and recent events in the Dashboard. Missing or unsupported measurements remain explicit.
+- Descriptive keyboard-accessible latency presets, grouped profile transfer controls, searchable event logs and responsive layouts for compact windows.
+- An explicit browser preview for inspecting the interface without the native desktop runtime. Preview configuration is temporary; audio, network discovery, system startup and profile persistence require the desktop app.
+
+### Fixed
+
+- Linux tray icons use an application-specific cache directory instead of the tray library's shared icon paths, preventing another application from overwriting or removing TCP Streamer's icon.
+- Browser startup no longer calls native Tauri IPC, event, settings or autostart APIs. Native-only actions are disabled in the preview, including their keyboard shortcuts, and reinitialization clears retained native startup errors.
+- TCP server connection addresses remain copyable while streaming configuration is locked.
+- Explicit accessible select labels, labeled radio groups, decorative icons and reliable active navigation styling in the native WebView.
+- Resuming log following returns to the latest event after scrolling or pausing.
+
+### Compatibility and installation
+
+- Existing desktop profiles remain compatible. The audio engine and Native UDP v2 wire protocol are unchanged from v3.0.2.
+- Native UDP v1 peers remain incompatible; use a compatible version on both endpoints. TCP/HTTP compatibility is unchanged.
+- Install manually from the release assets. Publisher signing, notarization and automatic updates remain unconfigured.
+
 ## [3.0.2] — 2026-10-10
 
 ### Breaking changes

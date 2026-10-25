@@ -1,11 +1,26 @@
 <template>
-  <fieldset :disabled="settings.configurationLocked" class="flex flex-col gap-4 min-w-0">
+  <fieldset :disabled="settings.configurationLocked" class="configuration-grid settings-grid">
+    <p
+      v-if="settings.persistenceError"
+      role="alert"
+      class="span-full text-sm text-[var(--color-danger)]"
+    >
+      {{ settings.persistenceError }}
+    </p>
+    <p v-if="settings.isDirty" role="status" class="span-full notice text-xs">
+      {{ t("operation.dirty") }}
+    </p>
     <!-- Profiles -->
-    <Card :title="t('settings.profiles')">
-      <div class="flex flex-col gap-3">
+    <Card
+      class="span-full"
+      :title="t('settings.profiles')"
+      :description="t('workspace.profilesDescription')"
+    >
+      <div class="profile-controls">
         <Field :label="t('settings.selectProfile')" :tooltip="t('settings.help.profile')">
           <Select
             :model-value="settings.currentProfile"
+            :disabled="!settings.nativeAvailable"
             @update:model-value="(v: string | number) => switchProfile(String(v))"
           >
             <SelectOption
@@ -17,21 +32,49 @@
           </Select>
         </Field>
 
-        <div class="flex gap-2">
-          <Button size="sm" variant="secondary" @click="saveProfile">
+        <div class="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            :disabled="!settings.nativeAvailable"
+            @click="saveProfile"
+          >
             {{ t("action.save") }}
           </Button>
-          <Button size="sm" variant="secondary" @click="openNewDialog = true">
+          <Button
+            size="sm"
+            variant="secondary"
+            :disabled="!settings.nativeAvailable"
+            @click="openNewDialog = true"
+          >
             {{ t("action.new") }}
           </Button>
           <Button
             size="sm"
             variant="danger"
-            :disabled="settings.currentProfile === 'Default'"
+            :disabled="!settings.nativeAvailable || settings.currentProfile === 'Default'"
             @click="deleteOpen = true"
           >
             {{ t("action.delete") }}
           </Button>
+        </div>
+      </div>
+      <div class="profile-transfer">
+        <div>
+          <h3>{{ t("workspace.profileTransfer") }}</h3>
+          <p>{{ t("workspace.profileTransferDescription") }}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" @click="exportProfile">{{
+            t("operation.export")
+          }}</Button
+          ><Button
+            size="sm"
+            variant="secondary"
+            :disabled="!settings.nativeAvailable"
+            @click="importOpen = true"
+            >{{ t("operation.import") }}</Button
+          >
         </div>
       </div>
     </Card>
@@ -85,15 +128,6 @@
       </div>
     </Dialog>
 
-    <Card :title="t('operation.export')">
-      <p class="text-xs text-[var(--color-text-muted)]">{{ t("operation.importHelp") }}</p>
-      <div class="flex gap-2 mt-2">
-        <Button size="sm" @click="exportProfile">{{ t("operation.export") }}</Button
-        ><Button size="sm" variant="secondary" @click="importOpen = true">{{
-          t("operation.import")
-        }}</Button>
-      </div>
-    </Card>
     <Dialog :open="importOpen" :title="t('operation.import')" @update:open="importOpen = $event">
       <Field :label="t('operation.profileName')"><Input v-model="importName" /></Field>
       <Field :label="t('operation.importHelp')"
@@ -101,17 +135,14 @@
       /></Field>
       <Button @click="importProfile">{{ t("operation.import") }}</Button>
     </Dialog>
-    <p v-if="settings.persistenceError" role="alert" class="text-sm text-[var(--color-danger)]">
-      {{ settings.persistenceError }}
-    </p>
-    <p v-if="settings.isDirty" role="status" class="text-xs">{{ t("operation.dirty") }}</p>
     <!-- Automation -->
-    <Card :title="t('settings.automation')">
+    <Card :title="t('settings.automation')" :description="t('workspace.automationDescription')">
       <div class="flex flex-col gap-4">
         <div class="flex items-center justify-between">
           <SettingLabel :label="t('settings.autoStart')" :tooltip="t('settings.help.autoStart')" />
           <Switch
             v-model="settings.autostart"
+            :disabled="!settings.nativeAvailable"
             :aria-label="t('settings.autoStart')"
             @update:model-value="settings.toggleAutostart()"
           />
@@ -142,6 +173,7 @@
         <SettingLabel :label="t('settings.language')" :tooltip="t('settings.help.language')" />
         <Select
           :model-value="ui.locale"
+          :aria-label="t('settings.language')"
           class="w-[120px]"
           @update:model-value="(v) => ui.setLocale(v as 'en' | 'es')"
         >
@@ -152,8 +184,8 @@
     </Card>
 
     <!-- About -->
-    <Card :title="t('settings.about')">
-      <div class="flex flex-col gap-3">
+    <Card class="span-full about-card" :title="t('settings.about')">
+      <div class="flex flex-col gap-4">
         <p class="text-sm text-[var(--color-text)]">
           {{ t("app.name") }}
           <span class="text-[var(--color-text-muted)]">v{{ version }}</span>
@@ -167,7 +199,7 @@
           as="a"
           href="https://github.com/NaturalDevCR/TCP-Streamer/issues"
           target="_blank"
-          @click.prevent="openSupport"
+          @click="openSupport"
         >
           {{ t("operation.support") }}
         </Button>
@@ -244,7 +276,9 @@ async function confirmSwitch() {
     stream.addToast(String(e), "error");
   }
 }
-async function openSupport() {
+async function openSupport(event: MouseEvent) {
+  if (!settings.nativeAvailable) return;
+  event.preventDefault();
   try {
     await openUrl("https://github.com/NaturalDevCR/TCP-Streamer/issues");
   } catch (e) {

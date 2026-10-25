@@ -7,7 +7,7 @@
     :aria-disabled="disabled || undefined"
     :rel="as === 'a' ? 'noopener noreferrer' : undefined"
     :class="[
-      'focus-ring inline-flex shrink-0 whitespace-nowrap items-center justify-center gap-2 rounded-[var(--radius)] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+      'ui-button focus-ring inline-flex shrink-0 whitespace-nowrap items-center justify-center gap-2 rounded-[var(--radius)] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
       sizeClass,
       variantClass,
     ]"
@@ -26,7 +26,7 @@ const props = defineProps<{
   disabled?: boolean;
 }>();
 const sizeClass = computed(() =>
-  props.size === "sm" ? "h-8 px-3 text-[13px]" : "h-9 px-4 text-sm",
+  props.size === "sm" ? "h-8 px-3 text-xs" : "h-10 px-4 text-[13px]",
 );
 const variantClass = computed(() => {
   switch (props.variant) {
@@ -35,7 +35,7 @@ const variantClass = computed(() => {
     case "ghost":
       return "bg-transparent text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]";
     case "danger":
-      return "bg-[var(--color-danger)] text-white hover:opacity-90";
+      return "bg-[var(--color-danger)] text-[var(--color-on-danger)] hover:opacity-90";
     default:
       return "bg-[var(--color-accent)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]";
   }

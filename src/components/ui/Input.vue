@@ -8,7 +8,7 @@
     :value="modelValue"
     :placeholder="placeholder"
     :disabled="disabled"
-    class="focus-ring w-full h-9 px-3 rounded-[var(--radius)] bg-[var(--color-surface-1)] border border-[var(--color-border)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] disabled:opacity-50"
+    class="ui-control focus-ring w-full h-10 px-3 rounded-[var(--radius)] bg-[var(--color-input)] border border-[var(--color-border)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] disabled:opacity-50"
     @input="onInput"
   />
 </template>

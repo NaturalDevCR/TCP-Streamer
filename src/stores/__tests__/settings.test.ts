@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/core")>()),
+  isTauri: () => true,
+}));
+
 const mockStore = new Map<string, unknown>();
 
 // This project's `getStore()` (src/composables/useTauri.ts) calls the named

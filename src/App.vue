@@ -15,7 +15,7 @@ onMounted(async () => {
   await settings.init();
   await stream.initListeners();
 
-  if (settings.autoStream && !stream.isStreaming) {
+  if (settings.nativeAvailable && settings.autoStream && !stream.isStreaming) {
     setTimeout(() => stream.startStream(), 500);
   }
 
@@ -30,7 +30,7 @@ onUnmounted(() => {
 function onKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
-    settings.saveSettings();
+    if (settings.nativeAvailable) settings.saveSettings();
   }
   if (
     (e.ctrlKey || e.metaKey) &&
@@ -42,7 +42,7 @@ function onKeyDown(e: KeyboardEvent) {
     )
   ) {
     e.preventDefault();
-    stream.toggleStream();
+    if (settings.nativeAvailable) stream.toggleStream();
   }
 }
 

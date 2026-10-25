@@ -42,11 +42,22 @@ pub fn run() {
             let show_i = MenuItem::with_id(app, "show", "Show TCP Streamer", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::with_id("tray")
+            // tray-icon's Linux default uses process-local counters in a shared directory.
+            // Other apps can overwrite/remove the same tray-icon-<id>-0.png. Namespace
+            // the files by our application identifier, even when launched hidden.
+            let tray = TrayIconBuilder::with_id("com.jdavidoa91.tcp-streamer.tray");
+            #[cfg(target_os = "linux")]
+            let tray = tray.temp_dir_path(app.path().app_cache_dir()?.join("tray"));
+
+            let _tray = tray
                 .menu(&menu)
                 .tooltip("TCP Streamer")
                 .show_menu_on_left_click(false)
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(
+                    app.default_window_icon()
+                        .ok_or("Missing application icon")?
+                        .clone(),
+                )
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
                         app.exit(0);

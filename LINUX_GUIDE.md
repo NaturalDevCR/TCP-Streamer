@@ -62,3 +62,11 @@ sudo ufw allow 1704/udp   # Native UDP
 ## Real-time Thread Priority
 
 The `.deb` package automatically runs a post-install script that sets `CAP_SYS_NICE` on the binary, allowing real-time thread priority for the audio capture thread. This reduces the risk of audio glitches under CPU load.
+
+## System tray icon
+
+TCP Streamer keeps running in the system tray after its window closes. Use the tray menu to show the window or quit.
+
+Tray icon files are stored in the application's own cache directory (`$XDG_CACHE_HOME/com.jdavidoa91.tcp-streamer/tray`, or `~/.cache/com.jdavidoa91.tcp-streamer/tray`). This avoids the shared `tray-icon-<counter>-0.png` paths used by the [underlying Linux tray library](https://github.com/tauri-apps/tray-icon/blob/tray-icon-v0.21.2/src/platform_impl/gtk/mod.rs), where another application could overwrite or remove TCP Streamer's icon. This applies to normal and hidden/autostart launches, for both `.deb` and AppImage builds.
+
+After installing a build with this fix, quit TCP Streamer using its tray menu and relaunch it. Closing the window alone keeps the previous process running. Desktop environments still need support for AppIndicator/StatusNotifier tray icons.

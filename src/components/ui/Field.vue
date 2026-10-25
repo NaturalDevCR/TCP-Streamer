@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col gap-1.5">
+  <div class="form-field flex min-w-0 flex-col gap-2">
     <SettingLabel v-if="label" :label="label" :for-id="fieldId" :tooltip="tooltip" as-label />
     <slot :id="fieldId" />
     <p v-if="help" :id="`${fieldId}-help`" class="text-xs text-[var(--color-text-faint)]">

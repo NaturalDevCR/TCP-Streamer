@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 const bridge = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), getStore: vi.fn() }));
 vi.mock("../../composables/useTauri", () => ({
+  isNativeRuntime: () => true,
   ...bridge,
   isEnabled: vi.fn(),
   enable: vi.fn(),

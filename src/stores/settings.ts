@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { getStore } from "../composables/useTauri";
+import { getStore, isNativeRuntime } from "../composables/useTauri";
 import { invoke, isEnabled, enable, disable } from "../composables/useTauri";
 
 export interface PreflightResult {
@@ -54,6 +54,7 @@ export function clampFixedLatency(value: number): number {
 }
 
 export const useSettingsStore = defineStore("settings", () => {
+  const nativeAvailable = isNativeRuntime();
   // ── Reactive State ──
   const devices = ref<string[]>([]);
   const osType = ref("unknown");
@@ -225,6 +226,18 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // ── Actions ──
   async function init() {
+    if (!nativeAvailable) {
+      // A preview can be reinitialized after a failed native startup or hot reload.
+      persistenceError.value = "";
+      devicesError.value = "";
+      outputDevicesError.value = "";
+      scanError.value = "";
+      preflightError.value = "";
+      currentProfile.value = "Default";
+      profiles.value = { Default: {} };
+      applyProfile({});
+      return;
+    }
     try {
       osType.value = (await invoke("get_os_type")) as string;
     } catch {
@@ -498,6 +511,7 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   return {
+    nativeAvailable,
     preflight,
     preflightResult,
     preflightLoading,

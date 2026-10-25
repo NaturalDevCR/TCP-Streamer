@@ -2,7 +2,7 @@
 
 > A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with configurable buffering. End-to-end latency depends on devices, network and receiver.
 
-![Version](https://img.shields.io/badge/version-3.0.2-blue.svg)
+![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/NaturalDevCR/TCP-Streamer)
@@ -11,10 +11,9 @@
 
 ## Screenshots
 
-<img width="962" height="648" alt="image" src="https://github.com/user-attachments/assets/15f43696-b91d-4d35-a837-e776fd0d9943" />
-<img width="841" height="846" alt="image" src="https://github.com/user-attachments/assets/0c5e52cb-2e13-4687-b31d-0a1d08eac8bf" />
-<img width="964" height="650" alt="image" src="https://github.com/user-attachments/assets/700828bf-05b3-45c7-8a3b-598f1346ebcb" />
-<img width="960" height="648" alt="image" src="https://github.com/user-attachments/assets/2f180360-80ac-420a-b1f5-1bf9746d25e7" />
+![TCP Streamer workspace](docs/screenshots/ui-overview.png)
+
+![TCP Streamer profiles and preferences](docs/screenshots/ui-settings.png)
 
 ## Table of Contents
 
@@ -266,6 +265,8 @@ pnpm tauri dev
 # Build for production
 pnpm tauri build -- --locked
 ```
+
+For a browser-only UI preview, run `pnpm dev` and open `http://localhost:1420/`. Audio devices, streaming, network discovery, system startup, and profile persistence require the native desktop app (`pnpm tauri dev`). The browser preview does not call the native Tauri APIs or save configuration.
 
 ---
 
