@@ -44,7 +44,7 @@
           ><span class="footer-dot" />{{ t("workspace.localAddress") }}
           <b>{{ settings.nativeAvailable ? settings.localIp : "—" }}</b></span
         >
-        <span class="footer-shortcuts"
+        <span v-if="settings.nativeAvailable" class="footer-shortcuts"
           ><kbd>{{ modifier }} S</kbd> {{ t("action.save") }}<span class="footer-divider" /><kbd
             >{{ modifier }} ↵</kbd
           >
@@ -94,7 +94,10 @@ const sectionIcon = computed(
 watch(
   () => ui.section,
   () => {
-    if (mainContent.value) mainContent.value.scrollTop = 0;
+    if (!mainContent.value) return;
+    mainContent.value.scrollTop = 0;
+    mainContent.value.focus({ preventScroll: true });
   },
+  { flush: "post" },
 );
 </script>

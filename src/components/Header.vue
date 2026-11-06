@@ -20,14 +20,28 @@
         v-if="settings.isDirty"
         size="sm"
         variant="secondary"
-        :disabled="!settings.nativeAvailable || settings.configurationLocked"
-        @click="saveSettings"
+        :disabled="
+          !settings.nativeAvailable ||
+          settings.configurationLocked ||
+          settings.initializing ||
+          settings.profileBusy
+        "
+        @click="stream.saveConfiguration()"
         ><IconSave class="w-3.5 h-3.5" />{{ t("operation.save") }}</Button
       >
       <Button
         :variant="stream.pending || stream.isStreaming ? 'danger' : 'primary'"
         size="sm"
-        :disabled="!settings.nativeAvailable || stream.stopping || settings.preflightLoading"
+        :disabled="
+          !settings.nativeAvailable ||
+          settings.initializing ||
+          stream.stopping ||
+          settings.preflightLoading ||
+          (!stream.pending &&
+            !stream.isStreaming &&
+            (settings.profileBusy ||
+              (settings.role === 'sink' ? settings.outputDevicesLoading : settings.devicesLoading)))
+        "
         :title="t('operation.shortcuts')"
         @click="stream.toggleStream()"
       >
@@ -52,11 +66,4 @@ const { t } = useI18n();
 const stream = useStreamStore();
 const ui = useUiStore();
 const settings = useSettingsStore();
-async function saveSettings() {
-  const saved = await settings.saveSettings();
-  stream.addToast(
-    saved ? t("toast.settingsSaved", { name: settings.currentProfile }) : settings.persistenceError,
-    saved ? "success" : "error",
-  );
-}
 </script>

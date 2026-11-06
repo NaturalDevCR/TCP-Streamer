@@ -1546,3 +1546,17 @@ kbd {
   margin-top: 4px;
   color: var(--color-text-faint);
 }
+
+@media (max-width: 460px) {
+  .workspace-header {
+    justify-content: flex-end;
+  }
+  .breadcrumb {
+    display: none;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex-shrink: 1;
+  }
+}

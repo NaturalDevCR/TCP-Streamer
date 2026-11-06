@@ -97,6 +97,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // Automation
   const autostart = ref(false);
+  const autostartBusy = ref(false);
   const autoStream = ref(false);
   const autoReconnect = ref(false);
 
@@ -123,10 +124,24 @@ export const useSettingsStore = defineStore("settings", () => {
   const persistenceError = ref("");
   const outputDevicesLoading = ref(false);
   const outputDevicesError = ref("");
+  const inputDevicesKnown = ref(false);
+  const outputDevicesKnown = ref(false);
+  const inputUnavailable = computed(
+    () =>
+      inputDevicesKnown.value && !!deviceName.value && !devices.value.includes(deviceName.value),
+  );
+  const outputUnavailable = computed(
+    () =>
+      outputDevicesKnown.value &&
+      !!outputDevice.value &&
+      !outputDevices.value.includes(outputDevice.value),
+  );
   const scanLoading = ref(false);
   const scanError = ref("");
   const scanCompleted = ref(false);
   const configurationLocked = ref(false);
+  const profileBusy = ref(false);
+  const initializing = ref(false);
   const savedSnapshot = ref("");
   const isDirty = computed(() => JSON.stringify(snapshot()) !== savedSnapshot.value);
   function snapshot(): SettingsDict {
@@ -200,7 +215,7 @@ export const useSettingsStore = defineStore("settings", () => {
     outputDevice.value = typeof raw.output_device === "string" ? raw.output_device : "";
     sourceAddr.value = typeof raw.source_addr === "string" ? raw.source_addr : "";
     rememberPsk.value = typeof raw.remember_psk === "boolean" ? raw.remember_psk : Boolean(raw.psk);
-    psk.value = typeof raw.psk === "string" ? raw.psk : "";
+    psk.value = rememberPsk.value && typeof raw.psk === "string" ? raw.psk : "";
     loopbackMode.value = typeof raw.loopback_mode === "boolean" ? raw.loopback_mode : false;
     const enums = {
       mode: ["client", "server"],
@@ -217,7 +232,6 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!enums.latencyProfile.includes(latencyProfile.value)) latencyProfile.value = "balanced";
     if (!enums.dscpStrategy.includes(dscpStrategy.value)) dscpStrategy.value = "voip";
     fixedLatencyMs.value = clampFixedLatency(fixedLatencyMs.value);
-    savedSnapshot.value = JSON.stringify(snapshot());
   }
   // ── Computed ──
   const isServer = computed(() => mode.value === "server");
@@ -236,6 +250,7 @@ export const useSettingsStore = defineStore("settings", () => {
       currentProfile.value = "Default";
       profiles.value = { Default: {} };
       applyProfile({});
+      savedSnapshot.value = JSON.stringify(snapshot());
       return;
     }
     try {
@@ -264,31 +279,37 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  async function loadDevices() {
+  let deviceGeneration = 0;
+  async function loadDevices(refresh = false) {
+    const generation = ++deviceGeneration;
     devicesLoading.value = true;
     devicesError.value = "";
     try {
       const result = (await invoke("get_input_devices", {
         includeLoopback: loopbackMode.value,
+        refresh,
       })) as string[];
+      if (generation !== deviceGeneration) return;
       devices.value = result || [];
+      inputDevicesKnown.value = true;
       if (!deviceName.value && devices.value.length) deviceName.value = devices.value[0];
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to load devices:", e);
+      if (generation !== deviceGeneration) return;
       devices.value = [];
-      devicesError.value = e instanceof Error ? e.message : "Failed to load devices";
+      devicesError.value = String(e);
     } finally {
-      devicesLoading.value = false;
+      if (generation === deviceGeneration) devicesLoading.value = false;
     }
   }
 
   async function loadOutputDevices() {
+    if (outputDevicesLoading.value) return;
     outputDevicesLoading.value = true;
     outputDevicesError.value = "";
     try {
       const result = (await invoke("get_output_devices")) as string[];
       outputDevices.value = result || [];
+      outputDevicesKnown.value = true;
       if (!outputDevice.value && outputDevices.value.length)
         outputDevice.value = outputDevices.value[0];
     } catch (e) {
@@ -306,7 +327,13 @@ export const useSettingsStore = defineStore("settings", () => {
     scanCompleted.value = false;
   }
   async function preflight() {
-    if (configurationLocked.value || preflightLoading.value) return;
+    if (
+      configurationLocked.value ||
+      profileBusy.value ||
+      initializing.value ||
+      preflightLoading.value
+    )
+      return;
     preflightLoading.value = true;
     preflightError.value = "";
     preflightResult.value = null;
@@ -371,46 +398,86 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function loadSettings() {
     const store = await getStore();
-    await loadProfiles();
+    const stored = (await store.get("profiles")) as Record<string, SettingsDict> | null;
+    const savedName = await store.get("current_profile");
+    const allProfiles: Record<string, SettingsDict> = { Default: {}, ...stored };
+    const name =
+      typeof savedName === "string" && Object.hasOwn(allProfiles, savedName)
+        ? savedName
+        : "Default";
+    // The old global loopback flag belongs to the profile selected on startup.
+    const legacyLoopback =
+      allProfiles[name]?.loopback_mode === undefined && Boolean(await store.get("loopback_mode"));
+    for (const [profileName, profile] of Object.entries(allProfiles)) {
+      if (typeof profile?.loopback_mode !== "boolean") {
+        allProfiles[profileName] = {
+          ...profile,
+          loopback_mode: profileName === name && legacyLoopback,
+        };
+      }
+    }
+    profiles.value = allProfiles;
+    currentProfile.value = name;
+    applyProfile(allProfiles[name]);
+    savedSnapshot.value = JSON.stringify(snapshot());
+  }
 
-    const profileName = ((await store.get("current_profile")) as string) || "Default";
-    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
-    const s: SettingsDict = allProfiles[profileName] || {};
+  async function commitProfiles(allProfiles: Record<string, SettingsDict>, name: string) {
+    const store = await getStore();
+    const previousProfiles = await store.get("profiles");
+    const previousName = await store.get("current_profile");
+    try {
+      await store.set("profiles", allProfiles);
+      await store.set("current_profile", name);
+      await store.save();
+    } catch (error) {
+      // The plugin updates its in-memory store before the explicit disk write.
+      await Promise.allSettled([
+        store.set("profiles", previousProfiles),
+        store.set("current_profile", previousName),
+      ]);
+      throw error;
+    }
+    profiles.value = allProfiles;
+    currentProfile.value = name;
+    persistenceError.value = "";
+  }
 
-    currentProfile.value = profileName;
-
-    applyProfile(s);
-    if (s.loopback_mode === undefined)
-      loopbackMode.value = Boolean(await store.get("loopback_mode"));
+  function profileForDisk(profile: SettingsDict): SettingsDict {
+    return {
+      ...profile,
+      psk: profile.remember_psk ? profile.psk : "",
+      fixed_latency_ms: clampFixedLatency(Number(profile.fixed_latency_ms)),
+    };
   }
 
   async function persistSettings() {
-    const store = await getStore();
-    const profileName = currentProfile.value || "Default";
+    const draft = snapshot();
+    const name = currentProfile.value;
+    await commitProfiles({ ...profiles.value, [name]: profileForDisk(draft) }, name);
+    savedSnapshot.value = JSON.stringify(draft);
+  }
 
-    const settings = snapshot();
-    settings.psk = rememberPsk.value ? psk.value : "";
-    settings.remember_psk = rememberPsk.value;
-    settings.fixed_latency_ms = clampFixedLatency(fixedLatencyMs.value);
-    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
-    allProfiles[profileName] = settings;
-
-    await store.set("profiles", allProfiles ?? {});
-    await store.set("current_profile", profileName ?? "Default");
-    await store.set("device", deviceName.value ?? "");
-    await store.set("loopback_mode", loopbackMode.value ?? false);
-    await store.save();
-    profiles.value = allProfiles;
-    persistenceError.value = "";
-    savedSnapshot.value = JSON.stringify(snapshot());
+  async function withProfileOperation(action: () => Promise<boolean>) {
+    if (profileBusy.value) return false;
+    profileBusy.value = true;
+    try {
+      return await action();
+    } catch (error) {
+      persistenceError.value = String(error);
+      throw error;
+    } finally {
+      profileBusy.value = false;
+    }
   }
 
   async function saveSettings() {
     try {
-      await persistSettings();
-      return true;
-    } catch (e) {
-      persistenceError.value = String(e);
+      return await withProfileOperation(async () => {
+        await persistSettings();
+        return true;
+      });
+    } catch {
       return false;
     }
   }
@@ -425,88 +492,99 @@ export const useSettingsStore = defineStore("settings", () => {
     };
     return JSON.stringify({ schema_version: 1, profile }, null, 2);
   }
-  async function importProfile(name: string, content: string) {
-    if (configurationLocked.value) return false;
-    const data = JSON.parse(content);
-    if (
-      data.schema_version !== 1 ||
-      !data.profile ||
-      typeof data.profile !== "object" ||
-      Array.isArray(data.profile)
-    )
-      throw new Error("Unsupported profile schema");
-    if (!name.trim() || profiles.value[name]) return false;
-    applyProfile({ ...data.profile, psk: "", remember_psk: false });
-    currentProfile.value = name;
-    return saveSettings();
+  async function activateProfile(profile: SettingsDict) {
+    const previousLoopback = loopbackMode.value;
+    applyProfile(profile);
+    savedSnapshot.value = JSON.stringify(snapshot());
+    if (inputDevicesKnown.value && loopbackMode.value !== previousLoopback) await loadDevices();
+    else if (!deviceName.value && devices.value.length) deviceName.value = devices.value[0];
+    if (!outputDevice.value && outputDevices.value.length)
+      outputDevice.value = outputDevices.value[0];
   }
-  // ── Profiles ──
-  async function loadProfiles() {
-    const store = await getStore();
-    const p = (await store.get("profiles")) as Record<string, SettingsDict> | null;
-    if (!p || Object.keys(p).length === 0) {
-      await store.set("profiles", { Default: {} });
-      await store.set("current_profile", "Default");
-      await store.save();
-      profiles.value = { Default: {} };
-    } else {
-      profiles.value = p;
-    }
-    currentProfile.value = ((await store.get("current_profile")) as string) || "Default";
+
+  function canCreateProfile(name: string) {
+    return !configurationLocked.value && !!name.trim() && !Object.hasOwn(profiles.value, name);
+  }
+
+  async function importProfile(name: string, content: string) {
+    if (!canCreateProfile(name)) return false;
+    return withProfileOperation(async () => {
+      const data = JSON.parse(content);
+      if (
+        data?.schema_version !== 1 ||
+        !data.profile ||
+        typeof data.profile !== "object" ||
+        Array.isArray(data.profile)
+      )
+        throw new Error("Unsupported profile schema");
+      const profile = {
+        ...data.profile,
+        psk: "",
+        remember_psk: false,
+        loopback_mode: data.profile.loopback_mode === true,
+      };
+      const allProfiles = { ...profiles.value };
+      if (isDirty.value) allProfiles[currentProfile.value] = profileForDisk(snapshot());
+      await commitProfiles({ ...allProfiles, [name]: profile }, name);
+      await activateProfile(profile);
+      return true;
+    });
   }
 
   async function switchProfile(name: string) {
-    if (configurationLocked.value || !profiles.value[name]) return;
-    if (isDirty.value && !(await saveSettings())) throw new Error(persistenceError.value);
-    currentProfile.value = name;
-    const store = await getStore();
-    await store.set("current_profile", name);
-    await store.save();
-    await loadSettings();
+    if (
+      configurationLocked.value ||
+      !Object.hasOwn(profiles.value, name) ||
+      name === currentProfile.value
+    )
+      return;
+    await withProfileOperation(async () => {
+      const allProfiles = { ...profiles.value };
+      if (isDirty.value) allProfiles[currentProfile.value] = profileForDisk(snapshot());
+      await commitProfiles(allProfiles, name);
+      await activateProfile(allProfiles[name]);
+      return true;
+    });
   }
 
   async function createProfile(name: string) {
-    if (configurationLocked.value || !name.trim() || profiles.value[name]) return false;
-    const store = await getStore();
-    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
-    allProfiles[name] = {
-      ...snapshot(),
-      psk: rememberPsk.value ? psk.value : "",
-      remember_psk: rememberPsk.value,
-    };
-    await store.set("profiles", allProfiles);
-    await store.set("current_profile", name);
-    await store.save();
-    profiles.value = allProfiles;
-    currentProfile.value = name;
-    savedSnapshot.value = JSON.stringify(snapshot());
-    return true;
+    if (!canCreateProfile(name)) return false;
+    return withProfileOperation(async () => {
+      const draft = snapshot();
+      await commitProfiles({ ...profiles.value, [name]: profileForDisk(draft) }, name);
+      savedSnapshot.value = JSON.stringify(draft);
+      return true;
+    });
   }
 
   async function deleteProfile(name: string) {
-    if (configurationLocked.value || name === "Default") return false;
-    const store = await getStore();
-    const allProfiles = ((await store.get("profiles")) as Record<string, SettingsDict>) || {};
-    delete allProfiles[name];
-    await store.set("profiles", allProfiles);
-    await store.set("current_profile", "Default");
-    await store.save();
-    profiles.value = allProfiles;
-    currentProfile.value = "Default";
-    await loadSettings();
-    return true;
+    if (configurationLocked.value || name === "Default" || !Object.hasOwn(profiles.value, name))
+      return false;
+    return withProfileOperation(async () => {
+      const deletingCurrent = name === currentProfile.value;
+      const next = deletingCurrent ? "Default" : currentProfile.value;
+      const allProfiles: Record<string, SettingsDict> = { Default: {}, ...profiles.value };
+      delete allProfiles[name];
+      await commitProfiles(allProfiles, next);
+      if (deletingCurrent) await activateProfile(allProfiles[next]);
+      return true;
+    });
   }
 
-  async function toggleAutostart() {
+  async function setAutostart(enabled: boolean) {
+    if (autostartBusy.value || enabled === autostart.value) return;
+    autostartBusy.value = true;
     try {
-      if (autostart.value) {
+      if (enabled) {
         await enable();
       } else {
         await disable();
       }
+      autostart.value = enabled;
     } catch (e) {
-      autostart.value = !autostart.value;
       persistenceError.value = String(e);
+    } finally {
+      autostartBusy.value = false;
     }
   }
 
@@ -521,6 +599,10 @@ export const useSettingsStore = defineStore("settings", () => {
     snapshot,
     isDirty,
     configurationLocked,
+    profileBusy,
+    initializing,
+    inputUnavailable,
+    outputUnavailable,
     persistenceError,
     exportProfile,
     importProfile,
@@ -546,6 +628,7 @@ export const useSettingsStore = defineStore("settings", () => {
     minBuffer,
     maxBuffer,
     autostart,
+    autostartBusy,
     autoStream,
     autoReconnect,
     highPriority,
@@ -577,7 +660,7 @@ export const useSettingsStore = defineStore("settings", () => {
     switchProfile,
     createProfile,
     deleteProfile,
-    toggleAutostart,
+    setAutostart,
     loadOutputDevices,
     scanSources,
     cancelScan,

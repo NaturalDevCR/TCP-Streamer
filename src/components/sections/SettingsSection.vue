@@ -1,83 +1,93 @@
 <template>
-  <fieldset :disabled="settings.configurationLocked" class="configuration-grid settings-grid">
-    <p
-      v-if="settings.persistenceError"
-      role="alert"
-      class="span-full text-sm text-[var(--color-danger)]"
+  <div class="configuration-grid settings-grid">
+    <fieldset
+      :disabled="settings.configurationLocked || settings.profileBusy || settings.initializing"
+      class="profile-settings span-full"
     >
-      {{ settings.persistenceError }}
-    </p>
-    <p v-if="settings.isDirty" role="status" class="span-full notice text-xs">
-      {{ t("operation.dirty") }}
-    </p>
-    <!-- Profiles -->
-    <Card
-      class="span-full"
-      :title="t('settings.profiles')"
-      :description="t('workspace.profilesDescription')"
-    >
-      <div class="profile-controls">
-        <Field :label="t('settings.selectProfile')" :tooltip="t('settings.help.profile')">
-          <Select
-            :model-value="settings.currentProfile"
-            :disabled="!settings.nativeAvailable"
-            @update:model-value="(v: string | number) => switchProfile(String(v))"
-          >
-            <SelectOption
-              v-for="(_, name) in settings.profiles"
-              :key="name"
-              :value="name"
-              :label="name"
-            />
-          </Select>
-        </Field>
+      <p
+        v-if="settings.persistenceError"
+        role="alert"
+        class="span-full text-sm text-[var(--color-danger)]"
+      >
+        {{ settings.persistenceError }}
+      </p>
+      <p v-if="settings.isDirty" role="status" class="span-full notice text-xs">
+        {{ t("operation.dirty") }}
+      </p>
+      <!-- Profiles -->
+      <Card
+        class="span-full"
+        :title="t('settings.profiles')"
+        :description="t('workspace.profilesDescription')"
+      >
+        <div class="profile-controls">
+          <Field :label="t('settings.selectProfile')" :tooltip="t('settings.help.profile')">
+            <Select
+              :model-value="settings.currentProfile"
+              :disabled="
+                !settings.nativeAvailable ||
+                settings.configurationLocked ||
+                settings.profileBusy ||
+                settings.initializing
+              "
+              @update:model-value="(v: string | number) => switchProfile(String(v))"
+            >
+              <SelectOption
+                v-for="(_, name) in settings.profiles"
+                :key="name"
+                :value="name"
+                :label="name"
+              />
+            </Select>
+          </Field>
 
-        <div class="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            :disabled="!settings.nativeAvailable"
-            @click="saveProfile"
-          >
-            {{ t("action.save") }}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            :disabled="!settings.nativeAvailable"
-            @click="openNewDialog = true"
-          >
-            {{ t("action.new") }}
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            :disabled="!settings.nativeAvailable || settings.currentProfile === 'Default'"
-            @click="deleteOpen = true"
-          >
-            {{ t("action.delete") }}
-          </Button>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              :disabled="!settings.nativeAvailable"
+              @click="stream.saveConfiguration()"
+            >
+              {{ t("action.save") }}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              :disabled="!settings.nativeAvailable"
+              @click="openNewDialog = true"
+            >
+              {{ t("action.new") }}
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              :disabled="!settings.nativeAvailable || settings.currentProfile === 'Default'"
+              @click="deleteOpen = true"
+            >
+              {{ t("action.delete") }}
+            </Button>
+          </div>
         </div>
-      </div>
-      <div class="profile-transfer">
-        <div>
-          <h3>{{ t("workspace.profileTransfer") }}</h3>
-          <p>{{ t("workspace.profileTransferDescription") }}</p>
+        <div class="profile-transfer">
+          <div>
+            <h3>{{ t("workspace.profileTransfer") }}</h3>
+            <p>{{ t("workspace.profileTransferDescription") }}</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" @click="exportProfile">{{
+              t("operation.export")
+            }}</Button
+            ><Button
+              size="sm"
+              variant="secondary"
+              :disabled="!settings.nativeAvailable"
+              @click="importOpen = true"
+              >{{ t("operation.import") }}</Button
+            >
+          </div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" @click="exportProfile">{{
-            t("operation.export")
-          }}</Button
-          ><Button
-            size="sm"
-            variant="secondary"
-            :disabled="!settings.nativeAvailable"
-            @click="importOpen = true"
-            >{{ t("operation.import") }}</Button
-          >
-        </div>
-      </div>
-    </Card>
+      </Card>
+    </fieldset>
 
     <Dialog
       :open="Boolean(pendingProfile)"
@@ -87,7 +97,11 @@
     >
       <div class="flex justify-end gap-2">
         <Button variant="ghost" @click="pendingProfile = ''">{{ t("action.cancel") }}</Button
-        ><Button @click="confirmSwitch">{{ t("operation.save") }}</Button>
+        ><Button
+          :disabled="settings.profileBusy || settings.configurationLocked"
+          @click="confirmSwitch"
+          >{{ t("operation.save") }}</Button
+        >
       </div>
     </Dialog>
     <Dialog
@@ -98,7 +112,12 @@
     >
       <div class="flex justify-end gap-2">
         <Button variant="ghost" @click="deleteOpen = false">{{ t("action.cancel") }}</Button
-        ><Button variant="danger" @click="deleteProfile">{{ t("action.delete") }}</Button>
+        ><Button
+          variant="danger"
+          :disabled="settings.profileBusy || settings.configurationLocked"
+          @click="deleteProfile"
+          >{{ t("action.delete") }}</Button
+        >
       </div>
     </Dialog>
     <!-- New Profile Dialog -->
@@ -121,7 +140,13 @@
           >
             {{ t("action.cancel") }}
           </Button>
-          <Button size="sm" @click="confirmCreate">
+          <Button
+            size="sm"
+            :disabled="
+              !newProfileName.trim() || settings.profileBusy || settings.configurationLocked
+            "
+            @click="confirmCreate"
+          >
             {{ t("action.create") }}
           </Button>
         </div>
@@ -133,18 +158,30 @@
       <Field :label="t('operation.importHelp')"
         ><Textarea v-model="importContent" :rows="8"
       /></Field>
-      <Button @click="importProfile">{{ t("operation.import") }}</Button>
+      <Button
+        :disabled="
+          !importName.trim() ||
+          !importContent.trim() ||
+          settings.profileBusy ||
+          settings.configurationLocked
+        "
+        @click="importProfile"
+        >{{ t("operation.import") }}</Button
+      >
     </Dialog>
     <!-- Automation -->
     <Card :title="t('settings.automation')" :description="t('workspace.automationDescription')">
-      <div class="flex flex-col gap-4">
+      <fieldset
+        :disabled="settings.configurationLocked || settings.initializing"
+        class="flex flex-col gap-4"
+      >
         <div class="flex items-center justify-between">
           <SettingLabel :label="t('settings.autoStart')" :tooltip="t('settings.help.autoStart')" />
           <Switch
-            v-model="settings.autostart"
-            :disabled="!settings.nativeAvailable"
+            :model-value="settings.autostart"
+            :disabled="!settings.nativeAvailable || settings.autostartBusy"
             :aria-label="t('settings.autoStart')"
-            @update:model-value="settings.toggleAutostart()"
+            @update:model-value="settings.setAutostart($event)"
           />
         </div>
         <div class="flex items-center justify-between">
@@ -164,7 +201,7 @@
           />
           <Switch v-model="settings.autoReconnect" :aria-label="t('settings.autoReconnect')" />
         </div>
-      </div>
+      </fieldset>
     </Card>
 
     <!-- Preferences -->
@@ -205,7 +242,7 @@
         </Button>
       </div>
     </Card>
-  </fieldset>
+  </div>
 </template>
 <script setup lang="ts">
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -257,6 +294,8 @@ async function importProfile() {
   }
 }
 async function switchProfile(name: string) {
+  if (name === settings.currentProfile || settings.profileBusy || settings.configurationLocked)
+    return;
   if (settings.isDirty) {
     pendingProfile.value = name;
     return;
@@ -285,16 +324,8 @@ async function openSupport(event: MouseEvent) {
     stream.addToast(String(e), "error");
   }
 }
-async function saveProfile() {
-  if (!(await settings.saveSettings())) {
-    stream.addToast(settings.persistenceError, "error");
-    return;
-  }
-  stream.addToast(t("toast.settingsSaved", { name: settings.currentProfile }), "success");
-}
-
 async function confirmCreate() {
-  if (!newProfileName.value) return;
+  if (!newProfileName.value.trim() || settings.profileBusy || settings.configurationLocked) return;
   let ok: boolean;
   try {
     ok = await settings.createProfile(newProfileName.value);

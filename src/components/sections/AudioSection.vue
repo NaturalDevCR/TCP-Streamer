@@ -1,5 +1,8 @@
 <template>
-  <fieldset :disabled="settings.configurationLocked" class="configuration-grid audio-grid">
+  <fieldset
+    :disabled="settings.configurationLocked || settings.initializing || settings.profileBusy"
+    class="configuration-grid audio-grid"
+  >
     <p
       v-if="settings.role === 'sink'"
       class="span-full notice text-xs text-[var(--color-text-muted)]"
@@ -19,20 +22,28 @@
             v-if="settings.role === 'source'"
             :label="t('audio.inputDevice')"
             :tooltip="t('audio.help.inputDevice')"
+            :error="
+              settings.inputUnavailable
+                ? t('connection.unavailableDevice', { name: settings.deviceName })
+                : undefined
+            "
             class="flex-1"
           >
             <Select
-              v-model="settings.deviceName"
+              :model-value="settings.inputUnavailable ? '' : settings.deviceName"
               :placeholder="
                 !settings.nativeAvailable
                   ? t('runtime.desktopDevices')
                   : settings.devicesLoading
                     ? t('connection.loadingDevices')
-                    : t('connection.noDevices')
+                    : settings.devices.length
+                      ? t('connection.chooseDevice')
+                      : t('connection.noDevices')
               "
               :disabled="
                 !settings.nativeAvailable || settings.configurationLocked || settings.devicesLoading
               "
+              @update:model-value="settings.deviceName = String($event)"
             >
               <SelectOption v-for="d in settings.devices" :key="d" :value="d" :label="d" />
             </Select>

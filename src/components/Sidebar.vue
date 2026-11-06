@@ -1,6 +1,11 @@
 <template>
   <aside class="sidebar">
-    <a class="brand focus-ring" href="#main-content" @click.prevent="ui.setSection('dashboard')">
+    <a
+      class="brand focus-ring"
+      href="#main-content"
+      :aria-label="`TCP Streamer · ${t('nav.dashboard')}`"
+      @click.prevent="ui.setSection('dashboard')"
+    >
       <span class="brand-mark"><IconWave /></span>
       <span class="brand-name"
         >TCP Streamer<span>{{ t("workspace.audioWorkspace") }}</span></span
@@ -16,6 +21,7 @@
         :aria-label="item.label"
         :title="item.label"
         class="nav-item focus-ring"
+        type="button"
         @click="ui.setSection(item.id)"
       >
         <component :is="item.icon" />
@@ -32,16 +38,38 @@
       <div class="session-indicator">
         <StatusDot :tone="stream.statusTone" /><span>{{ stream.statusText }}</span>
       </div>
-      <p>{{ t(stream.isStreaming ? "workspace.sessionActive" : "workspace.sessionIdle") }}</p>
+      <p>
+        {{
+          t(
+            stream.sessionState === "running" && !stream.stopping
+              ? "workspace.sessionActive"
+              : stream.pending || stream.isStreaming
+                ? "workspace.sessionPending"
+                : "workspace.sessionIdle",
+          )
+        }}
+      </p>
       <div class="session-transport">
         <span>{{ settings.role === "sink" ? "UDP" : settings.transport.toUpperCase() }}</span
-        ><span>PCM / STEREO</span>
+        ><span
+          >{{
+            settings.role === "source" &&
+            settings.transport === "tcp" &&
+            settings.isServer &&
+            settings.format === "wav"
+              ? "WAV"
+              : "PCM"
+          }}
+          / 2 ch</span
+        >
       </div>
     </div>
 
     <button
       class="profile-shortcut focus-ring"
       :title="t('settings.profiles')"
+      :aria-label="`${t('workspace.currentProfile')} · ${settings.currentProfile}`"
+      type="button"
       @click="ui.setSection('settings')"
     >
       <span class="profile-avatar">{{ settings.currentProfile.slice(0, 1).toUpperCase() }}</span>

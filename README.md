@@ -2,7 +2,7 @@
 
 > A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with configurable buffering. End-to-end latency depends on devices, network and receiver.
 
-![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/NaturalDevCR/TCP-Streamer)
@@ -98,12 +98,12 @@ The **source** role supports **TCP** (max compatibility, HTTP/WAV streaming) and
 
 ### User Interface
 
-- **Enterprise dark theme** — Premium glassmorphism design with Vue 3, Tailwind CSS 4, and reka-ui components.
+- **Dark workspace** — Sidebar navigation and session controls built with Vue 3, Tailwind CSS 4, and reka-ui.
 - **Bilingual (en/es)** — Full i18n with keyboard-accessible contextual tooltips on every configurable option.
-- **Top navigation** — Dashboard, Connection, Audio, Logs, and Settings sections.
+- **Workspace sections** — Dashboard, Connection, Audio, Logs, and Settings.
 - **Dashboard** — Real-time streaming stats: uptime, bitrate, transferred, RTT, underruns, quality score.
 - **Configuration profiles** — Save and switch between named presets (connection, audio, and automation settings).
-- **Configurable latency profiles** — Ultra-low, Balanced, Robust, and Custom with tested buffer parameters.
+- **Configurable latency profiles** — Ultra-low, Balanced, Robust, Broadcast, and Custom.
 - **System tray** — Background operation with show/quit menu and autostart support.
 
 ### Automation
@@ -136,7 +136,7 @@ Best for low-latency streaming between two TCP Streamer instances or compatible 
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | De-jitter buffer | Sequence/timestamp framing with configurable jitter tolerance.                             |
 | Loss concealment | Conceals missing packets to avoid audible gaps.                                            |
-| Clock drift      | Inserts/drops mini-chunks to track long-run clock differences (no PTP required).           |
+| Clock drift      | Adjusts the receiver's resampling ratio to track differences between device clocks.        |
 | Encryption       | Optional Chacha20-Poly1305 per-packet AEAD with PSK + HKDF-SHA256 key derivation.          |
 | mDNS             | Sources advertise via multicast DNS; sinks scan the LAN and auto-populate the source list. |
 

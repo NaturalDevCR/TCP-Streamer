@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
 }));
 
 const mockStore = new Map<string, unknown>();
+const mockSave = vi.fn(async () => {});
 
 // This project's `getStore()` (src/composables/useTauri.ts) calls the named
 // `Store.load(...)` static method, not a bare `load` export — mock that shape.
@@ -17,7 +18,7 @@ vi.mock("@tauri-apps/plugin-store", () => ({
       set: async (k: string, v: unknown) => {
         mockStore.set(k, v);
       },
-      save: async () => {},
+      save: mockSave,
     }),
   },
 }));
@@ -172,6 +173,51 @@ describe("profile isolation", () => {
     store.ip = "unsaved";
     await store.createProfile("New");
     expect(store.profiles.New.ip).toBe("unsaved");
+  });
+
+  it("keeps the current profile and draft when importing cannot be saved", async () => {
+    const store = useSettingsStore();
+    await store.loadSettings();
+    store.ip = "draft.local";
+    mockSave.mockRejectedValueOnce(new Error("disk full"));
+    const content = JSON.stringify({ schema_version: 1, profile: { ip: "other.local" } });
+    await expect(store.importProfile("Imported", content)).rejects.toThrow("disk full");
+    expect(store.currentProfile).toBe("Default");
+    expect(store.ip).toBe("draft.local");
+    expect(store.isDirty).toBe(true);
+    expect(store.profiles.Imported).toBeUndefined();
+    expect(mockStore.get("profiles")).toBeNull();
+
+    await expect(store.importProfile("Imported", content)).resolves.toBe(true);
+    expect(store.ip).toBe("other.local");
+    expect(store.profiles.Default.ip).toBe("draft.local");
+  });
+
+  it("keeps edits made while an earlier snapshot is being written marked dirty", async () => {
+    let finish!: () => void;
+    mockSave.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const store = useSettingsStore();
+    store.ip = "first.local";
+    const saving = store.saveSettings();
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    store.ip = "second.local";
+    finish();
+    await expect(saving).resolves.toBe(true);
+    expect(store.profiles.Default.ip).toBe("first.local");
+    expect(store.isDirty).toBe(true);
+  });
+
+  it("keeps the legacy loopback preference isolated to the original active profile", async () => {
+    mockStore.set("profiles", { Default: {}, Other: {} });
+    mockStore.set("current_profile", "Default");
+    mockStore.set("loopback_mode", true);
+    const store = useSettingsStore();
+    await store.loadSettings();
+    expect(store.loopbackMode).toBe(true);
+    expect(store.isDirty).toBe(false);
+    await store.switchProfile("Other");
+    await store.loadSettings();
+    expect(store.loopbackMode).toBe(false);
   });
 });
 

@@ -47,10 +47,13 @@ export async function isEnabled() {
   return nativeIsEnabled();
 }
 
-let storeInstance: Store | null = null;
+let storeInstance: Promise<Store> | null = null;
 /** Failed opens are propagated and retried on the next attempt. */
 export async function getStore(): Promise<Store> {
   requireNativeRuntime();
-  if (!storeInstance) storeInstance = await Store.load("store.bin");
+  storeInstance ??= Store.load("store.bin", { defaults: {}, autoSave: false }).catch((error) => {
+    storeInstance = null;
+    throw error;
+  });
   return storeInstance;
 }

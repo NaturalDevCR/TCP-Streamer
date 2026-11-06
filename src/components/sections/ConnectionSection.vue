@@ -1,6 +1,9 @@
 <template>
   <div class="section-stack">
-    <fieldset :disabled="settings.configurationLocked" class="configuration-grid connection-grid">
+    <fieldset
+      :disabled="settings.configurationLocked || settings.initializing || settings.profileBusy"
+      class="configuration-grid connection-grid"
+    >
       <Card
         class="span-full role-card"
         step="01"
@@ -24,21 +27,32 @@
           :description="t('workspace.captureDescription')"
         >
           <div class="flex flex-col gap-4">
-            <Field :label="t('audio.inputDevice')" :tooltip="t('connection.help.inputDevice')">
+            <Field
+              :label="t('audio.inputDevice')"
+              :tooltip="t('connection.help.inputDevice')"
+              :error="
+                settings.inputUnavailable
+                  ? t('connection.unavailableDevice', { name: settings.deviceName })
+                  : undefined
+              "
+            >
               <Select
-                v-model="settings.deviceName"
+                :model-value="settings.inputUnavailable ? '' : settings.deviceName"
                 :placeholder="
                   !settings.nativeAvailable
                     ? t('runtime.desktopDevices')
                     : settings.devicesLoading
                       ? t('connection.loadingDevices')
-                      : t('connection.noDevices')
+                      : settings.devices.length
+                        ? t('connection.chooseDevice')
+                        : t('connection.noDevices')
                 "
                 :disabled="
                   !settings.nativeAvailable ||
                   settings.configurationLocked ||
                   settings.devicesLoading
                 "
+                @update:model-value="settings.deviceName = String($event)"
               >
                 <SelectOption v-for="d in settings.devices" :key="d" :value="d" :label="d" />
               </Select>
@@ -48,11 +62,16 @@
               size="sm"
               variant="secondary"
               :disabled="!settings.nativeAvailable || settings.devicesLoading"
-              @click="settings.loadDevices()"
+              @click="settings.loadDevices(true)"
               >{{ t("operation.refresh") }}</Button
             >
             <p
-              v-if="settings.nativeAvailable && !settings.devices.length"
+              v-if="
+                settings.nativeAvailable &&
+                !settings.devicesLoading &&
+                !settings.devicesError &&
+                !settings.devices.length
+              "
               class="text-xs text-[var(--color-text-muted)]"
             >
               {{ t("operation.microphone") }}
@@ -137,6 +156,8 @@
                 <Input
                   v-model.number="settings.port"
                   type="number"
+                  min="1"
+                  max="65535"
                   :disabled="settings.configurationLocked"
                 />
               </Field>
@@ -168,6 +189,8 @@
               <Input
                 v-model.number="settings.port"
                 type="number"
+                min="1"
+                max="65535"
                 :disabled="settings.configurationLocked"
               />
             </Field>
@@ -187,17 +210,29 @@
             <Field
               :label="t('connection.outputDevice')"
               :tooltip="t('connection.help.outputDevice')"
+              :error="
+                settings.outputUnavailable
+                  ? t('connection.unavailableDevice', { name: settings.outputDevice })
+                  : undefined
+              "
             >
               <Select
-                v-model="settings.outputDevice"
+                :model-value="settings.outputUnavailable ? '' : settings.outputDevice"
                 :placeholder="
-                  t(
-                    settings.nativeAvailable
-                      ? 'connection.noOutputDevices'
-                      : 'runtime.desktopDevices',
-                  )
+                  !settings.nativeAvailable
+                    ? t('runtime.desktopDevices')
+                    : settings.outputDevicesLoading
+                      ? t('connection.loadingDevices')
+                      : settings.outputDevices.length
+                        ? t('connection.chooseDevice')
+                        : t('connection.noOutputDevices')
                 "
-                :disabled="!settings.nativeAvailable || settings.configurationLocked"
+                :disabled="
+                  !settings.nativeAvailable ||
+                  settings.configurationLocked ||
+                  settings.outputDevicesLoading
+                "
+                @update:model-value="settings.outputDevice = String($event)"
               >
                 <SelectOption v-for="d in settings.outputDevices" :key="d" :value="d" :label="d" />
               </Select>
@@ -270,7 +305,12 @@
               :tooltip="t('connection.help.discoveredSources')"
             >
               <Select
-                :model-value="settings.sourceAddr"
+                :model-value="
+                  settings.discoveredSources.some((source) => source.addr === settings.sourceAddr)
+                    ? settings.sourceAddr
+                    : ''
+                "
+                :placeholder="t('connection.chooseSource')"
                 :disabled="settings.configurationLocked"
                 @update:model-value="(v: string | number) => (settings.sourceAddr = String(v))"
               >
@@ -350,19 +390,10 @@
         </div>
       </Card>
     </fieldset>
-    <Card
-      v-if="
-        settings.role === 'source' &&
-        settings.transport === 'tcp' &&
-        settings.isServer &&
-        settings.configurationLocked
-      "
-      :title="t('connection.info')"
-    >
+    <Card v-if="stream.tcpUrl || stream.httpUrl" :title="t('connection.info')">
       <div class="flex flex-col gap-3">
-        <CopyField v-model="stream.tcpUrl" label="TCP" />
-        <CopyField v-model="stream.httpUrl" label="HTTP" />
-        <Textarea v-model="stream.connectionInfo" :rows="3" readonly />
+        <CopyField v-if="stream.tcpUrl" :model-value="stream.tcpUrl" label="TCP" />
+        <CopyField v-if="stream.httpUrl" :model-value="stream.httpUrl" label="HTTP" />
       </div>
     </Card>
   </div>
@@ -375,7 +406,6 @@ import { useStreamStore } from "../../stores/stream";
 import Card from "../ui/Card.vue";
 import Field from "../ui/Field.vue";
 import Input from "../ui/Input.vue";
-import Textarea from "../ui/Textarea.vue";
 import Select from "../ui/Select.vue";
 import SelectOption from "../ui/SelectOption.vue";
 import Switch from "../ui/Switch.vue";

@@ -5,8 +5,9 @@ use super::manager::{AudioCommand, AudioState};
 use super::session::SessionStatus;
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::debug;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{AppHandle, State};
 
@@ -112,7 +113,7 @@ pub async fn start_stream(
         psk,
         app_handle: Box::new(app_handle),
         reply,
-        running: state.new_running_flag(),
+        running: Arc::new(AtomicBool::new(true)),
     };
 
     request(&state, command, rx).await
@@ -124,7 +125,6 @@ pub async fn stop_stream(
     state: State<'_, AudioState>,
     app_handle: AppHandle,
 ) -> Result<SessionStatus, AudioError> {
-    state.cancel();
     let (reply, rx) = mpsc::channel();
     request(
         &state,
@@ -172,7 +172,7 @@ pub async fn start_sink(
             psk,
             app_handle: Box::new(app_handle),
             reply,
-            running: state.new_running_flag(),
+            running: Arc::new(AtomicBool::new(true)),
         },
         rx,
     )
@@ -189,16 +189,28 @@ pub fn get_os_type() -> String {
 ///
 /// Results are cached for 30 seconds to reduce repeated system calls.
 #[tauri::command]
-pub fn get_input_devices(include_loopback: bool) -> Result<Vec<String>, AudioError> {
+pub async fn get_input_devices(
+    include_loopback: bool,
+    refresh: Option<bool>,
+) -> Result<Vec<String>, AudioError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        input_devices(include_loopback, refresh.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| AudioError::ChannelError(e.to_string()))
+}
+
+fn input_devices(include_loopback: bool, refresh: bool) -> Vec<String> {
     let list_loopback = offer_loopback_devices(std::env::consts::OS, include_loopback);
 
     // Check cache (keyed by the loopback flag so toggling refreshes the list)
     if let Ok(cache) = DEVICE_CACHE.lock() {
         if let Some((cached_flag, cached_devices, timestamp)) = cache.as_ref() {
-            if *cached_flag == list_loopback
+            if !refresh
+                && *cached_flag == list_loopback
                 && timestamp.elapsed().as_secs() < DEVICE_CACHE_TTL_SECS
             {
-                return Ok(cached_devices.clone());
+                return cached_devices.clone();
             }
         }
     }
@@ -245,7 +257,7 @@ pub fn get_input_devices(include_loopback: bool) -> Result<Vec<String>, AudioErr
         *cache = Some((list_loopback, all_devices.clone(), Instant::now()));
     }
 
-    Ok(all_devices)
+    all_devices
 }
 
 // Stopping the sink reuses `stop_stream` (sends Stop to the manager,
@@ -253,13 +265,24 @@ pub fn get_input_devices(include_loopback: bool) -> Result<Vec<String>, AudioErr
 
 /// Lists native UDP sources discovered via mDNS on the LAN.
 #[tauri::command]
-pub fn list_sources() -> Vec<crate::audio::transport::discovery::DiscoveredSource> {
-    crate::audio::transport::discovery::browse(std::time::Duration::from_millis(1500))
+pub async fn list_sources(
+) -> Result<Vec<crate::audio::transport::discovery::DiscoveredSource>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::audio::transport::discovery::browse(std::time::Duration::from_millis(1500))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Enumerates available audio output devices across all CPAL hosts.
 #[tauri::command]
-pub fn get_output_devices() -> Result<Vec<String>, AudioError> {
+pub async fn get_output_devices() -> Result<Vec<String>, AudioError> {
+    tauri::async_runtime::spawn_blocking(output_devices)
+        .await
+        .map_err(|e| AudioError::ChannelError(e.to_string()))
+}
+
+fn output_devices() -> Vec<String> {
     let mut all = Vec::new();
     for host_id in cpal::available_hosts() {
         if let Ok(host) = cpal::host_from_id(host_id) {
@@ -274,7 +297,7 @@ pub fn get_output_devices() -> Result<Vec<String>, AudioError> {
     }
     all.sort();
     all.dedup();
-    Ok(all)
+    all
 }
 
 /// Returns the primary local IP address of the machine.
@@ -297,12 +320,7 @@ async fn request(
     command: AudioCommand,
     rx: mpsc::Receiver<Result<SessionStatus, String>>,
 ) -> Result<SessionStatus, AudioError> {
-    state
-        .tx
-        .lock()
-        .map_err(|_| AudioError::ChannelError("mutex poisoned".into()))?
-        .try_send(command)
-        .map_err(|e| AudioError::ChannelError(e.to_string()))?;
+    state.submit(command)?;
     tauri::async_runtime::spawn_blocking(move || {
         rx.recv()
             .map_err(|e| AudioError::ChannelError(e.to_string()))?

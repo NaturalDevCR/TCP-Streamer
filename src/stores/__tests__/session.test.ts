@@ -21,6 +21,37 @@ beforeEach(() => {
   bridge.invoke.mockResolvedValue({ state: "running", message: "", session_id: 1 });
 });
 describe("session coordination", () => {
+  it("keeps the newest state when an older start acknowledgement arrives", async () => {
+    const settings = useSettingsStore();
+    settings.deviceName = "mic";
+    settings.transport = "udp";
+    const stream = useStreamStore();
+    bridge.invoke.mockImplementation(async () => {
+      stream.applySession({ state: "running", message: "", session_id: 1, revision: 4 });
+      return { state: "waiting", message: "", session_id: 1, revision: 3 };
+    });
+    await stream.startStream();
+    expect(stream.sessionState).toBe("running");
+    stream.applySession({ state: "waiting", message: "", session_id: 1, revision: 5 });
+    expect(stream.sessionState).toBe("waiting");
+  });
+
+  it("blocks a disconnected capture device without switching to another microphone", async () => {
+    const settings = useSettingsStore();
+    settings.deviceName = "USB microphone";
+    settings.transport = "udp";
+    bridge.invoke.mockResolvedValueOnce(["Internal microphone"]);
+    await settings.loadDevices(true);
+    expect(bridge.invoke).toHaveBeenCalledWith("get_input_devices", {
+      includeLoopback: false,
+      refresh: true,
+    });
+    expect(settings.deviceName).toBe("USB microphone");
+    expect(settings.inputUnavailable).toBe(true);
+    await useStreamStore().startStream();
+    expect(bridge.invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("starts a clean UDP source without a hidden TCP destination and never enables a TCP server", async () => {
     const settings = useSettingsStore();
     settings.deviceName = "mic";

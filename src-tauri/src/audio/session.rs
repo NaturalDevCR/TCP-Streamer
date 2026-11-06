@@ -9,6 +9,12 @@ pub fn publish(app: &AppHandle, id: u64, state: &str, message: impl Into<String>
     }
 }
 
+pub fn publish_waiting(app: &AppHandle, id: u64, message: &str) {
+    if let Some(status) = SESSION.mark_waiting(id, message) {
+        let _ = app.emit("stream-state", status);
+    }
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct EffectiveConfig {
     pub role: String,
@@ -27,6 +33,7 @@ pub struct EffectiveConfig {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct SessionStatus {
     pub session_id: u64,
+    pub revision: u64,
     pub state: String,
     pub message: String,
     pub effective: Option<EffectiveConfig>,
@@ -43,25 +50,29 @@ impl SessionTracker {
             .clone()
             .unwrap_or(SessionStatus {
                 session_id: 0,
+                revision: 0,
                 state: "stopped".into(),
                 message: "Ready".into(),
                 effective: None,
             })
     }
     pub fn begin(&self) -> SessionStatus {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let status = SessionStatus {
-            session_id: self.snapshot().session_id + 1,
+            session_id: guard.as_ref().map_or(1, |current| current.session_id + 1),
+            revision: 0,
             state: "starting".into(),
             message: "Starting".into(),
             effective: None,
         };
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
+        *guard = Some(status.clone());
         status
     }
     pub fn configure(&self, id: u64, effective: EffectiveConfig) {
         let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(current) = guard.as_mut().filter(|s| s.session_id == id) {
             current.effective = Some(effective);
+            current.revision += 1;
         }
     }
     pub fn update_runtime(
@@ -87,6 +98,17 @@ impl SessionTracker {
         effective.sample_rate = rate;
         effective.channels = channels;
         effective.target_ms = target;
+        current.revision += 1;
+        Some(current.clone())
+    }
+    fn mark_waiting(&self, id: u64, message: &str) -> Option<SessionStatus> {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let current = guard
+            .as_mut()
+            .filter(|s| s.session_id == id && s.state == "starting")?;
+        current.state = "waiting".into();
+        current.message = message.into();
+        current.revision += 1;
         Some(current.clone())
     }
     pub fn update(&self, id: u64, state: &str, message: String) -> Option<SessionStatus> {
@@ -100,6 +122,7 @@ impl SessionTracker {
         }
         current.state = state.into();
         current.message = message;
+        current.revision += 1;
         Some(current.clone())
     }
 }
@@ -142,5 +165,20 @@ mod tests {
             .unwrap();
         assert_eq!(running.state, "running");
         assert_eq!(tracker.snapshot().message, "connected");
+    }
+
+    #[test]
+    fn startup_fallback_cannot_replace_a_worker_state() {
+        let tracker = SessionTracker::default();
+        let start = tracker.begin();
+        let waiting = tracker.mark_waiting(start.session_id, "waiting").unwrap();
+        let running = tracker
+            .update(start.session_id, "running", "connected".into())
+            .unwrap();
+        assert!(start.revision < waiting.revision && waiting.revision < running.revision);
+        assert!(tracker
+            .mark_waiting(start.session_id, "late waiting")
+            .is_none());
+        assert_eq!(tracker.snapshot(), running);
     }
 }

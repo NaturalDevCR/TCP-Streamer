@@ -15,7 +15,6 @@ pub struct Advertiser {
 
 /// Advertises this instance as a native source on the LAN.
 pub fn advertise(instance: &str, port: u16, encrypted: bool) -> Result<Advertiser, String> {
-    let daemon = ServiceDaemon::new().map_err(|e| e.to_string())?;
     let ip = local_ip_address::local_ip().map_err(|e| e.to_string())?;
     let label: String = instance
         .chars()
@@ -37,14 +36,26 @@ pub fn advertise(instance: &str, port: u16, encrypted: bool) -> Result<Advertise
         .map_err(|e| e.to_string())?
         .enable_addr_auto();
     let fullname = info.get_fullname().to_string();
-    daemon.register(info).map_err(|e| e.to_string())?;
+    let daemon = ServiceDaemon::new().map_err(|e| e.to_string())?;
+    if let Err(error) = daemon.register(info) {
+        shutdown(&daemon);
+        return Err(error.to_string());
+    }
     Ok(Advertiser { daemon, fullname })
 }
 
 impl Drop for Advertiser {
     fn drop(&mut self) {
-        let _ = self.daemon.unregister(&self.fullname);
-        let _ = self.daemon.shutdown();
+        if let Ok(ack) = self.daemon.unregister(&self.fullname) {
+            let _ = ack.recv_timeout(Duration::from_millis(100));
+        }
+        shutdown(&self.daemon);
+    }
+}
+
+fn shutdown(daemon: &ServiceDaemon) {
+    if let Ok(ack) = daemon.shutdown() {
+        let _ = ack.recv_timeout(Duration::from_millis(100));
     }
 }
 
@@ -57,12 +68,14 @@ pub struct DiscoveredSource {
 }
 
 /// Browses for native sources for `timeout`, returning what resolved.
-pub fn browse(timeout: Duration) -> Vec<DiscoveredSource> {
-    let Ok(daemon) = ServiceDaemon::new() else {
-        return Vec::new();
-    };
-    let Ok(rx) = daemon.browse(SERVICE_TYPE) else {
-        return Vec::new();
+pub fn browse(timeout: Duration) -> Result<Vec<DiscoveredSource>, String> {
+    let daemon = ServiceDaemon::new().map_err(|e| e.to_string())?;
+    let rx = match daemon.browse(SERVICE_TYPE) {
+        Ok(rx) => rx,
+        Err(error) => {
+            shutdown(&daemon);
+            return Err(error.to_string());
+        }
     };
     let deadline = Instant::now() + timeout;
     let mut out = Vec::new();
@@ -98,7 +111,7 @@ pub fn browse(timeout: Duration) -> Vec<DiscoveredSource> {
         }
     }
     let _ = daemon.stop_browse(SERVICE_TYPE);
-    let _ = daemon.shutdown();
+    shutdown(&daemon);
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.addr.cmp(&b.addr)));
-    out
+    Ok(out)
 }

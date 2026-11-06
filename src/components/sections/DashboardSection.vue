@@ -7,16 +7,25 @@
     >
       <div class="hero-topline">
         <span class="eyebrow"
-          ><span class="live-dot" :class="{ 'is-live': stream.isStreaming }" />{{
-            t("workspace.session")
-          }}</span
+          ><span
+            class="live-dot"
+            :class="{ 'is-live': stream.sessionState === 'running' && !stream.stopping }"
+          />{{ t("workspace.session") }}</span
         ><Badge>{{ transportLabel }}</Badge>
       </div>
       <div class="hero-heading">
         <div>
           <h2>{{ stream.statusText }}</h2>
           <p>
-            {{ t(stream.isStreaming ? "workspace.sessionActive" : "workspace.readyDescription") }}
+            {{
+              t(
+                stream.sessionState === "running" && !stream.stopping
+                  ? "workspace.sessionActive"
+                  : stream.pending || stream.isStreaming
+                    ? "workspace.sessionPending"
+                    : "workspace.readyDescription",
+              )
+            }}
           </p>
         </div>
         <span class="hero-wave" aria-hidden="true"><IconWave /></span>
@@ -76,7 +85,11 @@
       ></Stat>
       <Stat
         :label="t('stat.rtt')"
-        :value="stream.isStreaming && stream.rttMs !== null ? stream.rttMs.toFixed(1) + ' ms' : '—'"
+        :value="
+          stream.isStreaming && stream.qualityAvailable && stream.rttMs !== null
+            ? stream.rttMs.toFixed(1) + ' ms'
+            : '—'
+        "
         ><template #icon><IconConnection /></template
       ></Stat>
     </div>
@@ -335,7 +348,9 @@ const lastEndpoint = computed(() => {
   return host ? `${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${port}` : "";
 });
 const encrypted = computed(
-  () => transportLabel.value !== "TCP" && Boolean(active.value?.psk ?? settings.psk),
+  () =>
+    transportLabel.value !== "TCP" &&
+    (active.value ? Boolean(active.value.encrypted) : Boolean(settings.psk)),
 );
 const hasStats = computed(() => stream.isStreaming && stream.statsAvailable);
 function profileLabel(value: string) {

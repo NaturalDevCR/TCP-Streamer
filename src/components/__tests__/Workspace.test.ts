@@ -88,6 +88,7 @@ describe("redesigned workspace", () => {
     settings.mode = "server";
     settings.configurationLocked = true;
     useStreamStore().tcpUrl = "tcp://127.0.0.1:1704";
+    useStreamStore().httpUrl = "http://127.0.0.1:1704/stream.wav";
     await openSection("connection");
     const copyButtons = wrapper.findAll('button[aria-label="Copy"]');
     expect(copyButtons).toHaveLength(2);

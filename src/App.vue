@@ -10,27 +10,32 @@ import AppShell from "./components/AppShell.vue";
 
 const settings = useSettingsStore();
 const stream = useStreamStore();
+let mounted = true;
 
 onMounted(async () => {
-  await settings.init();
-  await stream.initListeners();
-
-  if (settings.nativeAvailable && settings.autoStream && !stream.isStreaming) {
-    setTimeout(() => stream.startStream(), 500);
-  }
-
   document.addEventListener("keydown", onKeyDown);
+  settings.initializing = settings.nativeAvailable;
+  try {
+    await Promise.all([settings.init(), stream.initListeners()]);
+    if (!mounted) return;
+    settings.initializing = false;
+    if (settings.autoStream && !stream.isStreaming) void stream.startStream();
+  } catch (error) {
+    if (mounted) stream.addToast(String(error), "error");
+  }
 });
 
 onUnmounted(() => {
+  mounted = false;
   document.removeEventListener("keydown", onKeyDown);
   stream.disposeListeners();
 });
 
 function onKeyDown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+  if (e.defaultPrevented || e.repeat || e.isComposing || !settings.nativeAvailable) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    if (settings.nativeAvailable) settings.saveSettings();
+    void stream.saveConfiguration();
   }
   if (
     (e.ctrlKey || e.metaKey) &&
@@ -42,20 +47,7 @@ function onKeyDown(e: KeyboardEvent) {
     )
   ) {
     e.preventDefault();
-    if (settings.nativeAvailable) stream.toggleStream();
+    void stream.toggleStream();
   }
 }
-
-window.addEventListener("beforeunload", (e) => {
-  if (stream.isStreaming) {
-    e.preventDefault();
-    e.returnValue = "Streaming is active. Are you sure you want to close?";
-  }
-});
-
-window.addEventListener("unload", () => {
-  if (stream.isStreaming) {
-    stream.stopStream();
-  }
-});
 </script>

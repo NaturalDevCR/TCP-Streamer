@@ -4,6 +4,21 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [3.1.1] — 2026-11-06
+
+### Fixed
+
+- Order start and stop updates so a delayed response cannot overwrite a newer state. Reset session metrics when the session changes.
+- Keep device refresh and UDP discovery responsive. Show when a selected device is unavailable and require an explicit selection before using another device.
+- Preserve the current profile and draft when a write fails. Keep edits made during a save marked as unsaved and isolate legacy loopback settings by profile.
+- Close a TCP receiver connection when writing its WAV header fails. Ignore TCP-only allowlist rules in other modes.
+- Improve keyboard navigation, language announcements, log following, and layout in narrow windows. Distinguish a waiting session from an active stream.
+
+### Compatibility and installation
+
+- Existing profiles remain compatible. Native UDP v2 and TCP/HTTP wire formats are unchanged.
+- Install manually from the release assets. Publisher signing and automatic updates are unavailable.
+
 ## [3.1.0] — 2026-10-25
 
 ### Added

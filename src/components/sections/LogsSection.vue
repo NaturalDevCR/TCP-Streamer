@@ -29,15 +29,15 @@
           />
         </div>
         <div class="log-actions">
-          <Button size="sm" variant="secondary" :aria-pressed="paused" @click="toggleFollowing">{{
-            t(paused ? "operation.paused" : "operation.pause")
+          <Button size="sm" variant="secondary" @click="toggleFollowing">{{
+            t(paused || userScrolledUp ? "operation.paused" : "operation.pause")
           }}</Button
           ><Button
             size="sm"
             variant="ghost"
             :title="t('action.copy')"
             :aria-label="t('action.copy')"
-            @click="copyLogs"
+            @click="copyLogs()"
             ><IconCopy class="w-4 h-4" /></Button
           ><Button size="sm" variant="ghost" @click="exportLogs">{{ t("operation.export") }}</Button
           ><Button
@@ -69,8 +69,8 @@
         </div>
         <div v-if="searchedLogs.length === 0" class="log-empty">
           <span><IconLogs /></span>
-          <h3>{{ t(searchQuery ? "workspace.noMatchingLogs" : "workspace.noActivity") }}</h3>
-          <p>{{ t(searchQuery ? "workspace.adjustFilters" : "workspace.activityDescription") }}</p>
+          <h3>{{ t(filtered ? "workspace.noMatchingLogs" : "workspace.noActivity") }}</h3>
+          <p>{{ t(filtered ? "workspace.adjustFilters" : "workspace.activityDescription") }}</p>
         </div>
       </div>
       <div class="log-footer">
@@ -81,7 +81,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { sanitizeSupport } from "../../utils/sanitize";
 import { useSettingsStore } from "../../stores/settings";
@@ -101,9 +101,11 @@ const logContainer = ref<HTMLElement | null>(null);
 const userScrolledUp = ref(false);
 const paused = ref(false);
 
+const search = computed(() => searchQuery.value.trim().toLowerCase());
+const filtered = computed(() => Boolean(search.value) || stream.logFilter !== "all");
 const searchedLogs = computed(() => {
-  if (!searchQuery.value) return stream.filteredLogs;
-  const q = searchQuery.value.toLowerCase();
+  const q = search.value;
+  if (!q) return stream.filteredLogs;
   return stream.filteredLogs.filter(
     (l) =>
       l.message.toLowerCase().includes(q) ||
@@ -121,23 +123,19 @@ const logColors: Record<string, string> = {
   trace: "text-[var(--color-text-faint)]",
 };
 
-watch(
-  () => stream.filteredLogs.at(-1),
-  async () => {
-    if (userScrolledUp.value || paused.value) return;
-    await nextTick();
-    if (logContainer.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  },
-);
+function followLatest() {
+  if (paused.value || userScrolledUp.value || !logContainer.value) return;
+  logContainer.value.scrollTop = logContainer.value.scrollHeight;
+}
+onMounted(followLatest);
+watch(() => searchedLogs.value.at(-1), followLatest, { flush: "post" });
 
 async function toggleFollowing() {
-  paused.value = !paused.value;
+  paused.value = !paused.value && !userScrolledUp.value;
   if (!paused.value) {
     userScrolledUp.value = false;
     await nextTick();
-    if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight;
+    followLatest();
   }
 }
 
@@ -161,21 +159,18 @@ function exportLogs() {
       String(p.source_addr || ""),
     ]),
   ];
-  const text = searchedLogs.value
-    .map((l) => `[${l.timestamp}] [${l.level}] ${l.message}`)
-    .join("\n");
-  navigator.clipboard
-    .writeText(sanitizeSupport(text, values))
-    .then(() => stream.addToast(t("toast.copied")))
-    .catch(() => stream.addToast(t("toast.copyFailed"), "error"));
+  void copyLogs(values);
 }
-function copyLogs() {
+
+async function copyLogs(redact?: string[]) {
   const text = searchedLogs.value
     .map((l) => `[${l.timestamp}] [${l.level}] ${l.message}`)
     .join("\n");
-  navigator.clipboard
-    .writeText(text)
-    .then(() => stream.addToast(t("toast.copied"), "success"))
-    .catch(() => stream.addToast(t("toast.copyFailed"), "error"));
+  try {
+    await navigator.clipboard.writeText(redact ? sanitizeSupport(text, redact) : text);
+    stream.addToast(t("toast.copied"), "success");
+  } catch {
+    stream.addToast(t("toast.copyFailed"), "error");
+  }
 }
 </script>

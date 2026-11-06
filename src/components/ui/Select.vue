@@ -18,14 +18,14 @@
       }"
       class="ui-control focus-ring flex w-full h-10 items-center justify-between gap-1 rounded-[var(--radius)] bg-[var(--color-input)] border border-[var(--color-border)] px-3 text-sm text-[var(--color-text)] data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed hover:border-[var(--color-border-strong)]"
     >
-      <SelectValue :placeholder="placeholder" />
+      <SelectValue class="min-w-0 truncate text-left" :placeholder="placeholder" />
       <IconChevronDown class="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
     </SelectTrigger>
     <SelectPortal>
       <SelectContent
         position="popper"
         :side-offset="4"
-        class="z-50 min-w-[var(--reka-select-trigger-width)] overflow-hidden rounded-[var(--radius)] bg-[var(--color-surface-2)] border border-[var(--color-border)] shadow-lg"
+        class="z-50 min-w-[var(--reka-select-trigger-width)] max-w-[var(--reka-select-content-available-width)] overflow-hidden rounded-[var(--radius)] bg-[var(--color-surface-2)] border border-[var(--color-border)] shadow-lg"
       >
         <SelectViewport class="p-1 max-h-60 overflow-y-auto">
           <slot />

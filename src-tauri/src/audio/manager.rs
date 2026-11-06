@@ -1,7 +1,7 @@
 #![deny(clippy::all)]
 
 use super::constants::*;
-use super::session::{publish, SessionStatus, SESSION};
+use super::session::{publish, publish_waiting, SessionStatus, SESSION};
 use super::stats::{emit_log, StreamStats};
 use cpal::traits::StreamTrait;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,7 +55,7 @@ pub enum AudioCommand {
 }
 
 pub struct AudioState {
-    pub tx: Mutex<mpsc::SyncSender<AudioCommand>>,
+    tx: mpsc::SyncSender<AudioCommand>,
     cancellation: Mutex<Option<Arc<AtomicBool>>>,
 }
 
@@ -156,7 +156,14 @@ impl AudioState {
                                 if !running.load(Ordering::Relaxed) {
                                     drop(stream);
                                     drop(stats);
-                                    publish(&app_handle, session_id, "stopped", "Start cancelled");
+                                    if SESSION.snapshot().state != "error" {
+                                        publish(
+                                            &app_handle,
+                                            session_id,
+                                            "stopped",
+                                            "Start cancelled",
+                                        );
+                                    }
                                     let _ = reply.send(Ok(SESSION.snapshot()));
                                 } else if let Err(e) = stream.play() {
                                     publish(
@@ -173,14 +180,11 @@ impl AudioState {
                                     );
                                 } else {
                                     current_stream_handle = Some((stream, stats));
-                                    if SESSION.snapshot().state == "starting" {
-                                        publish(
-                                            &app_handle,
-                                            session_id,
-                                            "waiting",
-                                            "Waiting for receiver",
-                                        );
-                                    }
+                                    publish_waiting(
+                                        &app_handle,
+                                        session_id,
+                                        "Waiting for receiver",
+                                    );
                                     let _ = reply.send(Ok(SESSION.snapshot()));
                                     emit_log(
                                         &app_handle,
@@ -267,7 +271,14 @@ impl AudioState {
                                 if !running.load(Ordering::Relaxed) {
                                     drop(stream);
                                     drop(stats);
-                                    publish(&app_handle, session_id, "stopped", "Start cancelled");
+                                    if SESSION.snapshot().state != "error" {
+                                        publish(
+                                            &app_handle,
+                                            session_id,
+                                            "stopped",
+                                            "Start cancelled",
+                                        );
+                                    }
                                     let _ = reply.send(Ok(SESSION.snapshot()));
                                 } else if let Err(e) = stream.play() {
                                     publish(
@@ -284,14 +295,11 @@ impl AudioState {
                                     );
                                 } else {
                                     current_stream_handle = Some((stream, stats));
-                                    if SESSION.snapshot().state == "starting" {
-                                        publish(
-                                            &app_handle,
-                                            session_id,
-                                            "waiting",
-                                            "Waiting for source audio",
-                                        );
-                                    }
+                                    publish_waiting(
+                                        &app_handle,
+                                        session_id,
+                                        "Waiting for source audio",
+                                    );
                                     let _ = reply.send(Ok(SESSION.snapshot()));
                                     emit_log(
                                         &app_handle,
@@ -351,42 +359,37 @@ impl AudioState {
         });
 
         Self {
-            tx: Mutex::new(tx),
+            tx,
             cancellation: Mutex::new(None),
         }
     }
 
-    pub fn new_running_flag(&self) -> Arc<AtomicBool> {
-        let running = Arc::new(AtomicBool::new(true));
+    pub fn submit(&self, command: AudioCommand) -> Result<(), super::error::AudioError> {
+        let next = match &command {
+            AudioCommand::Start { running, .. } | AudioCommand::StartSink { running, .. } => {
+                Some(running.clone())
+            }
+            AudioCommand::Stop { .. } => None,
+        };
         let mut guard = self.cancellation.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = guard.replace(running.clone()) {
+        self.tx
+            .try_send(command)
+            .map_err(|e| super::error::AudioError::ChannelError(e.to_string()))?;
+        if let Some(old) = std::mem::replace(&mut *guard, next) {
             old.store(false, Ordering::Relaxed);
         }
-        running
-    }
-    pub fn cancel(&self) {
-        if let Some(running) = self
-            .cancellation
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-        {
-            running.store(false, Ordering::Relaxed);
-        }
+        Ok(())
     }
     pub fn shutdown(&self) {
-        self.cancel();
         let (reply, ack) = mpsc::channel();
-        if let Ok(tx) = self.tx.lock() {
-            if tx
-                .try_send(AudioCommand::Stop {
-                    reply: Some(reply),
-                    app_handle: None,
-                })
-                .is_ok()
-            {
-                let _ = ack.recv_timeout(Duration::from_secs(2));
-            }
+        if self
+            .submit(AudioCommand::Stop {
+                reply: Some(reply),
+                app_handle: None,
+            })
+            .is_ok()
+        {
+            let _ = ack.recv_timeout(Duration::from_secs(2));
         }
     }
 }

@@ -313,7 +313,11 @@ pub fn run(
     let transport_net = transport.clone();
     let psk_net = psk.clone();
 
-    let allow_rules = super::transport::allowlist::validate_rules(&allowlist)?;
+    let allow_rules = if is_server && transport == "tcp" {
+        super::transport::allowlist::validate_rules(&allowlist)?
+    } else {
+        Vec::new()
+    };
 
     // 3. Build Audio Stream (Producer) via RT-safe capture — no Arc<Mutex> in callback
     let capacity_hint = effective_chunk as usize * STEREO as usize;
@@ -731,7 +735,7 @@ pub fn run(
                                 use_chunked = is_http;
                                 wav_header_sent = false;
                                 super::session::publish(&app_handle_net, session_id, "running", format!("TCP receiver connected: {addr}"));
-                            current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
+                                current_stream = Some(Box::new(super::transport::TcpConnection::new(stream)));
                                 disconnect_time = None;
                                 last_heartbeat = Instant::now();
                             }
@@ -784,26 +788,20 @@ pub fn run(
                 // - "wav": Header + PCM (Browsers/VLC over raw TCP)
                 // - "pcm": Raw PCM (audio receiver)
                 if is_server_clone && (use_chunked || format_clone == "wav") && !wav_header_sent {
-                     {
-                         // Send header with 0 length (handled by helper) for unknown/stream
-                         let header = create_wav_header(wire_rate_net, STEREO, 16);
-                         let stream: &mut dyn super::transport::Connection = stream_socket.as_mut();
-
-                         if use_chunked {
-                             let mut writer = ChunkedWriter::new(stream);
-                             if let Err(e) = writer.write_all(&header) {
-                                  let level = if e.kind() == std::io::ErrorKind::BrokenPipe { "info" } else { "error" };
-                                  emit_log(&app_handle_net, level, format!("Failed to send WAV header (chunked): {}", e));
-                             } else {
-                                 wav_header_sent = true;
-                             }
-                          } else if let Err(e) = stream.write_all(&header) {
-                                  let level = if e.kind() == std::io::ErrorKind::BrokenPipe { "info" } else { "error" };
-                                  emit_log(&app_handle_net, level, format!("Failed to send WAV header: {}", e));
-                          } else {
-                                   wav_header_sent = true;
-                              }
-                      }
+                    let header = create_wav_header(wire_rate_net, STEREO, 16);
+                    let result = if use_chunked {
+                        ChunkedWriter::new(stream_socket.as_mut()).write_all(&header)
+                    } else {
+                        stream_socket.write_all(&header)
+                    };
+                    if let Err(error) = result {
+                        // A partial WAV or HTTP chunk header cannot be retried on this socket.
+                        emit_log(&app_handle_net, "warning", format!("Failed to send WAV header: {error}"));
+                        stream_socket.close();
+                        super::session::publish(&app_handle_net, session_id, "waiting", "Waiting for receiver");
+                        continue;
+                    }
+                    wav_header_sent = true;
                 }
 
                 // Check prefill status
@@ -899,7 +897,14 @@ pub fn run(
                          // Write error — disconnect
                          stream_socket.close();
                          current_stream = None;
-                         super::session::publish(&app_handle_net, session_id, if is_server_clone { "waiting" } else { "reconnecting" }, "TCP connection lost");
+                         let state = if is_server_clone {
+                             "waiting"
+                         } else if auto_reconnect_net {
+                             "reconnecting"
+                         } else {
+                             "error"
+                         };
+                         super::session::publish(&app_handle_net, session_id, state, "TCP connection lost");
 
                          if !is_server_clone && !auto_reconnect_net {
                              emit_log(&app_handle_net, "info", "Auto-reconnect disabled; stopping stream.".to_string());

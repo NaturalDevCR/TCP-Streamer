@@ -24,20 +24,28 @@ export interface SessionStatus {
   state: "running" | "starting" | "waiting" | "reconnecting" | "stopped" | "error";
   message: string;
   session_id: number;
+  revision?: number;
 }
 
 export const useStreamStore = defineStore("stream", () => {
   const isStreaming = ref(false);
   const sessionState = ref<SessionStatus["state"]>("stopped");
   const sessionId = ref(0);
+  let sessionRevision = -1;
   const pending = ref(false);
   const stopping = ref(false);
   let operationId = 0;
+  let startDispatched = false;
   const statusDetail = ref("");
   const statusText = computed(() =>
     stopping.value
       ? i18n.global.t("session.stopping")
-      : statusDetail.value || i18n.global.t(`session.${sessionState.value}`),
+      : statusDetail.value ||
+        i18n.global.t(
+          sessionState.value === "waiting" && useSettingsStore().role === "sink"
+            ? "session.waitingSink"
+            : `session.${sessionState.value}`,
+        ),
   );
   const statusTone = computed<"success" | "danger" | "warning" | "neutral">(() => {
     if (sessionState.value === "error") return "danger";
@@ -58,16 +66,21 @@ export const useStreamStore = defineStore("stream", () => {
   function applySession(status: SessionStatus) {
     if (
       !status ||
-      (stopping.value &&
-        ["running", "starting", "waiting", "reconnecting"].includes(status.state)) ||
       status.session_id < sessionId.value ||
+      (status.session_id === sessionId.value &&
+        status.revision !== undefined &&
+        status.revision <= sessionRevision) ||
       (status.session_id <= terminalSession &&
         ["running", "starting", "waiting", "reconnecting"].includes(status.state))
     )
       return;
     if (["stopped", "error"].includes(status.state))
       terminalSession = Math.max(terminalSession, status.session_id);
-    if (status.session_id !== sessionId.value) effectiveConfig.value = null;
+    if (status.session_id !== sessionId.value) {
+      resetMetrics();
+      sessionRevision = -1;
+    }
+    if (status.revision !== undefined) sessionRevision = status.revision;
     if (status.effective !== undefined) effectiveConfig.value = status.effective;
     sessionId.value = status.session_id;
     sessionState.value = status.state;
@@ -76,15 +89,16 @@ export const useStreamStore = defineStore("stream", () => {
     isStreaming.value = ["running", "starting", "waiting", "reconnecting"].includes(status.state);
     useSettingsStore().configurationLocked = isStreaming.value || pending.value;
     if (!isStreaming.value) {
+      activeSettings.value = null;
       tcpUrl.value = "";
       httpUrl.value = "";
-      connectionInfo.value = "";
     }
   }
   function resetMetrics() {
     effectiveFormat.value = {};
     effectiveConfig.value = null;
     statsAvailable.value = false;
+    sinkMetrics.value = { authFailures: 0, lostFrames: 0, trimPpm: 0, received: false };
     qualityAvailable.value = false;
     uptimeSeconds.value = 0;
     bytesSent.value = 0;
@@ -133,7 +147,6 @@ export const useStreamStore = defineStore("stream", () => {
   // Stream URLs (server mode)
   const tcpUrl = ref("");
   const httpUrl = ref("");
-  const connectionInfo = ref("");
 
   // Quality warning tracking
   let qualityWarningShown = false;
@@ -189,19 +202,26 @@ export const useStreamStore = defineStore("stream", () => {
   async function startStream() {
     if (pending.value || isStreaming.value) return;
     const settings = useSettingsStore();
-    if (settings.preflightLoading) return;
+    if (
+      !settings.nativeAvailable ||
+      settings.initializing ||
+      settings.profileBusy ||
+      settings.preflightLoading ||
+      (settings.role === "sink" ? settings.outputDevicesLoading : settings.devicesLoading)
+    )
+      return;
     const device = settings.deviceName;
     const isServer = settings.isServer;
     const invalid =
       settings.role === "sink"
-        ? !settings.outputDevice
+        ? !settings.outputDevice || settings.outputUnavailable
           ? "outputDevice"
-          : !settings.sourceAddr
+          : !settings.sourceAddr.trim()
             ? "sourceAddress"
             : ""
-        : !device
+        : !device || settings.inputUnavailable
           ? "device"
-          : settings.transport === "tcp" && !isServer && !settings.ip
+          : settings.transport === "tcp" && !isServer && !settings.ip.trim()
             ? "target"
             : !Number.isInteger(settings.port) || settings.port < 1 || settings.port > 65535
               ? "port"
@@ -217,9 +237,12 @@ export const useStreamStore = defineStore("stream", () => {
     sessionState.value = "starting";
     statusDetail.value = "";
     resetMetrics();
+    const { psk, ...requested } = settings.snapshot();
+    activeSettings.value = { ...requested, encrypted: Boolean(psk) };
     try {
       if (!(await settings.saveSettings())) throw new Error(settings.persistenceError);
       if (operation !== operationId) return;
+      startDispatched = true;
       let status: SessionStatus;
       if (settings.role === "sink")
         status = (await invoke("start_sink", {
@@ -256,29 +279,29 @@ export const useStreamStore = defineStore("stream", () => {
           fixedLatencyMs: clampFixedLatency(settings.fixedLatencyMs),
           format: settings.transport === "udp" ? "pcm" : settings.format,
           latencyProfile: settings.latencyProfile,
-          allowlist: settings.allowlist,
+          allowlist: isServer && settings.transport === "tcp" ? settings.allowlist : "",
           transport: settings.transport,
-          psk: settings.psk,
+          psk: settings.transport === "udp" ? settings.psk : "",
         })) as SessionStatus;
       if (operation !== operationId) return;
       applySession(status);
       if (isStreaming.value) {
-        activeSettings.value = { ...settings.snapshot(), psk: undefined };
         bufferMs.value = settings.ringBufferDuration;
         if (settings.role === "source" && settings.transport === "tcp" && isServer) {
           const host = settings.localIp.includes(":") ? `[${settings.localIp}]` : settings.localIp;
           tcpUrl.value = `tcp://${host}:${settings.port}`;
           httpUrl.value = `http://${host}:${settings.port}/stream.wav`;
-          connectionInfo.value = tcpUrl.value;
         }
-      }
+      } else activeSettings.value = null;
     } catch (error) {
       if (operation === operationId) {
         fail(error);
         isStreaming.value = false;
+        activeSettings.value = null;
       }
     } finally {
       if (operation === operationId) {
+        startDispatched = false;
         pending.value = false;
         settings.configurationLocked = isStreaming.value;
       }
@@ -287,16 +310,18 @@ export const useStreamStore = defineStore("stream", () => {
 
   async function stopStream() {
     if (stopping.value) return;
+    const stopNative = isStreaming.value || startDispatched;
     ++operationId;
     stopping.value = true;
     pending.value = true;
     try {
-      const status = (await invoke("stop_stream")) as SessionStatus;
+      const status = stopNative ? await invoke<SessionStatus>("stop_stream") : null;
       if (status) applySession(status);
       else applySession({ state: "stopped", message: "", session_id: sessionId.value });
     } catch (error) {
-      fail(error);
+      addToast(i18n.global.t("session.failure", { error: String(error) }), "error");
     } finally {
+      startDispatched = false;
       pending.value = false;
       stopping.value = false;
       useSettingsStore().configurationLocked = isStreaming.value;
@@ -311,23 +336,50 @@ export const useStreamStore = defineStore("stream", () => {
     }
   }
 
+  async function saveConfiguration() {
+    const settings = useSettingsStore();
+    if (
+      !settings.nativeAvailable ||
+      settings.initializing ||
+      settings.profileBusy ||
+      settings.configurationLocked
+    )
+      return;
+    const saved = await settings.saveSettings();
+    addToast(
+      saved
+        ? i18n.global.t("toast.settingsSaved", { name: settings.currentProfile })
+        : settings.persistenceError,
+      saved ? "success" : "error",
+    );
+  }
+
   // ── Event Listeners ──
   let unlisteners: (() => void)[] = [];
+  let listenerGeneration = 0;
   function disposeListeners() {
+    listenerGeneration++;
     unlisteners.forEach((fn) => fn());
     unlisteners = [];
-  }
-  async function subscribe<T>(name: string, callback: (event: { payload: T }) => void) {
-    unlisteners.push(await listen(name, callback));
   }
   async function initListeners() {
     disposeListeners();
     if (!isNativeRuntime()) return;
+    const generation = listenerGeneration;
+    async function subscribe<T>(name: string, callback: (event: { payload: T }) => void) {
+      if (generation !== listenerGeneration) return;
+      const unlisten = await listen<T>(name, (event) => {
+        if (generation === listenerGeneration) callback(event);
+      });
+      if (generation === listenerGeneration) unlisteners.push(unlisten);
+      else unlisten();
+    }
     await subscribe<SessionStatus>("stream-state", (event) => applySession(event.payload));
     try {
-      applySession((await invoke("get_stream_state")) as SessionStatus);
+      const status = await invoke<SessionStatus>("get_stream_state");
+      if (generation === listenerGeneration) applySession(status);
     } catch (e) {
-      fail(e);
+      if (generation === listenerGeneration) fail(e);
     }
 
     await subscribe("log-event", (event: { payload: LogEntry }) => {
@@ -395,7 +447,7 @@ export const useStreamStore = defineStore("stream", () => {
       )
         return;
       bufferMs.value = event.payload.new_size_ms;
-      logs.value.push({
+      appendLog({
         timestamp: new Date().toLocaleTimeString(),
         level: "info",
         message: i18n.global.t("operation.bufferResized", {
@@ -440,7 +492,6 @@ export const useStreamStore = defineStore("stream", () => {
     toasts,
     tcpUrl,
     httpUrl,
-    connectionInfo,
     // Computed
     filteredLogs,
     formattedUptime,
@@ -452,6 +503,7 @@ export const useStreamStore = defineStore("stream", () => {
     startStream,
     stopStream,
     toggleStream,
+    saveConfiguration,
     initListeners,
   };
 });
