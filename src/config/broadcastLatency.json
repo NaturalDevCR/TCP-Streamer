@@ -1,0 +1,6 @@
+{
+  "defaultMs": 250,
+  "minimumMs": 50,
+  "maximumMs": 2000,
+  "loopbackMinimumMs": 400
+}

@@ -4,6 +4,17 @@ All notable changes to TCP Streamer are documented in this file.
 
 ---
 
+## [3.1.2] — 2026-11-24
+
+### Added
+
+- Native Intel macOS installers alongside the Apple Silicon installers. Choose the `x64` disk image for Intel or `aarch64` for Apple Silicon.
+
+### Fixed
+
+- The Broadcast latency field explains the 400 ms minimum for loopback capture. Regression tests cover saved profiles, the source and receiver startup commands, and the agreement between frontend and Rust latency settings.
+- Local builds and GitHub Actions use Rust 1.99.1. Clippy covers all targets, including test code, in both CI and the Rust pre-commit hook.
+
 ## [3.1.1] — 2026-11-06
 
 ### Fixed

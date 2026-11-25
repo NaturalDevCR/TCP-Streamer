@@ -118,12 +118,20 @@
         </Field>
 
         <template v-if="settings.latencyProfile === 'broadcast'">
-          <Field :label="t('audio.fixedLatency')" :tooltip="t('audio.help.fixedLatency')">
+          <Field
+            :label="t('audio.fixedLatency')"
+            :tooltip="t('audio.help.fixedLatency')"
+            :help="
+              settings.role === 'source' && settings.isLoopback
+                ? t('audio.broadcastLoopbackFloor', { minimum: broadcastLatency.loopbackMinimumMs })
+                : undefined
+            "
+          >
             <Input
               v-model.number="settings.fixedLatencyMs"
               type="number"
-              :min="50"
-              :max="2000"
+              :min="broadcastLatency.minimumMs"
+              :max="broadcastLatency.maximumMs"
               :step="50"
               :disabled="settings.configurationLocked"
             />
@@ -226,6 +234,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import broadcastLatency from "../../config/broadcastLatency.json";
 import { useSettingsStore } from "../../stores/settings";
 import SegmentedControl from "../ui/SegmentedControl.vue";
 import Card from "../ui/Card.vue";

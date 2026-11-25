@@ -129,6 +129,26 @@ describe("redesigned workspace", () => {
     expect(presets.findAll('[tabindex="0"]')).toHaveLength(1);
   });
 
+  it("describes the Broadcast latency floor only for loopback capture", async () => {
+    const settings = useSettingsStore();
+    settings.latencyProfile = "broadcast";
+    settings.deviceName = "USB microphone";
+    await openSection("audio");
+
+    const input = wrapper.get('input[aria-label="Latency target (ms)"]');
+    expect(input.attributes("aria-describedby")).toBeUndefined();
+
+    settings.deviceName = "[Loopback] Speakers";
+    await nextTick();
+    const helpId = input.attributes("aria-describedby");
+    expect(helpId).toBeTruthy();
+    expect(wrapper.get(`[id="${helpId}"]`).text()).toContain("400 ms");
+
+    settings.role = "sink";
+    await nextTick();
+    expect(input.attributes("aria-describedby")).toBeUndefined();
+  });
+
   it("filters events by search without hiding the copy and export controls", async () => {
     const stream = useStreamStore();
     stream.logs = [

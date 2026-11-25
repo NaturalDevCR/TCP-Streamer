@@ -18,6 +18,9 @@ pub struct LatencyParams {
     pub prefill_ms: u32,
 }
 
+const BROADCAST_DEFAULT_MS: u32 = 250;
+const BROADCAST_LOOPBACK_MIN_MS: u32 = 400;
+
 /// Returns buffer parameters for a named profile. Unknown profiles fall back to
 /// "balanced". Use this only for the named profiles; "custom" is handled by the
 /// caller, which passes the user's manual fields instead.
@@ -27,8 +30,20 @@ pub fn params(profile: &str, is_loopback: bool) -> LatencyParams {
         ("ultra-low", true) => (3000, 150, 800, 256, 150),
         ("robust", false) => (8000, 500, 3000, 1024, 300),
         ("robust", true) => (10000, 800, 4000, 1024, 400),
-        ("broadcast", false) => (3000, 250, 250, 512, 250),
-        ("broadcast", true) => (4000, 400, 400, 512, 400),
+        ("broadcast", false) => (
+            3000,
+            BROADCAST_DEFAULT_MS,
+            BROADCAST_DEFAULT_MS,
+            512,
+            BROADCAST_DEFAULT_MS,
+        ),
+        ("broadcast", true) => (
+            4000,
+            BROADCAST_LOOPBACK_MIN_MS,
+            BROADCAST_LOOPBACK_MIN_MS,
+            512,
+            BROADCAST_LOOPBACK_MIN_MS,
+        ),
         // "balanced" and any unknown profile
         (_, false) => (4000, 200, 1500, 512, 200),
         (_, true) => (6000, 300, 2000, 512, 250),
@@ -146,6 +161,26 @@ pub fn validate_overrides(profile: &str, values: LatencyOverrides) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn broadcast_targets_and_bounds_match_the_frontend() {
+        let config: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/config/broadcastLatency.json"
+        )))
+        .unwrap();
+
+        assert_eq!(
+            config["defaultMs"],
+            params("broadcast", false).adaptive_min_ms
+        );
+        assert_eq!(
+            config["loopbackMinimumMs"],
+            params("broadcast", true).adaptive_min_ms
+        );
+        assert_eq!(config["minimumMs"], FIXED_LATENCY_MIN_MS);
+        assert_eq!(config["maximumMs"], FIXED_LATENCY_MAX_MS);
+    }
 
     #[test]
     fn custom_validation_rejects_capacity_below_target_and_extreme_allocation() {

@@ -13,7 +13,7 @@ pre-commit:
       root: "src-tauri"
     cargo-clippy:
       glob: "*.rs"
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --locked --all-targets -- -D warnings
       root: "src-tauri"
 
 commit-msg:

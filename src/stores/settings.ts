@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { getStore, isNativeRuntime } from "../composables/useTauri";
 import { invoke, isEnabled, enable, disable } from "../composables/useTauri";
+import broadcastLatency from "../config/broadcastLatency.json";
 
 export interface PreflightResult {
   ready: boolean;
@@ -38,19 +39,18 @@ interface SettingsDict {
   psk?: string;
 }
 
-/** Bounds mirror FIXED_LATENCY_MIN_MS / FIXED_LATENCY_MAX_MS in latency.rs. */
-export const FIXED_LATENCY_MIN_MS = 50;
-export const FIXED_LATENCY_MAX_MS = 2000;
-
 /**
  * Clamps a fixed-latency value into the range the backend accepts. A number
  * input yields 0 for an empty field and NaN for a stray "-" or "e", and either
  * would be silently discarded on the next load — so nothing invalid is ever
  * persisted or sent.
  */
-export function clampFixedLatency(value: number): number {
-  if (!Number.isFinite(value)) return 250;
-  return Math.min(Math.max(Math.round(value), FIXED_LATENCY_MIN_MS), FIXED_LATENCY_MAX_MS);
+export function clampFixedLatency(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return broadcastLatency.defaultMs;
+  return Math.min(
+    Math.max(Math.round(value), broadcastLatency.minimumMs),
+    broadcastLatency.maximumMs,
+  );
 }
 
 export const useSettingsStore = defineStore("settings", () => {
@@ -106,7 +106,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const dscpStrategy = ref("voip");
   const chunkSize = ref(512);
   const latencyProfile = ref("balanced");
-  const fixedLatencyMs = ref(250);
+  const fixedLatencyMs = ref(broadcastLatency.defaultMs);
 
   // Profiles
   const profiles = ref<Record<string, SettingsDict>>({});
@@ -204,10 +204,7 @@ export const useSettingsStore = defineStore("settings", () => {
       typeof raw.max_buffer === "number" && Number.isFinite(raw.max_buffer) ? raw.max_buffer : 1500;
     latencyProfile.value =
       typeof raw.latency_profile === "string" ? raw.latency_profile : "balanced";
-    fixedLatencyMs.value =
-      typeof raw.fixed_latency_ms === "number" && Number.isFinite(raw.fixed_latency_ms)
-        ? raw.fixed_latency_ms
-        : 250;
+    fixedLatencyMs.value = clampFixedLatency(raw.fixed_latency_ms);
     allowlist.value = typeof raw.allowlist === "string" ? raw.allowlist : "";
     mode.value = typeof raw.mode === "string" ? raw.mode : "client";
     role.value = typeof raw.role === "string" ? raw.role : "source";
@@ -231,7 +228,6 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!enums.format.includes(format.value)) format.value = "pcm";
     if (!enums.latencyProfile.includes(latencyProfile.value)) latencyProfile.value = "balanced";
     if (!enums.dscpStrategy.includes(dscpStrategy.value)) dscpStrategy.value = "voip";
-    fixedLatencyMs.value = clampFixedLatency(fixedLatencyMs.value);
   }
   // ── Computed ──
   const isServer = computed(() => mode.value === "server");

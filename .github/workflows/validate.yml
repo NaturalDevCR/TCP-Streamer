@@ -31,15 +31,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, windows-latest, ubuntu-22.04]
+        platform: [macos-latest, macos-15-intel, windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target

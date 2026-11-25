@@ -99,6 +99,7 @@
     "latencyBroadcast": "Difusión (objetivo de latencia)",
     "fixedLatency": "Objetivo de latencia (ms)",
     "broadcastNote": "Objetivo de latencia del búfer para difusión. La latencia real de extremo a extremo también depende de los dispositivos y la red. Se ignora el búfer adaptativo.",
+    "broadcastLoopbackFloor": "La captura por loopback usa al menos {minimum} ms de búfer.",
     "ringBufferDuration": "Buffer circular (ms)",
     "chunkSize": "Tamaño de bloque (frames)",
     "minBuffer": "Buffer mín (ms)",

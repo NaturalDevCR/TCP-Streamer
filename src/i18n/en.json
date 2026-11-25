@@ -99,6 +99,7 @@
     "latencyBroadcast": "Broadcast (latency target)",
     "fixedLatency": "Latency target (ms)",
     "broadcastNote": "Target buffering latency for broadcast. Measured end-to-end latency also depends on devices and the network. Adaptive buffering is ignored.",
+    "broadcastLoopbackFloor": "Loopback capture uses at least {minimum} ms of buffering.",
     "ringBufferDuration": "Ring Buffer (ms)",
     "chunkSize": "Chunk Size (frames)",
     "minBuffer": "Min Buffer (ms)",

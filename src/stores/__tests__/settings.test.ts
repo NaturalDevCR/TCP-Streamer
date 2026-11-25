@@ -121,14 +121,20 @@ describe("fixedLatencyMs", () => {
   });
 
   it("clamps an empty-field 0 to the minimum instead of persisting 0", async () => {
-    const a = useSettingsStore();
-    a.fixedLatencyMs = 0;
-    await a.saveSettings();
+    const store = useSettingsStore();
+    store.fixedLatencyMs = 0;
+    expect(await store.saveSettings()).toBe(true);
+    expect(mockStore.get("profiles")).toMatchObject({ Default: { fixed_latency_ms: 50 } });
+  });
 
-    setActivePinia(createPinia());
-    const b = useSettingsStore();
-    await b.loadSettings();
-    expect(b.fixedLatencyMs).toBe(50);
+  it("clamps a zero already persisted by an older build on load", async () => {
+    mockStore.set("profiles", { Default: { fixed_latency_ms: 0 } });
+    const store = useSettingsStore();
+
+    await store.loadSettings();
+
+    expect(store.fixedLatencyMs).toBe(50);
+    expect(mockStore.get("profiles")).toEqual({ Default: { fixed_latency_ms: 0 } });
   });
 });
 

@@ -64,6 +64,51 @@ describe("session coordination", () => {
     );
     expect(useStreamStore().tcpUrl).toBe("");
   });
+
+  it("sends a clamped Broadcast latency in the source command", async () => {
+    const settings = useSettingsStore();
+    settings.deviceName = "mic";
+    settings.transport = "udp";
+    settings.latencyProfile = "broadcast";
+    settings.fixedLatencyMs = 0;
+
+    await useStreamStore().startStream();
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "start_stream",
+      expect.objectContaining({ latencyProfile: "broadcast", fixedLatencyMs: 50 }),
+    );
+  });
+
+  it("sends the receiver's latency overrides using the native field names", async () => {
+    const settings = useSettingsStore();
+    settings.role = "sink";
+    settings.outputDevice = "speakers";
+    settings.sourceAddr = "source.local:1704";
+    settings.latencyProfile = "broadcast";
+    settings.ringBufferDuration = 6000;
+    settings.minBuffer = 250;
+    settings.maxBuffer = 900;
+    settings.chunkSize = 256;
+    settings.fixedLatencyMs = 5000;
+
+    await useStreamStore().startStream();
+
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "start_sink",
+      expect.objectContaining({
+        latencyProfile: "broadcast",
+        overrides: {
+          ringMs: 6000,
+          minBufferMs: 250,
+          maxBufferMs: 900,
+          chunkSize: 256,
+          fixedLatencyMs: 2000,
+        },
+      }),
+    );
+  });
+
   it("awaits acknowledgement and blocks duplicate starts", async () => {
     let resolve!: (s: SessionStatus) => void;
     bridge.invoke.mockImplementation(

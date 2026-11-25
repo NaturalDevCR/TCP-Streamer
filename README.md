@@ -2,7 +2,7 @@
 
 > A feature-rich, cross-platform audio streaming desktop application built with Tauri. Capture and send over TCP or encrypted Native UDP; receive and play back over encrypted Native UDP, with configurable buffering. End-to-end latency depends on devices, network and receiver.
 
-![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)
+![Version](https://img.shields.io/badge/version-3.1.2-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/NaturalDevCR/TCP-Streamer)
@@ -232,11 +232,11 @@ Download the latest release for your platform:
 
 **[→ Releases Page](https://github.com/NaturalDevCR/TCP-Streamer/releases)**
 
-| Platform    | File Type             | Installation                         |
-| ----------- | --------------------- | ------------------------------------ |
-| **macOS**   | `.dmg`                | Open and drag to Applications        |
-| **Windows** | `.msi` or `.exe`      | Run installer                        |
-| **Linux**   | `.AppImage` or `.deb` | [See LINUX_GUIDE.md](LINUX_GUIDE.md) |
+| Platform    | File Type             | Installation                                                                             |
+| ----------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| **macOS**   | `.dmg`                | Choose `aarch64` for Apple Silicon or `x64` for Intel, then drag the app to Applications |
+| **Windows** | `.msi` or `.exe`      | Run installer                                                                            |
+| **Linux**   | `.AppImage` or `.deb` | [See LINUX_GUIDE.md](LINUX_GUIDE.md)                                                     |
 
 ### Build from Source
 
@@ -244,7 +244,7 @@ Download the latest release for your platform:
 
 - [Node.js](https://nodejs.org/) (v22.13 or later)
 - [pnpm](https://pnpm.io/) (the version in `package.json#packageManager`) — `npm i -g pnpm` or `corepack enable`
-- [Rust](https://www.rust-lang.org/) (latest stable)
+- [rustup](https://rustup.rs/) (uses the Rust version in `rust-toolchain.toml`)
 - **macOS**: Xcode Command Line Tools
 - **Windows**: Microsoft Visual Studio C++ Build Tools
 - **Linux**: `libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev`

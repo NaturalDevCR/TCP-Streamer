@@ -4,7 +4,7 @@
 
 - [Node.js](https://nodejs.org/) 22.13+
 - [pnpm](https://pnpm.io/) (the version declared in `package.json#packageManager`) — `npm i -g pnpm` or `corepack enable`
-- [Rust](https://rustup.rs/) (stable toolchain)
+- [rustup](https://rustup.rs/) (uses the Rust version and components in `rust-toolchain.toml`)
 - Platform-specific dependencies:
   - **macOS**: Xcode Command Line Tools
   - **Linux**: `libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev`
@@ -67,7 +67,7 @@ Pre-commit hooks (lefthook) run automatically on `git commit`:
 - Prettier formatting check
 - ESLint
 - `cargo fmt --check`
-- `cargo clippy`
+- `cargo clippy --locked --all-targets -- -D warnings`
 
 You can also run them manually:
 
@@ -182,7 +182,7 @@ Network → Connection trait (TCP or UDP with de-jitter)
 
 ## CI and release checklist
 
-Build and Release call the same `validate.yml`: frozen pnpm installation, ESLint, Prettier, TypeScript, frontend tests/build, plus locked Rust tests, all-target Clippy and rustfmt on macOS, Windows and Linux. Packaging also uses `--locked`. These checks do not exercise microphones, loopback, driver buffers, tray interaction, or measured latency. Before a public release, run a native smoke test on each platform: Start/Stop, occupied port, disconnected device, hidden window/second launch, encrypted UDP recovery, and a prolonged audio session.
+Build and Release call the same `validate.yml`: frozen pnpm installation, ESLint, Prettier, TypeScript, frontend tests/build, plus locked Rust tests, all-target Clippy and rustfmt on macOS (Apple Silicon and Intel), Windows and Linux. CI and local builds use the version in `rust-toolchain.toml`. Packaging also uses `--locked`. These checks do not exercise microphones, loopback, driver buffers, tray interaction, or measured latency. Before a public release, run a native smoke test on each platform: Start/Stop, occupied port, disconnected device, hidden window/second launch, encrypted UDP recovery, and a prolonged audio session.
 
 1. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` versions identical and update both committed lockfiles when dependencies change.
 2. Add nonempty `CHANGELOG.md` notes under `[X.Y.Z]`, then create the corresponding `vX.Y.Z` tag. Release rejects version mismatches.
